@@ -1,0 +1,219 @@
+// StarAnalytics — consolidated schema (build plan §3).
+// Not yet migrated against a real database: no Supabase project exists yet.
+// Once DATABASE_URL is supplied, run `npx prisma migrate dev --name init`.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+  team
+  agency_viewer
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  role      UserRole @default(team)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("users")
+}
+
+enum PostSource {
+  self
+  competitor
+  agency
+  fanpage
+  campaign
+}
+
+model Post {
+  id            String     @id @default(uuid())
+  source        PostSource
+  igShortcode   String?    @map("ig_shortcode")
+  externalUrl   String?    @map("external_url")
+  authorHandle  String?    @map("author_handle")
+  mediaType     String?    @map("media_type")
+  caption       String?
+  postedAt      DateTime?  @map("posted_at")
+  scrapedAt     DateTime   @default(now()) @map("scraped_at")
+
+  reach    Int?
+  likes    Int?
+  comments Int?
+  saves    Int?
+  shares   Int?
+
+  campaignId   String? @map("campaign_id")
+  campaign     Campaign? @relation(fields: [campaignId], references: [id])
+  agencyId     String? @map("agency_id")
+  agency       Agency? @relation(fields: [agencyId], references: [id])
+  fanPageId    String? @map("fan_page_id")
+  fanPage      FanPage? @relation(fields: [fanPageId], references: [id])
+  competitorId String? @map("competitor_id")
+  competitor   CompetitorAccount? @relation(fields: [competitorId], references: [id])
+
+  raw Json?
+
+  sentiment          Sentiment?
+  agencyPostScores   AgencyPostScore[]
+
+  @@map("posts")
+}
+
+enum ScrapeRunStatus {
+  queued
+  running
+  done
+  error
+}
+
+model ScrapeRun {
+  id         String          @id @default(uuid())
+  kind       String
+  status     ScrapeRunStatus @default(queued)
+  apifyRunId String?         @map("apify_run_id")
+  startedAt  DateTime?       @map("started_at")
+  finishedAt DateTime?       @map("finished_at")
+  itemCount  Int?            @map("item_count")
+  error      String?
+
+  @@map("scrape_runs")
+}
+
+enum CampaignStatus {
+  live
+  planned
+}
+
+model Campaign {
+  id        String         @id @default(uuid())
+  name      String
+  status    CampaignStatus
+  hashtags  String[]
+  startDate DateTime?      @map("start_date")
+  endDate   DateTime?      @map("end_date")
+  type      String?
+
+  posts    Post[]
+  agencies Agency[]
+
+  @@map("campaigns")
+}
+
+model Agency {
+  id         String  @id @default(uuid())
+  name       String
+  colourHex  String  @map("colour_hex")
+  campaignId String? @map("campaign_id")
+  campaign   Campaign? @relation(fields: [campaignId], references: [id])
+
+  posts             Post[]
+  agencyPostScores  AgencyPostScore[]
+
+  @@map("agencies")
+}
+
+model CompetitorAccount {
+  id            String    @id @default(uuid())
+  igHandle      String    @unique @map("ig_handle")
+  displayName   String?   @map("display_name")
+  followers     Int?
+  addedBy       String?   @map("added_by")
+  lastScrapedAt DateTime? @map("last_scraped_at")
+
+  posts Post[]
+
+  @@map("competitor_accounts")
+}
+
+model FanPage {
+  id            String    @id @default(uuid())
+  igHandle      String    @unique @map("ig_handle")
+  displayName   String?   @map("display_name")
+  followers     Int?
+  lastCheckedAt DateTime? @map("last_checked_at")
+  isActive      Boolean   @default(true) @map("is_active")
+  isVerifiedFan Boolean   @default(false) @map("is_verified_fan")
+
+  posts  Post[]
+  alerts Alert[]
+
+  @@map("fan_pages")
+}
+
+model AgencyPostScore {
+  id                     String   @id @default(uuid())
+  runId                  String   @map("run_id")
+  agencyId               String   @map("agency_id")
+  agency                 Agency   @relation(fields: [agencyId], references: [id])
+  postId                 String   @map("post_id")
+  post                   Post     @relation(fields: [postId], references: [id])
+  perfScore              Float    @map("perf_score")
+  authScore              Float    @map("auth_score")
+  effScore               Float    @map("eff_score")
+  totalScore             Float    @map("total_score")
+  flags                  Json
+  thresholdConfigVersion Int      @map("threshold_config_version")
+  scoredAt               DateTime @default(now()) @map("scored_at")
+
+  @@map("agency_post_scores")
+}
+
+enum SentimentLabel {
+  pos
+  neu
+  neg
+}
+
+model Sentiment {
+  postId     String         @id @map("post_id")
+  post       Post           @relation(fields: [postId], references: [id])
+  label      SentimentLabel
+  score      Float
+  keywords   String[]
+  model      String
+  analyzedAt DateTime       @default(now()) @map("analyzed_at")
+
+  @@map("sentiment")
+}
+
+model HashtagSnapshot {
+  id           String   @id @default(uuid())
+  hashtag      String
+  snapshotAt   DateTime @default(now()) @map("snapshot_at")
+  postCount    Int      @map("post_count")
+  avgEngRate   Float    @map("avg_eng_rate")
+
+  @@map("hashtag_snapshots")
+}
+
+model Alert {
+  id          String    @id @default(uuid())
+  type        String
+  fanPageId   String?   @map("fan_page_id")
+  fanPage     FanPage?  @relation(fields: [fanPageId], references: [id])
+  campaignId  String?   @map("campaign_id")
+  message     String
+  createdAt   DateTime  @default(now()) @map("created_at")
+  deliveredAt DateTime? @map("delivered_at")
+  channel     String?
+
+  @@map("alerts")
+}
+
+model ThresholdConfig {
+  version   Int      @id
+  params    Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("threshold_configs")
+}
