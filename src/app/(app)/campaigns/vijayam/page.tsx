@@ -4,6 +4,16 @@ import { KpiGrid, Kpi } from "@/components/ui/Kpi";
 import { Card } from "@/components/ui/Card";
 import { Pill, LiveDot } from "@/components/ui/Pill";
 
+// The prototype wraps hashtags in <em> so `.stream-text em` renders them in accent
+// pink. Split at render time rather than storing markup in the seed data.
+function StreamText({ text }: { text: string }) {
+  return (
+    <div className="stream-text">
+      {text.split(/(#\w+)/g).map((part, i) => (part.startsWith("#") ? <em key={i}>{part}</em> : part))}
+    </div>
+  );
+}
+
 export default async function VijayamDetailPage() {
   const v = await getVijayamDetail();
   const maxVolume = Math.max(...v.hourlyVolume);
@@ -116,7 +126,7 @@ export default async function VijayamDetailPage() {
             <div className="stream-body">
               <span className="stream-handle">{s.handle}</span>
               <span className="stream-time">{s.time}</span>
-              <div className="stream-text">{s.text}</div>
+              <StreamText text={s.text} />
               <div className="stream-stats">
                 <span className="sst">♥ {s.likes}</span>
                 <span className="sst">💬 {s.comments}</span>

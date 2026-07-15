@@ -117,7 +117,7 @@ export function AgencyReportClient({ agencies }: { agencies: Agencies }) {
               valueColor="var(--amber)"
               delta={`${result.summary.flaggedAgencies} agencies flagged`}
             />
-            <Kpi label="Top Agency" value={result.summary.topAgency.name} delta={`Score ${result.summary.topAgency.score}/100`} deltaDirection="up" />
+            <Kpi label="Top Agency" value={result.summary.topAgency.name} delta={`Score ${result.summary.topAgency.score}/100`} deltaDirection="up" compact />
           </KpiGrid>
 
           <div className="g-6-4">
