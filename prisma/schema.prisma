@@ -7,8 +7,11 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Migrations need a direct (non-pgbouncer) connection — Supabase's pooled port 6543
+  // doesn't support the prepared statements Prisma's migration engine relies on.
+  directUrl = env("DIRECT_URL")
 }
 
 enum UserRole {
