@@ -150,7 +150,11 @@ canvas{max-width:100%}
 /* ── AGENCY REPORT ── */
 .upload-zone{border:2px dashed var(--border);border-radius:var(--radius);padding:36px;text-align:center;cursor:pointer;transition:border-color .2s}
 .upload-zone:hover{border-color:var(--accent)}
-.upload-zone svg{color:var(--faint);margin-bottom:10px}
+/* margin-inline:auto because Tailwind's preflight sets `svg{display:block}`, which makes
+   the icon ignore .upload-zone's `text-align:center` and pin to the padding edge. The
+   prototype has no reset, so its svg stays inline and centers. Only this svg is affected —
+   every other icon in the app sits in a flex row. */
+.upload-zone svg{color:var(--faint);margin-bottom:10px;margin-inline:auto}
 .agency-inp-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)}
 .agency-inp-row:last-child{border-bottom:none}
 .ag-num{font-size:11px;color:var(--faint);width:18px;text-align:right;flex-shrink:0}

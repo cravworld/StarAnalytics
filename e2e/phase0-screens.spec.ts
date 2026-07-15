@@ -100,6 +100,16 @@ const VIEWS: View[] = [
     name: "07-agency-upload",
     path: "/campaigns/agency",
     text: ["Upload Agency Post Links", "Agencies in This Campaign", "Pixelwave Media", "50 links"],
+    extra: async (page) => {
+      // The dropzone icon must sit centred over "Drop your sheet here". Tailwind's
+      // preflight sets svg{display:block}, which silently defeats .upload-zone's
+      // text-align:center and left-pins the icon; the prototype has no such reset.
+      // Assert the icon's centre matches the zone's rather than trusting the CSS.
+      const zone = await page.locator(".upload-zone").boundingBox();
+      const icon = await page.locator(".upload-zone svg").boundingBox();
+      if (!zone || !icon) throw new Error("upload zone or its icon did not render");
+      expect(Math.abs(icon.x + icon.width / 2 - (zone.x + zone.width / 2))).toBeLessThan(2);
+    },
   },
   {
     name: "08-agency-scorecard",
@@ -148,6 +158,11 @@ const VIEWS: View[] = [
     name: "12-fan-pages",
     path: "/fan-pages",
     text: ["Total Fan Reach", "4.8M", "18/24", "Nivin Fanz Official", "Verified fan", "Alerts"],
+    extra: async (page) => {
+      // 24 tracked, 5 seeded as a sample. The tab must show the tracked total, not the
+      // seeded row count — "All (5)" next to an "18/24" KPI is self-contradictory.
+      await expect(page.locator(".itab.active")).toHaveText("All (24)");
+    },
   },
 ];
 

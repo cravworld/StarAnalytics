@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
 
 export default async function FanPagesPage() {
-  const { fanPages, kpis, alerts } = await getFanPagesData();
+  const { fanPages, totalTracked, kpis, alerts } = await getFanPagesData();
 
   return (
     <>
@@ -17,7 +17,7 @@ export default async function FanPagesPage() {
       <div className="add-btn">＋ Add fan page to track</div>
 
       <div className="inner-tabs">
-        <button className="itab active">All ({fanPages.length})</button>
+        <button className="itab active">All ({totalTracked})</button>
         <button className="itab">Most Active</button>
         <button className="itab">Posting #vijayam</button>
         <button className="itab">Largest Reach</button>

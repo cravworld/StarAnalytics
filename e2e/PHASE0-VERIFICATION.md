@@ -46,6 +46,10 @@ These are deliberately **not** pixel-diffed: different DOM, fonts and scroll mod
 produce false failures that say nothing about fidelity. Fidelity is a human call; the
 screenshots exist to make that call cheap.
 
+Both sets are committed as sign-off evidence, but note they **regenerate on every test
+run**, so they will show up in `git diff` after any run even when nothing changed
+meaningfully. `reference/shots/` only moves if the prototype does.
+
 ## What the auth coverage actually proves
 
 `e2e/auth/mintSession.ts` asks NextAuth's own `encode()` to mint the session token a real
@@ -80,18 +84,32 @@ Neither can close until real Google OAuth credentials and a Supabase `DATABASE_U
 
 ## Fidelity gaps found and fixed
 
-Both were invisible to text assertions — found by eyeballing the screenshots, which is
-why the artifacts matter.
+All 12 captures were compared against their prototype counterpart by eye. Every gap below
+was invisible to the text assertions — which is exactly why the screenshot artifacts exist.
+Each now has a regression assertion.
 
 1. **`#vijayam` detail dropped the campaigns tab bar.** `campaigns/layout.tsx` special-cased
    `pathname !== "/campaigns/vijayam"` to hide `.inner-tabs`. In the prototype `.inner-tabs`
    is a **sibling** of both `#camp-own` and `#camp-vijayam` (line 424), and `openVijayam()`
    toggles only those two divs — so the bar never disappears. Fixed; "Own Campaigns" stays
-   lit on the detail route. Now asserted, so it can't regress.
+   lit on the detail route.
 
 2. **Top Agency KPI rendered at the wrong size.** The prototype overrides that tile to
    `font-size:15px` (line 626) because an agency name is longer than a number. The port
    rendered it at the default 24px. Added a `compact` prop to `<Kpi>`; applied to that tile.
+
+3. **Agency upload dropzone icon was left-aligned, not centred.** The markup and the
+   `.upload-zone` CSS are byte-identical to the prototype — the cause is Tailwind's preflight
+   setting `svg{display:block}`, which makes the icon ignore `text-align:center` and pin to
+   the padding edge. The prototype has no reset, so its svg stays inline and centres. Fixed
+   with `margin-inline:auto`. Asserted geometrically (icon centre ≈ zone centre) rather than
+   by CSS inspection, since the CSS *looked* correct the whole time.
+
+4. **Fan Pages tab read "All (5)" instead of "All (24)".** The port derived the label from
+   `FAN_PAGES.length` (the seeded sample), so the screen contradicted its own "18/24 active
+   today" KPI and the sidebar's "24" badge. 24 pages are tracked; 5 are seeded as a sample —
+   the same pattern as the agency table's "Showing 10 of 500 posts". Added an explicit
+   `totalTracked` to the data layer; becomes a real count when the provider goes live.
 
 ## Intentional deviation — verified as correct, do not "fix"
 
@@ -133,7 +151,7 @@ a `/campaigns/*` route") is a choice worth making deliberately rather than infer
 | Item | Status |
 |------|--------|
 | 9 screens render seeded mock data in a real browser | ✅ verified (26/26 green) |
-| Screens visually match the prototype | ✅ reviewed; 2 gaps found + fixed |
+| Screens visually match the prototype | ✅ all 12 captures reviewed by eye; 4 gaps found + fixed |
 | Auth guard accepts a valid session / rejects invalid | ✅ verified |
 | Real Google OAuth login flow | ⛔ credentials-blocked |
 | Allowlist (`signIn` callback) enforcement | ⛔ credentials-blocked |
