@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>StarAnalytics — Nivin Pauly</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#f8f8fa;--sidebar:#ffffff;--card:#ffffff;--border:#e8e8ee;
+  --text:#0f0f14;--muted:#72728a;--faint:#b0b0c8;
+  --accent:#E1306C;--purple:#833AB4;--orange:#F77737;
+  --green:#1a7a4a;--blue:#1565c0;--red:#b71c1c;--amber:#b45309;
+  --radius:10px;--radius-sm:7px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:hidden;font-size:13px}
+
+/* ── SIDEBAR ── */
+.sidebar{width:210px;flex-shrink:0;background:var(--sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;height:100vh;overflow-y:auto}
+.logo-wrap{padding:18px 16px 14px;border-bottom:1px solid var(--border)}
+.logo-name{font-size:15px;font-weight:700;color:var(--text)}
+.logo-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.nav-sec{font-size:10px;color:var(--faint);padding:14px 16px 4px;letter-spacing:.8px;font-weight:600;text-transform:uppercase}
+.nav-item{display:flex;align-items:center;gap:9px;padding:9px 16px;font-size:13px;cursor:pointer;color:var(--muted);border-left:3px solid transparent;transition:all .15s}
+.nav-item:hover{background:#fdf0f4;color:var(--text)}
+.nav-item.active{background:#fdf0f4;color:var(--accent);border-left-color:var(--accent);font-weight:600}
+.nav-item svg{width:16px;height:16px;flex-shrink:0}
+.nav-badge{margin-left:auto;font-size:10px;background:var(--accent);color:#fff;padding:2px 6px;border-radius:10px;font-weight:700}
+.nav-sub{padding:6px 16px 6px 40px;font-size:12px;cursor:pointer;color:var(--muted);display:flex;align-items:center;gap:6px;transition:all .15s}
+.nav-sub:hover{color:var(--text)}
+.nav-sub.active{color:var(--accent);font-weight:600}
+.nav-sub-dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0}
+.sidebar-footer{margin-top:auto;padding:14px 16px;border-top:1px solid var(--border);display:flex;align-items:center;gap:9px}
+.avatar{width:30px;height:30px;border-radius:50%;background:#fde8ef;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--accent);flex-shrink:0}
+
+/* ── MAIN ── */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.topbar{background:#fff;border-bottom:1px solid var(--border);padding:0 24px;height:52px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.breadcrumb{font-size:13px;color:var(--muted)}
+.breadcrumb strong{color:var(--text);font-weight:600}
+.topbar-actions{display:flex;gap:8px;align-items:center}
+.tb-btn{padding:6px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;cursor:pointer;background:#fff;color:var(--muted);font-weight:500}
+.tb-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.content{flex:1;overflow-y:auto;padding:20px 24px}
+
+/* ── SCREENS ── */
+.screen{display:none}.screen.active{display:block}
+
+/* ── COMPONENTS ── */
+.kpi-grid{display:grid;gap:12px;margin-bottom:18px}
+.kpi-grid-4{grid-template-columns:repeat(4,1fr)}
+.kpi-grid-5{grid-template-columns:repeat(5,1fr)}
+.kpi-grid-3{grid-template-columns:repeat(3,1fr)}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
+.kpi-label{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.kpi-val{font-size:24px;font-weight:700;color:var(--text);line-height:1}
+.kpi-delta{font-size:11px;margin-top:5px;color:var(--muted)}
+.kpi-delta.up{color:var(--green)}.kpi-delta.dn{color:var(--red)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.card-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:12px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:18px}
+.g-6-4{display:grid;grid-template-columns:3fr 2fr;gap:14px;margin-bottom:18px}
+.g-4-6{display:grid;grid-template-columns:2fr 3fr;gap:14px;margin-bottom:18px}
+.section-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:12px}
+canvas{max-width:100%}
+
+/* ── PILLS / BADGES ── */
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 8px;border-radius:20px;border:1px solid;font-weight:600;white-space:nowrap}
+.pill-live{background:#e8f5e9;color:#1b5e20;border-color:#a5d6a7}
+.pill-planned{background:#fff8e1;color:#e65100;border-color:#ffcc80}
+.pill-hot{background:#fde8ef;color:var(--accent);border-color:#f48fb1}
+.pill-new{background:#e3f2fd;color:var(--blue);border-color:#90caf9}
+.pill-fan{background:#f3e5f5;color:#6a1b9a;border-color:#ce93d8}
+.pill-good{background:#e8f5e9;color:#1b5e20;border-color:#a5d6a7}
+.pill-warn{background:#fff8e1;color:#e65100;border-color:#ffcc80}
+.pill-bad{background:#ffebee;color:var(--red);border-color:#ef9a9a}
+.live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#1b5e20;animation:blink 1.4s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── INNER TABS ── */
+.inner-tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:18px;gap:0}
+.itab{padding:9px 18px;font-size:13px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500;transition:all .15s}
+.itab:hover{color:var(--text)}
+.itab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:700}
+
+/* ── CHARTS ── */
+.chart-wrap{position:relative;height:180px;width:100%}
+.chart-wrap-sm{position:relative;height:130px;width:100%}
+.chart-wrap-lg{position:relative;height:220px;width:100%}
+
+/* ── POST GRID ── */
+.post-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}
+.post-thumb{aspect-ratio:1;border-radius:var(--radius-sm);background:#f0f0f5;position:relative;overflow:hidden;cursor:pointer;border:1px solid var(--border)}
+.post-thumb-icon{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:28px}
+.post-overlay{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.55));padding:8px;display:flex;gap:8px}
+.post-stat{font-size:10px;color:#fff;font-weight:600}
+
+/* ── COMPARE ── */
+.cmp-grid{display:grid;grid-template-columns:160px 1fr 1fr;gap:10px;margin-bottom:14px}
+.cmp-header{background:#f8f8fa;border-radius:var(--radius-sm);padding:12px;text-align:center}
+.cmp-row{display:grid;grid-template-columns:160px 1fr 1fr;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)}
+.cmp-label{font-size:12px;color:var(--muted);font-weight:500}
+.cmp-cell{text-align:center}
+.cmp-val{font-size:14px;font-weight:700;color:var(--text)}
+.cmp-bar-wrap{height:4px;background:#f0f0f5;border-radius:2px;margin-top:5px;overflow:hidden}
+.win{color:var(--green)!important}
+
+/* ── CAMPAIGNS ── */
+.campaign-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px;cursor:pointer;transition:all .15s;display:flex;gap:14px;align-items:flex-start}
+.campaign-card:hover{border-color:#E1306C;box-shadow:0 2px 8px rgba(225,48,108,.1)}
+.campaign-card.featured{border-color:#E1306C}
+.camp-icon{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.camp-body{flex:1;min-width:0}
+.camp-name{font-size:14px;font-weight:700;color:var(--text);margin-bottom:3px}
+.camp-meta{font-size:11px;color:var(--muted);margin-bottom:8px}
+.camp-stats{display:flex;gap:16px;flex-wrap:wrap}
+.cstat{font-size:12px;color:var(--muted)}.cstat strong{color:var(--text);font-weight:700}
+
+/* ── VIJAYAM DETAIL ── */
+.vhero{background:linear-gradient(135deg,#fde8ef,#f3e5f5);border-radius:var(--radius);padding:18px;margin-bottom:16px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.vhero-tag{font-size:26px;font-weight:800;color:var(--accent)}
+.vhero-stats{margin-left:auto;display:flex;gap:20px;flex-wrap:wrap}
+.vstat{text-align:center}
+.vstat-val{font-size:20px;font-weight:700;color:var(--text)}
+.vstat-label{font-size:10px;color:var(--muted);margin-top:2px}
+.divider{width:1px;background:rgba(0,0,0,.1)}
+.spark-wrap{display:flex;align-items:flex-end;gap:3px;height:48px}
+.sbar{flex:1;border-radius:2px 2px 0 0;background:var(--accent);opacity:.5;min-height:3px}
+.sbar.hi{opacity:1}
+.sent-bar{height:8px;border-radius:4px;overflow:hidden;display:flex;margin:8px 0}
+.geo-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.geo-name{font-size:12px;color:var(--muted);width:80px;flex-shrink:0}
+.geo-track{flex:1;height:5px;background:#f0f0f5;border-radius:3px;overflow:hidden}
+.geo-fill{height:100%;border-radius:3px;background:var(--purple)}
+.geo-val{font-size:11px;color:var(--muted);width:30px;text-align:right}
+.stream-item{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.stream-item:last-child{border-bottom:none}
+.stream-av{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+.stream-body{flex:1;min-width:0}
+.stream-handle{font-size:12px;font-weight:700;color:var(--text)}
+.stream-time{font-size:10px;color:var(--faint);margin-left:6px}
+.stream-text{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.5}
+.stream-text em{color:var(--accent);font-style:normal;font-weight:600}
+.stream-stats{display:flex;gap:12px;margin-top:5px}
+.sst{font-size:11px;color:var(--faint)}
+
+/* ── HASHTAG ── */
+.htag-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.htag-row:last-child{border-bottom:none}
+.htag-name{font-size:13px;font-weight:700;color:var(--accent);width:175px;flex-shrink:0}
+.htag-track{flex:1;height:5px;background:#f0f0f5;border-radius:3px;overflow:hidden}
+.htag-fill{height:100%;border-radius:3px;background:var(--purple)}
+.htag-posts{font-size:11px;color:var(--muted);width:68px;text-align:right}
+.htag-eng{font-size:12px;font-weight:700;color:var(--text);width:44px;text-align:right}
+
+/* ── AGENCY REPORT ── */
+.upload-zone{border:2px dashed var(--border);border-radius:var(--radius);padding:36px;text-align:center;cursor:pointer;transition:border-color .2s}
+.upload-zone:hover{border-color:var(--accent)}
+.upload-zone svg{color:var(--faint);margin-bottom:10px}
+.agency-inp-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)}
+.agency-inp-row:last-child{border-bottom:none}
+.ag-num{font-size:11px;color:var(--faint);width:18px;text-align:right;flex-shrink:0}
+.ag-dot{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+.ag-name{flex:1;font-size:12px;font-weight:600;color:var(--text)}
+.ag-links{font-size:11px;color:var(--muted);white-space:nowrap}
+.lb-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer}
+.lb-row:hover .lb-name{color:var(--accent)}
+.lb-row:last-child{border-bottom:none}
+.lb-rank{font-size:13px;font-weight:700;color:var(--faint);width:22px;text-align:center;flex-shrink:0}
+.lb-rank.r1{color:#B8860B}.lb-rank.r2{color:#888}.lb-rank.r3{color:#cd7f32}
+.lb-body{flex:1;min-width:0}
+.lb-name{font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.lb-bar-track{height:5px;background:#f0f0f5;border-radius:3px;overflow:hidden}
+.lb-bar-fill{height:100%;border-radius:3px}
+.lb-meta{font-size:11px;color:var(--muted);margin-top:4px;display:flex;gap:12px}
+.lb-score{font-size:20px;font-weight:800;flex-shrink:0;width:38px;text-align:right}
+.flag-row{display:flex;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);margin-bottom:8px}
+.flag-row.red{background:#ffebee}.flag-row.amber{background:#fff8e1}.flag-row.green-bg{background:#e8f5e9}
+.flag-ico{font-size:16px;flex-shrink:0;margin-top:1px}
+.flag-body{flex:1}
+.flag-title{font-size:12px;font-weight:700;color:var(--text)}
+.flag-desc{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.5}
+.flag-tags{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}
+.auth-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)}
+.auth-row:last-child{border-bottom:none}
+.auth-bar-track{width:90px;height:5px;background:#f0f0f5;border-radius:3px;overflow:hidden;flex-shrink:0}
+.auth-bar-fill{height:100%;border-radius:3px}
+.post-tbl{width:100%;border-collapse:collapse;font-size:11px}
+.post-tbl th{padding:7px 10px;text-align:left;color:var(--muted);font-weight:700;border-bottom:1px solid var(--border);white-space:nowrap;background:#fafafa}
+.post-tbl td{padding:7px 10px;border-bottom:1px solid var(--border);color:var(--text)}
+.post-tbl tr:hover td{background:#fdf8fc}
+.score-chip{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700}
+.chip-good{background:#e8f5e9;color:#1b5e20}
+.chip-warn{background:#fff8e1;color:#b45309}
+.chip-bad{background:#ffebee;color:var(--red)}
+.flag-chip{display:inline-block;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;background:#ffebee;color:var(--red);margin:1px}
+
+/* ── FAN PAGES ── */
+.fan-row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)}
+.fan-row:last-child{border-bottom:none}
+.fan-av{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+.fan-info{flex:1;min-width:0}
+.fan-name{font-size:13px;font-weight:600;color:var(--text)}
+.fan-handle{font-size:11px;color:var(--muted)}
+.fan-stats{display:flex;gap:12px;margin-top:3px}
+.fan-stat{font-size:11px;color:var(--muted)}.fan-stat strong{color:var(--text)}
+.fan-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+.mini-spark{display:flex;align-items:flex-end;gap:2px;height:20px}
+.ms-bar{width:5px;border-radius:1px 2px 0 0;background:var(--accent);opacity:.4}
+.ms-bar.mhi{opacity:1}
+.sdot{width:7px;height:7px;border-radius:50%}
+.sdot-on{background:var(--green)}.sdot-off{background:var(--faint)}
+.alert-item{display:flex;gap:10px;align-items:flex-start;padding:9px 12px;background:#f8f8fa;border-radius:var(--radius-sm);margin-bottom:6px}
+
+/* ── HEATMAP ── */
+.heat-cell{width:20px;height:20px;border-radius:3px}
+.h0{background:#f0f0f5}.h1{background:#f8bbd0}.h2{background:#f06292}.h3{background:var(--accent)}.h4{background:#880e4f}
+
+/* ── AUDIENCE ── */
+.bar-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.bar-label{font-size:12px;color:var(--muted);width:60px;text-align:right;flex-shrink:0}
+.bar-track{flex:1;height:7px;background:#f0f0f5;border-radius:4px;overflow:hidden}
+.bar-fill{height:100%;border-radius:4px;background:var(--accent)}
+.bar-val{font-size:11px;color:var(--muted);width:32px}
+input,select,textarea{outline:none;font-family:inherit;font-size:13px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 11px;background:#fff;color:var(--text);transition:border-color .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+button{font-family:inherit;cursor:pointer}
+.btn{padding:8px 16px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;border:1px solid var(--border);background:#fff;color:var(--text);cursor:pointer;transition:all .15s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-primary:hover{background:#c42560;border-color:#c42560;color:#fff}
+.add-btn{display:flex;align-items:center;justify-content:center;gap:6px;padding:9px;border:1px dashed var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--muted);cursor:pointer;margin-bottom:14px}
+.add-btn:hover{border-color:var(--accent);color:var(--accent)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:2px;flex-shrink:0}
+.back-link{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);cursor:pointer;margin-bottom:14px;font-weight:500}
+.back-link:hover{color:var(--accent)}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ SIDEBAR ═══════════════ -->
+<div class="sidebar">
+  <div class="logo-wrap">
+    <div class="logo-name">StarAnalytics</div>
+    <div class="logo-sub">Nivin Pauly · Actor</div>
+  </div>
+
+  <div class="nav-sec">My Page</div>
+  <div class="nav-item active" id="nav-dashboard" onclick="goScreen('dashboard',this,'Dashboard','')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+    Dashboard
+  </div>
+  <div class="nav-item" id="nav-content" onclick="goScreen('content',this,'Content','')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21,15 16,10 5,21"/></svg>
+    Content
+  </div>
+  <div class="nav-item" id="nav-audience" onclick="goScreen('audience',this,'Audience','')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M21 21v-2a4 4 0 0 0-3-3.87"/></svg>
+    Audience
+  </div>
+  <div class="nav-item" id="nav-compare" onclick="goScreen('compare',this,'Compare Pages','')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17,1 21,5 17,9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7,23 3,19 7,15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+    Compare Pages
+  </div>
+
+  <div class="nav-sec">Campaigns</div>
+  <div class="nav-item" id="nav-campaigns" onclick="openCampaigns(this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4z"/></svg>
+    Campaigns
+  </div>
+  <div id="camp-sub" style="display:block">
+    <div class="nav-sub active" id="ns-own" onclick="campTab('own')"><div class="nav-sub-dot"></div> Own Campaigns</div>
+    <div class="nav-sub" id="ns-htag" onclick="campTab('htag')"><div class="nav-sub-dot"></div> Hashtag Search</div>
+    <div class="nav-sub" id="ns-agency" onclick="campTab('agency')"><div class="nav-sub-dot"></div> Agency Report <span class="nav-badge">New</span></div>
+  </div>
+
+  <div class="nav-sec">Community</div>
+  <div class="nav-item" id="nav-fanpages" onclick="goScreen('fanpages',this,'Fan Pages','')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>
+    Fan Pages <span class="nav-badge">24</span>
+  </div>
+
+  <div class="sidebar-footer">
+    <div class="avatar">NP</div>
+    <div>
+      <div style="font-size:13px;font-weight:600">Nivin Pauly</div>
+      <div style="font-size:11px;color:var(--muted)">@nivinpauly</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ MAIN ═══════════════ -->
+<div class="main">
+  <div class="topbar">
+    <div class="breadcrumb" id="bc"><strong>Dashboard</strong></div>
+    <div class="topbar-actions">
+      <span style="font-size:11px;color:var(--muted)" id="bc-sub"></span>
+      <button class="btn">Last 30 days ▾</button>
+      <button class="btn btn-primary" onclick="alert('Export coming in full build!')">Export</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ════════ DASHBOARD ════════ -->
+    <div class="screen active" id="screen-dashboard">
+      <div class="kpi-grid kpi-grid-4">
+        <div class="kpi"><div class="kpi-label">Followers</div><div class="kpi-val">7.4M</div><div class="kpi-delta up">↑ +12.4K this week</div></div>
+        <div class="kpi"><div class="kpi-label">Engagement Rate</div><div class="kpi-val">4.2%</div><div class="kpi-delta up">↑ +0.3% vs last month</div></div>
+        <div class="kpi"><div class="kpi-label">Reach (30d)</div><div class="kpi-val">28.1M</div><div class="kpi-delta dn">↓ -4% vs prev period</div></div>
+        <div class="kpi"><div class="kpi-label">Profile Visits</div><div class="kpi-val">312K</div><div class="kpi-delta up">↑ +22% this week</div></div>
+      </div>
+      <div class="g2">
+        <div class="card"><div class="card-title">Follower Growth — 12 Weeks</div><div class="chart-wrap"><canvas id="c-growth"></canvas></div></div>
+        <div class="card"><div class="card-title">Engagement Breakdown</div><div class="chart-wrap"><canvas id="c-eng"></canvas></div></div>
+      </div>
+      <div class="section-title">Top Posts This Month</div>
+      <div class="post-grid">
+        <div class="post-thumb"><div class="post-thumb-icon">🎬</div><div class="post-overlay"><span class="post-stat">♥ 1.2M</span><span class="post-stat">💬 8.4K</span></div></div>
+        <div class="post-thumb"><div class="post-thumb-icon">📸</div><div class="post-overlay"><span class="post-stat">♥ 980K</span><span class="post-stat">💬 6.1K</span></div></div>
+        <div class="post-thumb"><div class="post-thumb-icon">🎬</div><div class="post-overlay"><span class="post-stat">♥ 760K</span><span class="post-stat">💬 4.2K</span></div></div>
+        <div class="post-thumb"><div class="post-thumb-icon">📸</div><div class="post-overlay"><span class="post-stat">♥ 640K</span><span class="post-stat">💬 3.8K</span></div></div>
+      </div>
+    </div>
+
+    <!-- ════════ CONTENT ════════ -->
+    <div class="screen" id="screen-content">
+      <div class="kpi-grid kpi-grid-4" style="margin-bottom:14px">
+        <div class="kpi"><div class="kpi-label">Best Format</div><div class="kpi-val" style="font-size:18px">Reels</div><div class="kpi-delta up">4.8% avg eng</div></div>
+        <div class="kpi"><div class="kpi-label">Best Time</div><div class="kpi-val" style="font-size:18px">Fri 7PM</div><div class="kpi-delta">Peak engagement</div></div>
+        <div class="kpi"><div class="kpi-label">Posts This Month</div><div class="kpi-val">14</div><div class="kpi-delta up">↑ +3 vs last</div></div>
+        <div class="kpi"><div class="kpi-label">Avg Reel Views</div><div class="kpi-val">2.8M</div><div class="kpi-delta up">↑ +18%</div></div>
+      </div>
+      <div class="g2">
+        <div class="card"><div class="card-title">Post Type Performance</div><div class="chart-wrap"><canvas id="c-posttype"></canvas></div></div>
+        <div class="card"><div class="card-title">Reach by Week</div><div class="chart-wrap"><canvas id="c-reach"></canvas></div></div>
+      </div>
+      <div class="section-title">Recent Posts</div>
+      <div class="post-grid">
+        <div class="post-thumb"><div class="post-thumb-icon">🎬</div><div class="post-overlay"><span class="post-stat">1.2M views</span></div></div>
+        <div class="post-thumb"><div class="post-thumb-icon">📸</div><div class="post-overlay"><span class="post-stat">980K reach</span></div></div>
+        <div class="post-thumb"><div class="post-thumb-icon">🖼️</div><div class="post-overlay"><span class="post-stat">740K reach</span></div></div>
+        <div class="post-thumb"><div class="post-thumb-icon">🎬</div><div class="post-overlay"><span class="post-stat">620K views</span></div></div>
+        <div class="post-thumb"><div class="post-thumb-icon">📸</div><div class="post-overlay"><span class="post-stat">580K reach</span></div></div>
+        <div class="post-thumb"><div class="post-thumb-icon">📸</div><div class="post-overlay"><span class="post-stat">450K reach</span></div></div>
+        <div class="post-thumb"><div class="post-thumb-icon">🖼️</div><div class="post-overlay"><span class="post-stat">390K reach</span></div></div>
+        <div class="post-thumb"><div class="post-thumb-icon">🎬</div><div class="post-overlay"><span class="post-stat">310K views</span></div></div>
+      </div>
+    </div>
+
+    <!-- ════════ AUDIENCE ════════ -->
+    <div class="screen" id="screen-audience">
+      <div class="kpi-grid kpi-grid-3">
+        <div class="kpi"><div class="kpi-label">Top City</div><div class="kpi-val" style="font-size:18px">Kochi</div><div class="kpi-delta">31% of audience</div></div>
+        <div class="kpi"><div class="kpi-label">Dominant Age</div><div class="kpi-val" style="font-size:18px">25–34</div><div class="kpi-delta">44% of followers</div></div>
+        <div class="kpi"><div class="kpi-label">Gender Split</div><div class="kpi-val" style="font-size:18px">64M / 36F</div><div class="kpi-delta">Male-leaning</div></div>
+      </div>
+      <div class="g2">
+        <div class="card">
+          <div class="card-title">Top Locations</div>
+          <div class="bar-row"><div class="bar-label">Kochi</div><div class="bar-track"><div class="bar-fill" style="width:100%"></div></div><div class="bar-val">31%</div></div>
+          <div class="bar-row"><div class="bar-label">Trivandrum</div><div class="bar-track"><div class="bar-fill" style="width:58%"></div></div><div class="bar-val">18%</div></div>
+          <div class="bar-row"><div class="bar-label">Calicut</div><div class="bar-track"><div class="bar-fill" style="width:42%"></div></div><div class="bar-val">13%</div></div>
+          <div class="bar-row"><div class="bar-label">Dubai</div><div class="bar-track"><div class="bar-fill" style="width:35%"></div></div><div class="bar-val">11%</div></div>
+          <div class="bar-row"><div class="bar-label">Chennai</div><div class="bar-track"><div class="bar-fill" style="width:26%"></div></div><div class="bar-val">8%</div></div>
+          <div class="bar-row"><div class="bar-label">Others</div><div class="bar-track"><div class="bar-fill" style="width:61%"></div></div><div class="bar-val">19%</div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Age Distribution</div>
+          <div class="chart-wrap"><canvas id="c-age"></canvas></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Best Time to Post — Engagement Heatmap</div>
+        <div style="margin-top:8px;overflow-x:auto">
+          <div style="display:flex;gap:3px;padding-left:38px;margin-bottom:4px">
+            <span style="font-size:10px;color:var(--faint);width:20px;text-align:center">6a</span>
+            <span style="font-size:10px;color:var(--faint);width:20px;text-align:center">9a</span>
+            <span style="font-size:10px;color:var(--faint);width:20px;text-align:center">12p</span>
+            <span style="font-size:10px;color:var(--faint);width:20px;text-align:center">3p</span>
+            <span style="font-size:10px;color:var(--faint);width:20px;text-align:center">6p</span>
+            <span style="font-size:10px;color:var(--faint);width:20px;text-align:center">9p</span>
+          </div>
+          <div id="heatmap"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:10px">
+          <span style="font-size:10px;color:var(--faint)">Low</span>
+          <div style="display:flex;gap:2px"><div class="heat-cell h0"></div><div class="heat-cell h1"></div><div class="heat-cell h2"></div><div class="heat-cell h3"></div><div class="heat-cell h4"></div></div>
+          <span style="font-size:10px;color:var(--faint)">High</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ COMPARE ════════ -->
+    <div class="screen" id="screen-compare">
+      <div class="add-btn" onclick="alert('Connect via Instagram Graph API in full build')">＋ Add account to compare</div>
+      <div class="cmp-grid">
+        <div></div>
+        <div class="cmp-header">
+          <div class="avatar" style="margin:0 auto 6px">NP</div>
+          <div style="font-size:13px;font-weight:700">Nivin Pauly</div>
+          <div style="font-size:11px;color:var(--muted)">@nivinpauly · 7.4M</div>
+        </div>
+        <div class="cmp-header" style="background:#f0f4ff">
+          <div class="avatar" style="margin:0 auto 6px;background:#e3f2fd;color:var(--blue)">DQ</div>
+          <div style="font-size:13px;font-weight:700">Dulquer Salmaan</div>
+          <div style="font-size:11px;color:var(--muted)">@dqsalmaan · 9.1M</div>
+        </div>
+      </div>
+      <div class="card" style="padding:0">
+        <div class="cmp-row" style="padding:9px 14px"><div class="cmp-label">Followers</div><div class="cmp-cell"><div class="cmp-val">7.4M</div><div class="cmp-bar-wrap"><div style="width:81%;height:100%;background:var(--accent);border-radius:2px"></div></div></div><div class="cmp-cell"><div class="cmp-val win">9.1M</div><div class="cmp-bar-wrap"><div style="width:100%;height:100%;background:var(--blue);border-radius:2px"></div></div></div></div>
+        <div class="cmp-row" style="padding:9px 14px"><div class="cmp-label">Engagement Rate</div><div class="cmp-cell"><div class="cmp-val win">4.2%</div><div class="cmp-bar-wrap"><div style="width:100%;height:100%;background:var(--accent);border-radius:2px"></div></div></div><div class="cmp-cell"><div class="cmp-val">3.7%</div><div class="cmp-bar-wrap"><div style="width:88%;height:100%;background:var(--blue);border-radius:2px"></div></div></div></div>
+        <div class="cmp-row" style="padding:9px 14px"><div class="cmp-label">Avg Likes/Post</div><div class="cmp-cell"><div class="cmp-val win">621K</div><div class="cmp-bar-wrap"><div style="width:100%;height:100%;background:var(--accent);border-radius:2px"></div></div></div><div class="cmp-cell"><div class="cmp-val">588K</div><div class="cmp-bar-wrap"><div style="width:94%;height:100%;background:var(--blue);border-radius:2px"></div></div></div></div>
+        <div class="cmp-row" style="padding:9px 14px"><div class="cmp-label">Posts/Week</div><div class="cmp-cell"><div class="cmp-val">2.1</div><div class="cmp-bar-wrap"><div style="width:52%;height:100%;background:var(--accent);border-radius:2px"></div></div></div><div class="cmp-cell"><div class="cmp-val win">4.0</div><div class="cmp-bar-wrap"><div style="width:100%;height:100%;background:var(--blue);border-radius:2px"></div></div></div></div>
+        <div class="cmp-row" style="padding:9px 14px"><div class="cmp-label">Reel Avg Views</div><div class="cmp-cell"><div class="cmp-val">2.8M</div><div class="cmp-bar-wrap"><div style="width:82%;height:100%;background:var(--accent);border-radius:2px"></div></div></div><div class="cmp-cell"><div class="cmp-val win">3.4M</div><div class="cmp-bar-wrap"><div style="width:100%;height:100%;background:var(--blue);border-radius:2px"></div></div></div></div>
+        <div class="cmp-row" style="padding:9px 14px;border-bottom:none"><div class="cmp-label">Story Response Rate</div><div class="cmp-cell"><div class="cmp-val win">1.8%</div><div class="cmp-bar-wrap"><div style="width:100%;height:100%;background:var(--accent);border-radius:2px"></div></div></div><div class="cmp-cell"><div class="cmp-val">1.4%</div><div class="cmp-bar-wrap"><div style="width:77%;height:100%;background:var(--blue);border-radius:2px"></div></div></div></div>
+      </div>
+    </div>
+
+    <!-- ════════ CAMPAIGNS ════════ -->
+    <div class="screen" id="screen-campaigns">
+      <div class="inner-tabs">
+        <div class="itab active" id="itab-own" onclick="campTab('own')">Own Campaigns</div>
+        <div class="itab" id="itab-htag" onclick="campTab('htag')">Hashtag Search</div>
+        <div class="itab" id="itab-agency" onclick="campTab('agency')">Agency Report</div>
+      </div>
+
+      <!-- OWN CAMPAIGNS -->
+      <div id="camp-own">
+        <div style="display:flex;gap:10px;margin-bottom:16px">
+          <input placeholder="Search campaigns…" style="flex:1">
+          <button class="btn btn-primary">＋ New Campaign</button>
+        </div>
+        <div class="kpi-grid kpi-grid-3" style="margin-bottom:16px">
+          <div class="kpi"><div class="kpi-label">Active Campaigns</div><div class="kpi-val">2</div><div class="kpi-delta up">1 new this week</div></div>
+          <div class="kpi"><div class="kpi-label">Total Hashtag Reach</div><div class="kpi-val">28.4M</div><div class="kpi-delta">All campaigns</div></div>
+          <div class="kpi"><div class="kpi-label">Hashtags Tracked</div><div class="kpi-val">8</div><div class="kpi-delta">Across campaigns</div></div>
+        </div>
+
+        <div class="campaign-card featured" onclick="openVijayam()">
+          <div class="camp-icon" style="background:#fde8ef">🎬</div>
+          <div class="camp-body">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+              <div class="camp-name">#vijayam — Movie Announcement</div>
+              <span class="pill pill-live"><span class="live-dot"></span> Live</span>
+            </div>
+            <div class="camp-meta">Started Jul 8, 2026 · #vijayam · #NivinPauly · #vijayammovie</div>
+            <div class="camp-stats">
+              <span class="cstat"><strong>3,847</strong> posts today</span>
+              <span class="cstat"><strong>14.2M</strong> reach</span>
+              <span class="cstat"><strong>8.4%</strong> avg eng</span>
+              <span class="cstat"><strong>78%</strong> positive sentiment</span>
+            </div>
+          </div>
+          <span style="color:var(--faint);font-size:18px;margin-top:2px">›</span>
+        </div>
+
+        <div class="campaign-card" onclick="alert('Bethleham Kudumba Unit campaign detail — coming in next build')">
+          <div class="camp-icon" style="background:#e3f2fd">🎥</div>
+          <div class="camp-body">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+              <div class="camp-name">Bethleham Kudumba Unit — Launch Campaign</div>
+              <span class="pill pill-live"><span class="live-dot"></span> Live</span>
+            </div>
+            <div class="camp-meta">Jun 19 – Jul 10, 2026 · #BethlehemKudumbaUnit · #BKULaunch · #NivinPauly</div>
+            <div class="camp-stats">
+              <span class="cstat"><strong>60.9K</strong> posts</span>
+              <span class="cstat"><strong>14.2M</strong> reach</span>
+              <span class="cstat"><strong>5.8%</strong> avg eng</span>
+              <span class="cstat"><strong>22</strong> team posts</span>
+            </div>
+          </div>
+          <span style="color:var(--faint);font-size:18px;margin-top:2px">›</span>
+        </div>
+
+        <div class="campaign-card">
+          <div class="camp-icon" style="background:#e8f5e9">🏠</div>
+          <div class="camp-body">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+              <div class="camp-name">Kalyan Homes — Brand Partnership</div>
+              <span class="pill pill-planned">Planned</span>
+            </div>
+            <div class="camp-meta">Starts Jul 15, 2026 · Hashtags TBD · 4 posts scheduled</div>
+          </div>
+          <span style="color:var(--faint);font-size:18px;margin-top:2px">›</span>
+        </div>
+      </div>
+
+      <!-- VIJAYAM DETAIL (hidden by default) -->
+      <div id="camp-vijayam" style="display:none">
+        <div class="back-link" onclick="closeVijayam()">← Back to Campaigns</div>
+        <div class="vhero">
+          <div>
+            <div class="vhero-tag">#vijayam</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px">Announcement campaign · Started Jul 8, 2026</div>
+            <span class="pill pill-live" style="margin-top:8px"><span class="live-dot"></span> Live tracking</span>
+          </div>
+          <div class="vhero-stats">
+            <div class="vstat"><div class="vstat-val">3,847</div><div class="vstat-label">Posts today</div></div>
+            <div class="divider"></div>
+            <div class="vstat"><div class="vstat-val" style="color:var(--accent)">+1,204</div><div class="vstat-label">Last hour</div></div>
+            <div class="divider"></div>
+            <div class="vstat"><div class="vstat-val">14.2M</div><div class="vstat-label">Total reach</div></div>
+            <div class="divider"></div>
+            <div class="vstat"><div class="vstat-val">2,341</div><div class="vstat-label">Unique accounts</div></div>
+          </div>
+        </div>
+        <div class="kpi-grid kpi-grid-4">
+          <div class="kpi"><div class="kpi-label">Avg Eng/Post</div><div class="kpi-val">8.4%</div><div class="kpi-delta up">Above avg</div></div>
+          <div class="kpi"><div class="kpi-label">Reels With Tag</div><div class="kpi-val">1,092</div><div class="kpi-delta">28% of posts</div></div>
+          <div class="kpi"><div class="kpi-label">Stories With Tag</div><div class="kpi-val">612</div><div class="kpi-delta up">Fast spreading</div></div>
+          <div class="kpi"><div class="kpi-label">Sentiment</div><div class="kpi-val">78%</div><div class="kpi-delta up">Positive</div></div>
+        </div>
+        <div class="g2">
+          <div class="card">
+            <div class="card-title">Post Volume Since Announcement (Hourly)</div>
+            <div class="spark-wrap">
+              <div class="sbar" style="height:12%"></div><div class="sbar" style="height:28%"></div><div class="sbar" style="height:45%"></div><div class="sbar" style="height:62%"></div><div class="sbar hi" style="height:100%"></div><div class="sbar" style="height:88%"></div><div class="sbar" style="height:72%"></div><div class="sbar" style="height:60%"></div><div class="sbar" style="height:54%"></div><div class="sbar" style="height:50%"></div><div class="sbar" style="height:55%"></div><div class="sbar hi" style="height:92%"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:6px">
+              <span style="font-size:10px;color:var(--faint)">Announcement</span>
+              <span style="font-size:10px;color:var(--accent);font-weight:700">Peak: 1,204/hr</span>
+              <span style="font-size:10px;color:var(--faint)">Now</span>
+            </div>
+            <div style="margin-top:14px"><div class="card-title">Sentiment</div>
+              <div class="sent-bar"><div style="width:78%;background:var(--green)"></div><div style="width:14%;background:#999"></div><div style="width:8%;background:var(--red)"></div></div>
+              <div style="display:flex;gap:14px">
+                <span style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--green);display:inline-block"></span>Positive 78%</span>
+                <span style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:#999;display:inline-block"></span>Neutral 14%</span>
+                <span style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--red);display:inline-block"></span>Negative 8%</span>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <div class="card">
+              <div class="card-title">Geographic Spread</div>
+              <div class="geo-row"><div class="geo-name">Kerala</div><div class="geo-track"><div class="geo-fill" style="width:100%"></div></div><div class="geo-val">44%</div></div>
+              <div class="geo-row"><div class="geo-name">Tamil Nadu</div><div class="geo-track"><div class="geo-fill" style="width:60%"></div></div><div class="geo-val">26%</div></div>
+              <div class="geo-row"><div class="geo-name">UAE/Gulf</div><div class="geo-track"><div class="geo-fill" style="width:38%"></div></div><div class="geo-val">16%</div></div>
+              <div class="geo-row"><div class="geo-name">Karnataka</div><div class="geo-track"><div class="geo-fill" style="width:20%"></div></div><div class="geo-val">8%</div></div>
+              <div class="geo-row"><div class="geo-name">Others</div><div class="geo-track"><div class="geo-fill" style="width:14%"></div></div><div class="geo-val">6%</div></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Top Keywords</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
+                <span class="pill pill-hot">excited</span><span class="pill pill-hot">fire</span><span class="pill">blockbuster</span><span class="pill">can't wait</span><span class="pill pill-hot">goosebumps</span><span class="pill">masterpiece</span><span class="pill">waiting</span><span class="pill pill-hot">incredible</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Live Post Stream</div>
+          <div class="stream-item"><div class="stream-av" style="background:#fde8ef;color:var(--accent)">NF</div><div class="stream-body"><span class="stream-handle">@nivin_fanz_official</span><span class="stream-time">2 min ago</span><div class="stream-text">VIJAYAM IS HERE!! Drop everything and share this. <em>#vijayam</em> <em>#NivinPauly</em></div><div class="stream-stats"><span class="sst">♥ 6.1K</span><span class="sst">💬 441</span><span class="pill pill-fan" style="margin-left:4px">Fan page</span></div></div></div>
+          <div class="stream-item"><div class="stream-av" style="background:#e8f5e9;color:var(--green)">FF</div><div class="stream-body"><span class="stream-handle">@fanfire_nivin</span><span class="stream-time">8 min ago</span><div class="stream-text">Finally the announcement! <em>#vijayam</em> <em>#NivinPauly</em> 🔥</div><div class="stream-stats"><span class="sst">♥ 4.2K</span><span class="sst">💬 312</span><span class="pill pill-fan" style="margin-left:4px">Fan page</span></div></div></div>
+          <div class="stream-item"><div class="stream-av" style="background:#e3f2fd;color:var(--blue)">MK</div><div class="stream-body"><span class="stream-handle">@mollywood_king</span><span class="stream-time">15 min ago</span><div class="stream-text"><em>#vijayam</em> title reveal giving major vibes. Nivin is back in full form!</div><div class="stream-stats"><span class="sst">♥ 2.8K</span><span class="sst">💬 189</span><span class="pill" style="margin-left:4px">Public</span></div></div></div>
+          <div class="stream-item"><div class="stream-av" style="background:#f3e5f5;color:#6a1b9a">MC</div><div class="stream-body"><span class="stream-handle">@malayali_cinema_hub</span><span class="stream-time">22 min ago</span><div class="stream-text">Title: <em>#vijayam</em> · Nivin Pauly. Hype is already through the roof.</div><div class="stream-stats"><span class="sst">♥ 1.9K</span><span class="sst">💬 97</span><span class="pill" style="margin-left:4px">Media</span></div></div></div>
+        </div>
+      </div>
+
+      <!-- HASHTAG SEARCH -->
+      <div id="camp-htag" style="display:none">
+        <div style="display:flex;gap:10px;margin-bottom:16px">
+          <input placeholder="Search any hashtag or keyword…" style="flex:1" id="htag-input">
+          <button class="btn btn-primary" onclick="alert('Hashtag tracked!')">Track Hashtag</button>
+        </div>
+        <div class="card">
+          <div class="card-title">Tracked Hashtags</div>
+          <div class="htag-row"><div class="htag-name">#vijayam</div><div class="htag-track"><div class="htag-fill" style="width:100%"></div></div><div class="htag-posts">3.8K posts</div><div class="htag-eng">8.4%</div><span class="pill pill-new" style="margin-left:6px">New</span></div>
+          <div class="htag-row"><div class="htag-name">#BethlehemKudumbaUnit</div><div class="htag-track"><div class="htag-fill" style="width:82%"></div></div><div class="htag-posts">48.2K posts</div><div class="htag-eng">6.1%</div><span class="pill pill-hot" style="margin-left:6px">Trending</span></div>
+          <div class="htag-row"><div class="htag-name">#BKULaunch</div><div class="htag-track"><div class="htag-fill" style="width:60%"></div></div><div class="htag-posts">12.7K posts</div><div class="htag-eng">5.4%</div><span class="pill" style="margin-left:6px">Campaign</span></div>
+          <div class="htag-row"><div class="htag-name">#NivinPauly</div><div class="htag-track"><div class="htag-fill" style="width:55%"></div></div><div class="htag-posts">142K posts</div><div class="htag-eng">4.8%</div><span class="pill" style="margin-left:6px">Active</span></div>
+          <div class="htag-row"><div class="htag-name">#vijayammovie</div><div class="htag-track"><div class="htag-fill" style="width:28%"></div></div><div class="htag-posts">1.1K posts</div><div class="htag-eng">9.1%</div><span class="pill pill-new" style="margin-left:6px">New</span></div>
+          <div class="htag-row"><div class="htag-name">#MalayalamCinema</div><div class="htag-track"><div class="htag-fill" style="width:44%"></div></div><div class="htag-posts">980K posts</div><div class="htag-eng">3.2%</div><span class="pill" style="margin-left:6px">Active</span></div>
+          <div class="htag-row"><div class="htag-name">#Mollywood</div><div class="htag-track"><div class="htag-fill" style="width:40%"></div></div><div class="htag-posts">2.1M posts</div><div class="htag-eng">2.9%</div><span class="pill" style="margin-left:6px">Active</span></div>
+          <div class="htag-row"><div class="htag-name">#NivinFans</div><div class="htag-track"><div class="htag-fill" style="width:22%"></div></div><div class="htag-posts">28K posts</div><div class="htag-eng">5.1%</div><span class="pill" style="margin-left:6px">Active</span></div>
+        </div>
+      </div>
+
+      <!-- AGENCY REPORT -->
+      <div id="camp-agency" style="display:none">
+        <div id="agency-upload-view">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+            <div><div style="font-size:15px;font-weight:700;margin-bottom:3px">Upload Agency Post Links</div><div style="font-size:12px;color:var(--muted)">Upload a sheet or paste links for each agency. We'll scrape and score all 500 posts.</div></div>
+            <button class="btn btn-primary" onclick="runAnalysis()">Analyse All Posts →</button>
+          </div>
+          <div class="g2">
+            <div>
+              <div class="upload-zone" onclick="runAnalysis()">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+                <div style="font-size:14px;font-weight:700;margin-bottom:4px">Drop your sheet here</div>
+                <div style="font-size:12px;color:var(--muted)">Excel or CSV · one row per link · agency column</div>
+                <button class="btn" style="margin-top:12px;font-size:12px">Browse file</button>
+              </div>
+              <div style="text-align:center;font-size:11px;color:var(--faint);margin:10px 0">— or paste links directly —</div>
+              <textarea placeholder="Paste Instagram post URLs, one per line…&#10;https://instagram.com/p/abc123&#10;https://instagram.com/p/def456" style="width:100%;height:100px;resize:none;font-size:12px"></textarea>
+            </div>
+            <div class="card">
+              <div class="card-title">Agencies in This Campaign</div>
+              <div id="agency-list"></div>
+              <div class="add-btn" style="margin-top:10px;margin-bottom:0">＋ Add Agency</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="agency-results-view" style="display:none">
+          <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center">
+            <div class="back-link" onclick="document.getElementById('agency-upload-view').style.display='block';document.getElementById('agency-results-view').style.display='none'">← Back to Upload</div>
+            <div style="margin-left:auto;font-size:12px;color:var(--muted)">10 agencies · 500 posts analysed · BKU campaign</div>
+          </div>
+
+          <div class="inner-tabs" style="margin-bottom:14px">
+            <div class="itab active" id="ag-tab-scores" onclick="agTab('scores')">Agency Scorecard</div>
+            <div class="itab" id="ag-tab-auth" onclick="agTab('auth')">Authenticity Audit</div>
+            <div class="itab" id="ag-tab-posts" onclick="agTab('posts')">All 500 Posts</div>
+          </div>
+
+          <!-- SCORECARD -->
+          <div id="ag-scores">
+            <div class="kpi-grid kpi-grid-5" style="margin-bottom:14px">
+              <div class="kpi"><div class="kpi-label">Posts Analysed</div><div class="kpi-val">500</div><div class="kpi-delta">10 agencies</div></div>
+              <div class="kpi"><div class="kpi-label">Total Reach</div><div class="kpi-val">84.2M</div><div class="kpi-delta up">Campaign total</div></div>
+              <div class="kpi"><div class="kpi-label">Avg Engagement</div><div class="kpi-val">4.8%</div><div class="kpi-delta">All posts</div></div>
+              <div class="kpi"><div class="kpi-label">Authenticity</div><div class="kpi-val" style="color:var(--amber)">71%</div><div class="kpi-delta" style="color:var(--amber)">3 agencies flagged</div></div>
+              <div class="kpi"><div class="kpi-label">Top Agency</div><div class="kpi-val" style="font-size:15px">Pixelwave</div><div class="kpi-delta up">Score 91/100</div></div>
+            </div>
+            <div class="g-6-4">
+              <div class="card"><div class="card-title">Agency Leaderboard — Overall Score</div><div id="leaderboard"></div></div>
+              <div style="display:flex;flex-direction:column;gap:14px">
+                <div class="card">
+                  <div class="card-title">Score Components</div>
+                  <div style="font-size:12px;color:var(--muted);line-height:2">
+                    <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:4px;margin-bottom:4px"><span>Performance (50%)</span><span style="color:var(--text);font-weight:600">Reach · likes · comments · saves</span></div>
+                    <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:4px;margin-bottom:4px"><span>Authenticity (30%)</span><span style="color:var(--text);font-weight:600">Real eng · bot detection</span></div>
+                    <div style="display:flex;justify-content:space-between"><span>Efficiency (20%)</span><span style="color:var(--text);font-weight:600">Reach/post · consistency</span></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-title">Campaign Health</div>
+                  <div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="color:var(--muted)">Avg authenticity</span><span style="font-weight:700;color:var(--amber)">71/100</span></div><div style="height:6px;background:#f0f0f5;border-radius:3px;overflow:hidden"><div style="width:71%;height:100%;background:var(--amber);border-radius:3px"></div></div></div>
+                  <div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="color:var(--muted)">Avg performance</span><span style="font-weight:700;color:var(--green)">78/100</span></div><div style="height:6px;background:#f0f0f5;border-radius:3px;overflow:hidden"><div style="width:78%;height:100%;background:var(--green);border-radius:3px"></div></div></div>
+                  <div><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="color:var(--muted)">Avg efficiency</span><span style="font-weight:700;color:var(--blue)">74/100</span></div><div style="height:6px;background:#f0f0f5;border-radius:3px;overflow:hidden"><div style="width:74%;height:100%;background:var(--blue);border-radius:3px"></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- AUTHENTICITY -->
+          <div id="ag-auth" style="display:none">
+            <div class="kpi-grid kpi-grid-4" style="margin-bottom:14px">
+              <div class="kpi"><div class="kpi-label">Suspicious Posts</div><div class="kpi-val" style="color:var(--red)">37</div><div class="kpi-delta">7.4% of 500 posts</div></div>
+              <div class="kpi"><div class="kpi-label">Bot-like Engagement</div><div class="kpi-val" style="font-size:16px;color:var(--amber)">3 agencies</div><div class="kpi-delta">Influx, BuzzBridge, NovaSocial</div></div>
+              <div class="kpi"><div class="kpi-label">Comment Quality</div><div class="kpi-val" style="color:var(--green)">82%</div><div class="kpi-delta up">Genuine comments</div></div>
+              <div class="kpi"><div class="kpi-label">Clean Agencies</div><div class="kpi-val" style="color:var(--green)">7/10</div><div class="kpi-delta up">No flags raised</div></div>
+            </div>
+            <div class="g2">
+              <div class="card">
+                <div class="card-title">Red Flags Detected</div>
+                <div class="flag-row red"><div class="flag-ico">⚠️</div><div class="flag-body"><div class="flag-title">Engagement velocity anomaly</div><div class="flag-desc">Posts gained 10K+ likes within 2 minutes of publishing — consistent with purchased engagement.</div><div class="flag-tags"><span class="pill pill-bad">Influx Kerala · 12 posts</span><span class="pill pill-bad">NovaSocial · 8 posts</span></div></div></div>
+                <div class="flag-row red" style="margin-top:6px"><div class="flag-ico">🤖</div><div class="flag-body"><div class="flag-title">Generic comment patterns</div><div class="flag-desc">High volume of single-emoji or copy-paste comments from accounts with 0 posts.</div><div class="flag-tags"><span class="pill pill-bad">BuzzBridge · 9 posts</span><span class="pill pill-bad">Influx Kerala · 6 posts</span></div></div></div>
+                <div class="flag-row amber" style="margin-top:6px"><div class="flag-ico">👁</div><div class="flag-body"><div class="flag-title">Low save-to-like ratio</div><div class="flag-desc">Unusually high likes but near-zero saves — real audiences save valuable content.</div><div class="flag-tags"><span class="pill pill-warn">BuzzBridge · 14 posts</span></div></div></div>
+                <div class="flag-row amber" style="margin-top:6px"><div class="flag-ico">🕐</div><div class="flag-body"><div class="flag-title">Off-hours engagement spike</div><div class="flag-desc">Significant engagement between 2–4 AM IST, inconsistent with Kerala audience active hours.</div><div class="flag-tags"><span class="pill pill-warn">NovaSocial · 5 posts</span></div></div></div>
+              </div>
+              <div class="card">
+                <div class="card-title">Authenticity Score per Agency</div>
+                <div id="auth-list"></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">Positive Signals — What's Genuine</div>
+              <div class="g3" style="margin-bottom:0">
+                <div class="flag-row green-bg" style="flex-direction:column;gap:4px"><div style="display:flex;align-items:center;gap:6px"><span>💬</span><div class="flag-title">Real conversations</div></div><div class="flag-desc">7 agencies show organic comment threads with replies — strong authenticity signal.</div></div>
+                <div class="flag-row green-bg" style="flex-direction:column;gap:4px"><div style="display:flex;align-items:center;gap:6px"><span>📤</span><div class="flag-title">High share rate</div></div><div class="flag-desc">Pixelwave, Reelcraft, SocialSpark show share rates 3× above campaign avg — genuine virality.</div></div>
+                <div class="flag-row green-bg" style="flex-direction:column;gap:4px"><div style="display:flex;align-items:center;gap:6px"><span>✅</span><div class="flag-title">Audience overlap verified</div></div><div class="flag-desc">62% of engaging accounts follow @nivinpauly — genuinely relevant audience.</div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ALL POSTS -->
+          <div id="ag-posts" style="display:none">
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+              <input placeholder="Search URL or caption…" style="flex:1;min-width:160px">
+              <select><option>All agencies</option><option>Pixelwave Media</option><option>Reelcraft Agency</option><option>Influx Kerala</option><option>BuzzBridge</option><option>NovaSocial</option></select>
+              <select><option>Sort: Score (high)</option><option>Sort: Reach</option><option>Sort: Engagement</option><option>Sort: Flags</option></select>
+            </div>
+            <div class="card" style="overflow-x:auto;padding:0">
+              <table class="post-tbl">
+                <thead><tr><th>#</th><th>Post URL</th><th>Agency</th><th>Reach</th><th>Likes</th><th>Comments</th><th>Saves</th><th>Eng%</th><th>Auth</th><th>Score</th><th>Flags</th></tr></thead>
+                <tbody id="posts-tbody"></tbody>
+              </table>
+            </div>
+            <div style="text-align:center;font-size:11px;color:var(--faint);margin-top:10px;padding:8px">Showing 10 of 500 posts · sorted by score</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ FAN PAGES ════════ -->
+    <div class="screen" id="screen-fanpages">
+      <div class="kpi-grid kpi-grid-3">
+        <div class="kpi"><div class="kpi-label">Total Fan Reach</div><div class="kpi-val">4.8M</div><div class="kpi-delta">Combined followers</div></div>
+        <div class="kpi"><div class="kpi-label">Active Today</div><div class="kpi-val">18/24</div><div class="kpi-delta up">75% posting rate</div></div>
+        <div class="kpi"><div class="kpi-label">Posting #vijayam</div><div class="kpi-val">21/24</div><div class="kpi-delta up">87% coverage</div></div>
+      </div>
+      <div class="add-btn">＋ Add fan page to track</div>
+      <div class="inner-tabs">
+        <div class="itab active">All (24)</div>
+        <div class="itab">Most Active</div>
+        <div class="itab">Posting #vijayam</div>
+        <div class="itab">Largest Reach</div>
+      </div>
+      <div class="card" style="margin-bottom:16px"><div id="fan-list"></div></div>
+      <div class="section-title">Alerts</div>
+      <div class="alert-item"><span>🔔</span><div style="flex:1"><span style="font-weight:700">@nivin_fanz_official</span><span style="color:var(--muted)"> posted about #vijayam — 6.1K likes in 14 min</span></div><span style="font-size:11px;color:var(--faint)">14m</span></div>
+      <div class="alert-item"><span style="opacity:.5">🔔</span><div style="flex:1"><span style="font-weight:700">@fanfire_nivin</span><span style="color:var(--muted)"> Reel about #vijayam crossed 100K views</span></div><span style="font-size:11px;color:var(--faint)">1h</span></div>
+      <div class="alert-item"><span style="opacity:.5">🔔</span><div style="flex:1"><span style="color:var(--muted)">New fan page detected: </span><span style="font-weight:700">@nivin_vijayadal</span><span style="color:var(--muted)"> (12K followers) started posting #vijayam</span></div><span style="font-size:11px;color:var(--faint)">2h</span></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── DATA ──
+const AGENCIES=[
+  {name:'Pixelwave Media',color:'#E1306C',score:91,perf:94,auth:90,eff:89,reach:'9.4M',flags:0},
+  {name:'Reelcraft Agency',color:'#833AB4',score:86,perf:88,auth:87,eff:83,reach:'8.8M',flags:1},
+  {name:'Kochi Digital Co.',color:'#F77737',score:82,perf:84,auth:83,eff:79,reach:'7.9M',flags:0},
+  {name:'SocialSpark IN',color:'#1a7a4a',score:79,perf:80,auth:82,eff:76,reach:'7.4M',flags:1},
+  {name:'TrendTide Media',color:'#558b2f',score:76,perf:77,auth:78,eff:74,reach:'7.1M',flags:0},
+  {name:'CreatorHub',color:'#00838f',score:74,perf:75,auth:76,eff:71,reach:'6.8M',flags:0},
+  {name:'Viralthread MKT',color:'#ad1457',score:71,perf:73,auth:70,eff:69,reach:'6.4M',flags:2},
+  {name:'BuzzBridge',color:'#1565c0',score:58,perf:72,auth:38,eff:64,reach:'8.1M',flags:23},
+  {name:'Influx Kerala',color:'#6a1b9a',score:52,perf:65,auth:32,eff:60,reach:'9.0M',flags:18},
+  {name:'NovaSocial',color:'#4527a0',score:48,perf:60,auth:28,eff:55,reach:'8.9M',flags:13},
+];
+const POSTS=[
+  {url:'instagram.com/p/Cx1a…',ag:'Pixelwave Media',color:'#E1306C',reach:'284K',likes:'18.4K',comments:'920',saves:'3.2K',eng:'6.5%',auth:92,score:94,flags:[]},
+  {url:'instagram.com/p/Bw2b…',ag:'Reelcraft Agency',color:'#833AB4',reach:'241K',likes:'15.1K',comments:'741',saves:'2.8K',eng:'6.3%',auth:88,score:90,flags:[]},
+  {url:'instagram.com/p/Dq3c…',ag:'Pixelwave Media',color:'#E1306C',reach:'220K',likes:'13.2K',comments:'680',saves:'2.4K',eng:'6.0%',auth:91,score:89,flags:[]},
+  {url:'instagram.com/p/Ar4d…',ag:'Kochi Digital Co.',color:'#F77737',reach:'198K',likes:'11.8K',comments:'590',saves:'1.9K',eng:'5.7%',auth:84,score:85,flags:[]},
+  {url:'instagram.com/p/Zp5e…',ag:'SocialSpark IN',color:'#1a7a4a',reach:'187K',likes:'10.4K',comments:'512',saves:'1.7K',eng:'5.6%',auth:82,score:83,flags:[]},
+  {url:'instagram.com/p/Yq6f…',ag:'BuzzBridge',color:'#1565c0',reach:'310K',likes:'22.1K',comments:'88',saves:'142',eng:'7.2%',auth:34,score:58,flags:['Velocity','Low saves']},
+  {url:'instagram.com/p/Xr7g…',ag:'Influx Kerala',color:'#6a1b9a',reach:'298K',likes:'20.8K',comments:'64',saves:'98',eng:'7.0%',auth:29,score:51,flags:['Bot comments','Velocity']},
+  {url:'instagram.com/p/Ws8h…',ag:'NovaSocial',color:'#4527a0',reach:'290K',likes:'19.4K',comments:'72',saves:'110',eng:'6.8%',auth:26,score:48,flags:['Off-hours','Bot comments']},
+  {url:'instagram.com/p/Vt9i…',ag:'TrendTide Media',color:'#558b2f',reach:'172K',likes:'9.8K',comments:'440',saves:'1.5K',eng:'5.4%',auth:79,score:77,flags:[]},
+  {url:'instagram.com/p/Uj0j…',ag:'CreatorHub',color:'#00838f',reach:'165K',likes:'9.1K',comments:'398',saves:'1.3K',eng:'5.2%',auth:77,score:74,flags:[]},
+];
+const FAN_PAGES=[
+  {name:'Nivin Fanz Official',handle:'@nivin_fanz_official',bg:'#fde8ef',c:'#E1306C',init:'NF',followers:'284K',eng:'9.2%',posts:'4 posts',status:true,spark:[40,70,50,100,90],vijayam:true},
+  {name:'Fan Fire Nivin',handle:'@fanfire_nivin',bg:'#e8f5e9',c:'#1a7a4a',init:'FF',followers:'176K',eng:'7.8%',posts:'3 posts',status:true,spark:[30,100,90,75,60],vijayam:true},
+  {name:'NP Fan Club Kerala',handle:'@np_fanclub_kerala',bg:'#f3e5f5',c:'#6a1b9a',init:'NK',followers:'142K',eng:'6.1%',posts:'2 posts',status:true,spark:[50,60,100,80,70],vijayam:true},
+  {name:'Mollywood King Fans',handle:'@mollywood_king',bg:'#e3f2fd',c:'#1565c0',init:'MK',followers:'98K',eng:'5.4%',posts:'1 post',status:false,spark:[70,50,30,30,60],vijayam:true},
+  {name:'Nivin Empire Gulf',handle:'@nivin_empire_gulf',bg:'#fff8e1',c:'#e65100',init:'GF',followers:'67K',eng:'4.9%',posts:'0 posts',status:false,spark:[80,60,40,20,8],vijayam:false},
+];
+
+const AC=s=>s>=80?'#1a7a4a':s>=60?'#b45309':'#b71c1c';
+const SC=s=>s>=80?'chip-good':s>=65?'chip-warn':'chip-bad';
+
+// ── HEATMAP ──
+const heatData={Mon:[1,0,2,1,3,4],Tue:[0,1,2,2,3,3],Wed:[1,1,1,3,4,3],Fri:[2,2,3,3,4,4],Sat:[3,3,3,2,4,3]};
+function buildHeatmap(){
+  const el=document.getElementById('heatmap');
+  const days=Object.keys(heatData);
+  el.innerHTML=days.map(d=>`<div style="display:flex;gap:3px;margin-bottom:3px;align-items:center">
+    <span style="font-size:10px;color:var(--faint);width:34px;text-align:right">${d}</span>
+    ${heatData[d].map(v=>`<div class="heat-cell h${v}"></div>`).join('')}
+  </div>`).join('');
+}
+
+// ── AGENCY LIST (upload view) ──
+function buildAgencyList(){
+  const el=document.getElementById('agency-list');
+  el.innerHTML=AGENCIES.map((a,i)=>`
+    <div class="agency-inp-row">
+      <div class="ag-num">${i+1}</div>
+      <div class="ag-dot" style="background:${a.color}"></div>
+      <div class="ag-name">${a.name}</div>
+      <div class="ag-links">50 links</div>
+    </div>`).join('');
+}
+
+// ── LEADERBOARD ──
+function buildLeaderboard(){
+  const el=document.getElementById('leaderboard');
+  const ranks=['r1','r2','r3'];
+  el.innerHTML=AGENCIES.map((a,i)=>`
+    <div class="lb-row">
+      <div class="lb-rank ${ranks[i]||''}">${i+1}</div>
+      <div class="lb-body">
+        <div class="lb-name">
+          <span class="dot" style="background:${a.color}"></span>
+          ${a.name}
+          ${a.flags>0?`<span class="flag-chip">${a.flags} flags</span>`:''}
+        </div>
+        <div class="lb-bar-track"><div class="lb-bar-fill" style="width:${a.score}%;background:${AC(a.score)}"></div></div>
+        <div class="lb-meta">
+          <span>Reach <strong>${a.reach}</strong></span>
+          <span>Auth <strong style="color:${AC(a.auth)}">${a.auth}</strong></span>
+          <span>Eff <strong>${a.eff}</strong></span>
+        </div>
+      </div>
+      <div class="lb-score" style="color:${AC(a.score)}">${a.score}</div>
+    </div>`).join('');
+}
+
+// ── AUTH LIST ──
+function buildAuthList(){
+  const el=document.getElementById('auth-list');
+  el.innerHTML=AGENCIES.map(a=>`
+    <div class="auth-row">
+      <span class="dot" style="background:${a.color}"></span>
+      <div style="flex:1;font-size:12px;font-weight:600">${a.name}</div>
+      <div class="auth-bar-track"><div class="auth-bar-fill" style="width:${a.auth}%;background:${AC(a.auth)}"></div></div>
+      <div style="font-size:12px;font-weight:700;color:${AC(a.auth)};width:26px;text-align:right">${a.auth}</div>
+      ${a.flags>0?`<span class="pill pill-${a.auth<60?'bad':'warn'}">${a.flags} flags</span>`:`<span class="pill pill-good">Clean</span>`}
+    </div>`).join('');
+}
+
+// ── POSTS TABLE ──
+function buildPostsTable(){
+  const tb=document.getElementById('posts-tbody');
+  tb.innerHTML=POSTS.map((p,i)=>`<tr>
+    <td style="color:var(--faint)">${i+1}</td>
+    <td><a href="#" style="color:var(--accent);text-decoration:none;font-size:11px">${p.url}</a></td>
+    <td><span class="dot" style="background:${p.color};margin-right:5px"></span>${p.ag}</td>
+    <td>${p.reach}</td><td>${p.likes}</td><td>${p.comments}</td><td>${p.saves}</td>
+    <td style="font-weight:700">${p.eng}</td>
+    <td style="font-weight:700;color:${AC(p.auth)}">${p.auth}</td>
+    <td><span class="score-chip ${SC(p.score)}">${p.score}</span></td>
+    <td>${p.flags.length?p.flags.map(f=>`<span class="flag-chip">${f}</span>`).join(''):'<span style="color:var(--green);font-size:12px">✓</span>'}</td>
+  </tr>`).join('');
+}
+
+// ── FAN LIST ──
+function buildFanList(){
+  const el=document.getElementById('fan-list');
+  el.innerHTML=FAN_PAGES.map(f=>`
+    <div class="fan-row">
+      <div class="fan-av" style="background:${f.bg};color:${f.c}">${f.init}</div>
+      <div class="fan-info">
+        <div class="fan-name">${f.name} ${f.init==='NF'?`<span class="pill pill-fan" style="margin-left:5px">Verified fan</span>`:''}</div>
+        <div class="fan-handle">${f.handle}</div>
+        <div class="fan-stats">
+          <span class="fan-stat"><strong>${f.followers}</strong> followers</span>
+          <span class="fan-stat"><strong>${f.eng}</strong> eng</span>
+          <span class="fan-stat"><strong>${f.posts}</strong> today</span>
+        </div>
+      </div>
+      <div class="fan-right">
+        <div class="mini-spark">${f.spark.map(v=>`<div class="ms-bar ${v>=90?'mhi':''}" style="height:${v}%"></div>`).join('')}</div>
+        <div style="display:flex;align-items:center;gap:4px"><div class="sdot ${f.status?'sdot-on':'sdot-off'}"></div><span style="font-size:10px;color:var(--muted)">${f.status?'Active now':'Idle'}</span></div>
+        ${f.vijayam?`<span class="pill pill-hot" style="font-size:10px">#vijayam</span>`:`<span class="pill" style="font-size:10px">Not yet</span>`}
+      </div>
+    </div>`).join('');
+}
+
+// ── NAV ──
+function goScreen(id,el,bc,sub){
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('camp-sub').style.display='none';
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-'+id).classList.add('active');
+  document.getElementById('bc').innerHTML=`<strong>${bc}</strong>`;
+  document.getElementById('bc-sub').textContent=sub;
+  initCharts();
+}
+
+function openCampaigns(el){
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('camp-sub').style.display='block';
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-campaigns').classList.add('active');
+  document.getElementById('bc').innerHTML='<strong>Campaigns</strong>';
+  campTab('own');
+}
+
+function campTab(tab){
+  ['own','htag','agency'].forEach(t=>{
+    document.getElementById('ns-'+t).classList.toggle('active',t===tab);
+    document.getElementById('itab-'+t).classList.toggle('active',t===tab);
+    const el=document.getElementById('camp-'+t);
+    if(el) el.style.display=t===tab?'block':'none';
+  });
+  document.getElementById('camp-vijayam').style.display='none';
+  if(tab==='own') document.getElementById('camp-own').style.display='block';
+  const subs={own:'Own Campaigns',htag:'Hashtag Search',agency:'Agency Report'};
+  document.getElementById('bc').innerHTML=`Campaigns › <strong>${subs[tab]}</strong>`;
+  // ensure campaigns screen is active
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-campaigns').classList.add('active');
+}
+
+function openVijayam(){
+  document.getElementById('camp-own').style.display='none';
+  document.getElementById('camp-vijayam').style.display='block';
+  document.getElementById('bc').innerHTML='Campaigns › Own Campaigns › <strong>#vijayam</strong>';
+}
+function closeVijayam(){
+  document.getElementById('camp-vijayam').style.display='none';
+  document.getElementById('camp-own').style.display='block';
+  document.getElementById('bc').innerHTML='Campaigns › <strong>Own Campaigns</strong>';
+}
+
+function agTab(t){
+  ['scores','auth','posts'].forEach(x=>{
+    document.getElementById('ag-tab-'+x).classList.toggle('active',x===t);
+    document.getElementById('ag-'+x).style.display=x===t?'block':'none';
+  });
+}
+
+function runAnalysis(){
+  document.getElementById('agency-upload-view').style.display='none';
+  document.getElementById('agency-results-view').style.display='block';
+  buildLeaderboard();buildAuthList();buildPostsTable();
+}
+
+// ── CHARTS ──
+let chartsInited=false;
+function initCharts(){
+  if(chartsInited)return;
+  chartsInited=true;
+
+  // Growth
+  new Chart(document.getElementById('c-growth'),{type:'line',data:{
+    labels:['W1','W2','W3','W4','W5','W6','W7','W8','W9','W10','W11','W12'],
+    datasets:[{data:[7050,7080,7100,7150,7180,7230,7270,7310,7330,7360,7385,7410],borderColor:'#E1306C',backgroundColor:'rgba(225,48,108,.08)',fill:true,tension:.4,pointRadius:0,borderWidth:2}]
+  },options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#b0b0c8',font:{size:10}}},y:{grid:{color:'rgba(0,0,0,.05)'},ticks:{color:'#b0b0c8',font:{size:10},callback:v=>v+'K'}}}}});
+
+  // Engagement donut
+  new Chart(document.getElementById('c-eng'),{type:'doughnut',data:{
+    labels:['Likes','Comments','Saves','Shares'],
+    datasets:[{data:[82,11,5,2],backgroundColor:['#E1306C','#833AB4','#F77737','#1a7a4a'],borderWidth:0}]
+  },options:{responsive:true,maintainAspectRatio:false,cutout:'62%',plugins:{legend:{position:'bottom',labels:{color:'#72728a',font:{size:11},padding:12,boxWidth:10}}}}});
+
+  // Post type
+  new Chart(document.getElementById('c-posttype'),{type:'bar',data:{
+    labels:['Reels','Photos','Carousels','Stories'],
+    datasets:[{label:'Avg Eng %',data:[4.8,3.9,3.4,2.1],backgroundColor:['#E1306C','#833AB4','#F77737','#1a7a4a'],borderRadius:5}]
+  },options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#72728a'}},y:{grid:{color:'rgba(0,0,0,.05)'},ticks:{color:'#72728a',callback:v=>v+'%'}}}}});
+
+  // Reach
+  new Chart(document.getElementById('c-reach'),{type:'line',data:{
+    labels:['W1','W2','W3','W4','W5','W6','W7','W8'],
+    datasets:[{data:[6.2,7.1,5.8,8.4,7.9,9.2,8.1,10.4],borderColor:'#833AB4',backgroundColor:'rgba(131,58,180,.08)',fill:true,tension:.4,pointRadius:3,borderWidth:2,pointBackgroundColor:'#833AB4'}]
+  },options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#72728a'}},y:{grid:{color:'rgba(0,0,0,.05)'},ticks:{color:'#72728a',callback:v=>v+'M'}}}}});
+
+  // Age
+  new Chart(document.getElementById('c-age'),{type:'bar',data:{
+    labels:['13-17','18-24','25-34','35-44','45+'],
+    datasets:[{data:[8,28,44,14,6],backgroundColor:'rgba(225,48,108,.7)',borderRadius:5}]
+  },options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{grid:{color:'rgba(0,0,0,.05)'},ticks:{color:'#72728a',callback:v=>v+'%'}},y:{grid:{display:false},ticks:{color:'#72728a'}}}}});
+}
+
+// ── INIT ──
+buildHeatmap();
+buildAgencyList();
+buildFanList();
+
+// Default: show campaigns nav open
+document.getElementById('nav-campaigns').classList.add('active');
+document.getElementById('nav-dashboard').classList.remove('active');
+// Actually show dashboard first
+document.getElementById('nav-dashboard').classList.add('active');
+document.getElementById('nav-campaigns').classList.remove('active');
+document.getElementById('camp-sub').style.display='block'; // keep subnav visible
+initCharts();
+</script>
+</body>
+</html>
