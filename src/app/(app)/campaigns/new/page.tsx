@@ -9,7 +9,9 @@ export default function NewCampaignPage() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function onSubmit(formData: FormData) {
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
     setPending(true);
     setError(null);
     try {
@@ -37,7 +39,7 @@ export default function NewCampaignPage() {
   return (
     <div className="card" style={{ maxWidth: 480 }}>
       <div className="card-title">New Campaign</div>
-      <form action={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <label>
           Name
           <input name="name" required placeholder="e.g. #vijayam — Movie Announcement" />

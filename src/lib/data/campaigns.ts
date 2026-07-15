@@ -86,7 +86,10 @@ export async function createCampaign(input: {
     data: {
       name: input.name,
       status: input.status,
-      hashtags: input.hashtags.map((h) => h.replace(/^#/, "").trim()).filter(Boolean),
+      // Lowercased to match the tag normalization scrapeByHashtag/trackHashtag always
+      // apply — otherwise a campaign created with "#Vijayam" would never link up with
+      // posts scraped (and stored lowercase) for "vijayam".
+      hashtags: input.hashtags.map((h) => h.replace(/^#/, "").trim().toLowerCase()).filter(Boolean),
       startDate: input.startDate ? new Date(input.startDate) : null,
       endDate: input.endDate ? new Date(input.endDate) : null,
       type: input.type || null,

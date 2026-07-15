@@ -80,22 +80,12 @@ const VIEWS: View[] = [
     path: "/compare",
     text: ["Nivin Pauly", "Dulquer Salmaan", "Followers", "Story Response Rate", "—"],
   },
-  {
-    name: "05-campaigns-own",
-    path: "/campaigns",
-    text: [
-      "#vijayam — Movie Announcement",
-      "Bethleham Kudumba Unit — Launch Campaign",
-      "Kalyan Homes — Brand Partnership",
-      "Planned",
-      "28.4M",
-    ],
-  },
-  {
-    name: "06-campaigns-hashtag",
-    path: "/campaigns/hashtag",
-    text: ["Tracked Hashtags", "#BethlehemKudumbaUnit", "Trending", "48.2K posts"],
-  },
+  // 05-campaigns-own and 06-campaigns-hashtag retired in Phase 2: both screens now
+  // read from the real `campaigns`/`hashtag_snapshots` tables unconditionally
+  // (mock and live mode alike — see src/lib/data/campaigns.ts), not the static
+  // CAMPAIGNS/TRACKED_HASHTAGS seed fixtures. A fresh DB has neither, so the
+  // fixed seed strings this test asserted on no longer appear by design. Covered
+  // instead by e2e/phase2-campaigns.spec.ts against real DB-backed data.
   {
     name: "07-agency-upload",
     path: "/campaigns/agency",

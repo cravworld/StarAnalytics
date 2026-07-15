@@ -25,8 +25,8 @@ test.describe("Phase 2 — campaign CRUD and generic detail view", () => {
     await page.getByLabel("Hashtags (comma-separated)").fill("e2etestcampaign");
     await page.getByRole("button", { name: "Create Campaign" }).click();
 
-    // Redirects to /campaigns/[id] on success.
-    await expect(page).toHaveURL(/\/campaigns\/[^/]+$/);
+    // Redirects to /campaigns/[id] on success (a uuid — not "new", "hashtag", "agency").
+    await expect(page).toHaveURL(/\/campaigns\/(?!new$|hashtag$|agency$)[^/]+$/);
     await expect(page.getByText("#e2etestcampaign")).toBeVisible();
 
     // Honest pending states, not fake numbers or a blank card.
