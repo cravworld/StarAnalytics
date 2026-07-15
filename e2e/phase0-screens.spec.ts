@@ -135,25 +135,12 @@ const VIEWS: View[] = [
     },
     text: ["instagram.com/p/Cx1a…", "Showing 10 of 500 posts · sorted by score", "Velocity"],
   },
-  {
-    name: "11-vijayam-detail",
-    path: "/campaigns/vijayam",
-    text: ["#vijayam", "Live tracking", "3,847", "+1,204", "2,341", "Positive 78%", "Kerala", "Live Post Stream", "goosebumps"],
-    extra: async (page) => {
-      // The prototype highlights hashtags inside the post stream via `.stream-text em`.
-      // Assert the markup exists so the accent styling can't silently regress back to
-      // plain grey text (which is how the port originally shipped).
-      await expect(page.locator(".stream-text em").first()).toHaveText("#vijayam");
-      await expect(page.locator(".stream-text em")).not.toHaveCount(0);
-
-      // The detail view keeps the campaigns tab bar with "Own Campaigns" still lit —
-      // in the prototype .inner-tabs is a sibling of #camp-vijayam and openVijayam()
-      // never hides it. The port originally special-cased this route to drop the bar,
-      // which no text assertion could catch since the tab labels live in the layout.
-      await expect(page.locator(".inner-tabs")).toBeVisible();
-      await expect(page.locator(".itab.active")).toHaveText("Own Campaigns");
-    },
-  },
+  // 11-vijayam-detail retired in Phase 2: the fixed /campaigns/vijayam route was
+  // replaced by a generic /campaigns/[id] detail view (build plan §1 explicitly
+  // forbids hardcoding "vijayam" in component logic). The old mock-fixture route no
+  // longer exists — this isn't a regression, it's the mandated shape change. A
+  // Phase-2-specific e2e spec covers the generic detail view against real DB data
+  // instead of the static seed fixture.
   {
     name: "12-fan-pages",
     path: "/fan-pages",

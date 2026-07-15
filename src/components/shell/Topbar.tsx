@@ -10,13 +10,23 @@ const BREADCRUMBS: Record<string, string[]> = {
   "/campaigns": ["Campaigns", "Own Campaigns"],
   "/campaigns/hashtag": ["Campaigns", "Hashtag Search"],
   "/campaigns/agency": ["Campaigns", "Agency Report"],
-  "/campaigns/vijayam": ["Campaigns", "Own Campaigns", "#vijayam"],
+  "/campaigns/new": ["Campaigns", "Own Campaigns", "New Campaign"],
   "/fan-pages": ["Fan Pages"],
 };
 
+const KNOWN_CAMPAIGN_SUBROUTES = ["/campaigns/hashtag", "/campaigns/agency", "/campaigns/new"];
+
 export function Topbar() {
   const pathname = usePathname();
-  const crumbs = BREADCRUMBS[pathname] ?? [pathname];
+  // Campaign detail routes are /campaigns/[id] — id is a DB-generated uuid, not a
+  // fixed slug, so it can't live in the static BREADCRUMBS map above.
+  const isCampaignDetail =
+    pathname !== "/campaigns" &&
+    pathname.startsWith("/campaigns/") &&
+    !KNOWN_CAMPAIGN_SUBROUTES.some((r) => pathname.startsWith(r));
+  const crumbs = isCampaignDetail
+    ? ["Campaigns", "Own Campaigns", "Campaign Detail"]
+    : (BREADCRUMBS[pathname] ?? [pathname]);
 
   return (
     <div className="topbar">

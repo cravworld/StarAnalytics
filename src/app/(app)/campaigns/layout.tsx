@@ -13,17 +13,22 @@ const TABS = [
 export default function CampaignsLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
-  // The tabs persist on the #vijayam detail view. In the prototype the .inner-tabs
-  // div is a sibling of both #camp-own and #camp-vijayam, and openVijayam() toggles
-  // only those two — so the tab bar never disappears. "Own Campaigns" stays the
-  // active tab there, which /campaigns/vijayam satisfies via the startsWith below.
+  // The tabs persist on any campaign detail view (/campaigns/[id]). In the
+  // prototype the .inner-tabs div is a sibling of both #camp-own and the detail
+  // panel, and toggling between them never hides the tab bar — "Own Campaigns"
+  // stays the active tab on a detail route, which the isDetailRoute check below
+  // covers generically instead of special-casing any one campaign's slug.
+  const knownSubRoutes = ["/campaigns/hashtag", "/campaigns/agency", "/campaigns/new"];
+  const isDetailRoute =
+    pathname !== "/campaigns" &&
+    pathname.startsWith("/campaigns/") &&
+    !knownSubRoutes.some((r) => pathname.startsWith(r));
+
   return (
     <>
       <div className="inner-tabs">
         {TABS.map((t) => {
-          // Sub-routes of a tab keep that tab lit; without this, /campaigns/vijayam
-          // would render the bar with nothing active.
-          const active = t.href === "/campaigns" ? pathname === t.href || pathname.startsWith("/campaigns/vijayam") : pathname === t.href;
+          const active = t.href === "/campaigns" ? pathname === t.href || isDetailRoute : pathname === t.href;
           return (
             <Link key={t.href} href={t.href} className={`itab${active ? " active" : ""}`}>
               {t.label}
