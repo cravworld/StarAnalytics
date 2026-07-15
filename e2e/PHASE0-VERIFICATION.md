@@ -61,24 +61,37 @@ stubbed.** Two negative tests prove the guard still bites:
 - a token signed with the wrong secret is rejected (so the guard validates the
   signature, not merely the cookie's presence)
 
-### What it does NOT prove — still credentials-blocked
+### Update 2026-07-15: the real login flow is now verified manually
 
-The build plan (line 61) anticipated this exactly:
+Google OAuth credentials and `ALLOWED_EMAIL_DOMAIN="crav.world"` arrived, and the real
+"log in with an allowlisted account" flow was driven end-to-end in a real browser by the
+human (`caine@crav.world`) and by Playwright-scripted checks. Two bugs surfaced along the
+way — neither in the harness, both in app code the harness's minted-session approach
+structurally cannot reach, because it never round-trips through Google:
 
-> the full "log in with allowlisted account" browser flow can't be verified end-to-end
-> until Google OAuth credentials + Supabase are wired — call this out explicitly rather
-> than claiming it's done.
+1. **`invalid_client` from Google.** `auth.ts` passed the bare `providers: [Google]`.
+   Auth.js v5 auto-infers OAuth credentials for a bare provider from
+   `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET`, not the `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`
+   names this project's `.env.example` documents (the old NextAuth v4 convention). Every
+   request to Google went out with `client_id=undefined`. Fixed by passing the provider
+   config explicitly.
+2. **Successful login silently bounced back to `/login`.** `signIn("google")` was called
+   with no `redirectTo`. Auth.js v5 falls back to the `Referer` header as the post-login
+   destination when `redirectTo` is omitted — which was `/login` itself, since that's the
+   page the form was submitted from. The OAuth handshake fully succeeded (confirmed via
+   debug logging: real profile, real tokens, allowlist check passing, no errors thrown)
+   but the user landed right back on the login screen, indistinguishable from a failure.
+   Fixed by passing `redirectTo: "/"`.
 
-Both remain open:
+Both fixed and confirmed working end-to-end by the human after each fix. The fail-closed
+allowlist (`ALLOWED_EMAIL_DOMAIN`) is now also exercised: `caine@crav.world` matches and
+was let through by the real `signIn` callback, not the harness's minted token.
 
-1. **The real Google OAuth login flow is unexercised.** `GOOGLE_CLIENT_ID` is empty; the
-   harness mints a token directly rather than round-tripping through Google.
-2. **The fail-closed allowlist is unexercised.** The app enforces it in NextAuth's
-   `signIn` callback — i.e. at login time only, not per-request. A minted session never
-   passes through it, so `ALLOWED_EMAIL_DOMAIN` / `ALLOWED_EMAILS` have **zero** browser
-   coverage. This is the confidentiality gate; it needs a real login to verify.
-
-Neither can close until real Google OAuth credentials and a Supabase `DATABASE_URL` exist.
+**What's still open:** Supabase (`DATABASE_URL`) is still a placeholder pointing at
+`localhost:5432`, so `prisma.user.upsert()` in the `jwt` callback fails on every login —
+harmlessly, since it's wrapped in try/catch and falls back to `role: "team"`, but
+`users.role` is never actually persisted yet. That's a distinct, already-flagged gap (see
+build plan line 20/61) and doesn't block login itself.
 
 ---
 
@@ -153,8 +166,9 @@ a `/campaigns/*` route") is a choice worth making deliberately rather than infer
 | 9 screens render seeded mock data in a real browser | ✅ verified (26/26 green) |
 | Screens visually match the prototype | ✅ all 12 captures reviewed by eye; 4 gaps found + fixed |
 | Auth guard accepts a valid session / rejects invalid | ✅ verified |
-| Real Google OAuth login flow | ⛔ credentials-blocked |
-| Allowlist (`signIn` callback) enforcement | ⛔ credentials-blocked |
+| Real Google OAuth login flow | ✅ verified manually 2026-07-15 (2 bugs found + fixed) |
+| Allowlist (`signIn` callback) enforcement | ✅ verified — `caine@crav.world` let through |
+| `users.role` persisted to Supabase on login | ⛔ still blocked — `DATABASE_URL` is a placeholder |
 | Campaigns sub-nav collapse behavior | ❓ open — needs a design call |
 | **Phase 0 DoD** | **awaiting human sign-off** |
 
