@@ -41,7 +41,7 @@ enum PostSource {
 model Post {
   id            String     @id @default(uuid())
   source        PostSource
-  igShortcode   String?    @map("ig_shortcode")
+  igShortcode   String?    @unique @map("ig_shortcode")
   externalUrl   String?    @map("external_url")
   authorHandle  String?    @map("author_handle")
   mediaType     String?    @map("media_type")

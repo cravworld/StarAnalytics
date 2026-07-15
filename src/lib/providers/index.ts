@@ -1,3 +1,4 @@
+import { ApifyPublicContentProvider } from "./apify-public-content";
 import { MockInstagramInsightsProvider } from "./mock-instagram-insights";
 import { MockNotifierProvider } from "./mock-notifier";
 import { MockPublicContentProvider } from "./mock-public-content";
@@ -22,7 +23,7 @@ export function getInstagramInsightsProvider() {
 export function getPublicContentProvider() {
   const mode = modeFor("DATA_MODE_APIFY");
   if (mode === "live") {
-    throw new Error("Live PublicContentProvider not implemented until Phase 1.");
+    return new ApifyPublicContentProvider();
   }
   return new MockPublicContentProvider();
 }
