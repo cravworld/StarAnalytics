@@ -4,7 +4,10 @@ import { isEmailAllowed } from "@/lib/auth-allowlist";
 import { prisma } from "@/lib/prisma";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  providers: [Google],
+  // Passed explicitly rather than bare `Google`: Auth.js v5's auto-inference reads
+  // AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET for a bare provider, not the GOOGLE_CLIENT_ID /
+  // GOOGLE_CLIENT_SECRET names this project's .env.example already documents.
+  providers: [Google({ clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET })],
   session: { strategy: "jwt" },
   callbacks: {
     async signIn({ user }) {
