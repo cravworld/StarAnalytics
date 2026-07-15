@@ -157,3 +157,8 @@ a `/campaigns/*` route") is a choice worth making deliberately rather than infer
 | Allowlist (`signIn` callback) enforcement | ⛔ credentials-blocked |
 | Campaigns sub-nav collapse behavior | ❓ open — needs a design call |
 | **Phase 0 DoD** | **awaiting human sign-off** |
+
+**This table is not exhaustive of Phase 0.** It covers the browser-verification DoD (plan
+line 14) only. Notably, plan line 64 separately requires empty/loading/error states as real
+code paths — those states don't exist in the prototype, so this harness can't compare them
+and doesn't claim to. They're a code-level review item, tracked separately.
