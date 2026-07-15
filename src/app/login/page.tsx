@@ -18,7 +18,11 @@ export default function LoginPage() {
         <form
           action={async () => {
             "use server";
-            await signIn("google");
+            // Without redirectTo, Auth.js v5 falls back to the Referer header as the
+            // post-login destination -- which is this same /login page, since that's
+            // where the form was submitted from. Login then silently "succeeds" by
+            // bouncing straight back here, indistinguishable from a failure.
+            await signIn("google", { redirectTo: "/" });
           }}
         >
           <button className="btn btn-primary" style={{ width: "100%" }} type="submit">
