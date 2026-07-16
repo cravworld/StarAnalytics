@@ -8,11 +8,14 @@ import { trackHashtag } from "@/lib/data/campaigns";
 
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    }
+  if (!secret) {
+    // Fail closed: an unset secret must never mean "no auth required" — this
+    // endpoint triggers metered Apify scrapes and its path is predictable.
+    return NextResponse.json({ error: "CRON_SECRET is not configured" }, { status: 500 });
+  }
+  const auth = request.headers.get("authorization");
+  if (auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const tracked = await prisma.hashtagSnapshot.groupBy({ by: ["hashtag"] });
