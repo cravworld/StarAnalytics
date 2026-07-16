@@ -61,7 +61,7 @@ const CAMPAIGN_SUBS = [
   { href: "/campaigns/agency", label: "Agency Report", badge: "New" },
 ];
 
-export function Sidebar() {
+export function Sidebar({ fanPageCount }: { fanPageCount: number }) {
   const pathname = usePathname();
   const inCampaigns = pathname.startsWith("/campaigns");
 
@@ -106,7 +106,7 @@ export function Sidebar() {
       <div className="nav-sec">Community</div>
       <Link href="/fan-pages" className={`nav-item${pathname === "/fan-pages" ? " active" : ""}`}>
         {NAV_ICONS.fanpages}
-        Fan Pages <span className="nav-badge">24</span>
+        Fan Pages {fanPageCount > 0 ? <span className="nav-badge">{fanPageCount}</span> : null}
       </Link>
 
       <div className="sidebar-footer">
