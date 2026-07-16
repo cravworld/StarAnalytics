@@ -1,5 +1,10 @@
 import { getCompareData } from "@/lib/data/compare";
 
+// getCompareData() runs a real, slow (10-20s+) Apify scrape when
+// DATA_MODE_APIFY=live — force-dynamic keeps that off the build's static
+// generation pass (where it timed out) and defers it to request time.
+export const dynamic = "force-dynamic";
+
 export default async function ComparePage() {
   const { self, other, metrics } = await getCompareData();
 
