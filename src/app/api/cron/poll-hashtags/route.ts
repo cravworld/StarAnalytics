@@ -1,7 +1,13 @@
-// 15-minute polling cron (see vercel.json) — re-scrapes every currently-tracked
-// hashtag and appends a fresh hashtag_snapshots row. Per the build plan: polling,
-// not WebSocket/real-time push, for hashtag volume. The live post *stream* on a
-// campaign detail page is separate — that's Supabase Realtime on `posts` inserts.
+// Polling cron (see vercel.json) — re-scrapes every currently-tracked hashtag and
+// appends a fresh hashtag_snapshots row. Per the build plan: polling, not WebSocket/
+// real-time push, for hashtag volume. The live post *stream* on a campaign detail
+// page is separate — that's Supabase Realtime on `posts` inserts.
+//
+// Designed for a 15-min cadence, but currently scheduled once/day in vercel.json:
+// Vercel's Hobby plan caps crons at once/day, and every production deploy since this
+// cron was added had been silently failing (deploy_failed) as a result — production
+// was stuck 9 commits behind main until this was found and fixed. Move back to */15
+// once the project is on a Pro plan (or the cron is moved to an external scheduler).
 import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { trackHashtag } from "@/lib/data/campaigns";
