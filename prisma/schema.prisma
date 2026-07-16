@@ -68,8 +68,23 @@ model Post {
 
   sentiment          Sentiment?
   agencyPostScores   AgencyPostScore[]
+  postComments       PostComment[]
 
   @@map("posts")
+}
+
+model PostComment {
+  id           String    @id @default(uuid())
+  postId       String    @map("post_id")
+  post         Post      @relation(fields: [postId], references: [id])
+  igCommentId  String?   @map("ig_comment_id")
+  authorHandle String?   @map("author_handle")
+  text         String
+  postedAt     DateTime? @map("posted_at")
+  scrapedAt    DateTime  @default(now()) @map("scraped_at")
+  raw          Json?
+
+  @@map("post_comments")
 }
 
 enum ScrapeRunStatus {

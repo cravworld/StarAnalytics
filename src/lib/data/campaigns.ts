@@ -146,6 +146,17 @@ function toStreamItem(
   };
 }
 
+// null when zero posts are classified yet — render the full "Pending" placeholder in that
+// case. Otherwise these percentages are computed over classifiedCount posts, not totalCount —
+// classifiedCount/totalCount are shown alongside so a partial campaign never looks complete.
+export interface CampaignSentiment {
+  classifiedCount: number;
+  totalCount: number;
+  positivePct: number;
+  neutralPct: number;
+  negativePct: number;
+}
+
 export interface CampaignDetail {
   id: string;
   tag: string;
@@ -154,9 +165,9 @@ export interface CampaignDetail {
   kpis: { label: string; value: string; delta?: string; pending?: boolean }[];
   hourlyVolume: number[];
   peakLabel: string;
-  sentimentPending: true;
+  sentiment: CampaignSentiment | null;
   geoSpreadPending: { reason: string };
-  keywordsPending: true;
+  keywordPills: string[];
   stream: StreamItem[];
 }
 
@@ -211,6 +222,36 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     .slice(0, 30)
     .map((p, i) => toStreamItem(p, fanPageHandles.has((p.authorHandle ?? "").replace(/^@/, "").toLowerCase()), i));
 
+  // Real sentiment/keyword data (Phase 4) — computed over whichever posts have a `sentiment`
+  // row today. Never averaged against totalCount, so a partly-classified campaign shows an
+  // honest "N of M classified" subset instead of a full-looking-but-partial aggregate.
+  const sentiments = posts.length
+    ? await prisma.sentiment.findMany({ where: { postId: { in: posts.map((p) => p.id) } } })
+    : [];
+  const classifiedCount = sentiments.length;
+  const sentiment: CampaignSentiment | null = classifiedCount
+    ? {
+        classifiedCount,
+        totalCount: posts.length,
+        positivePct: Math.round((sentiments.filter((s) => s.label === "pos").length / classifiedCount) * 100),
+        neutralPct: Math.round((sentiments.filter((s) => s.label === "neu").length / classifiedCount) * 100),
+        negativePct: Math.round((sentiments.filter((s) => s.label === "neg").length / classifiedCount) * 100),
+      }
+    : null;
+
+  const keywordFreq = new Map<string, number>();
+  for (const s of sentiments) {
+    for (const kw of s.keywords) {
+      const key = kw.trim().toLowerCase();
+      if (!key) continue;
+      keywordFreq.set(key, (keywordFreq.get(key) ?? 0) + 1);
+    }
+  }
+  const keywordPills = Array.from(keywordFreq.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([term]) => term);
+
   return {
     id: campaign.id,
     tag: campaign.hashtags.map((h) => `#${h}`).join(" "),
@@ -231,15 +272,17 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
         delta: posts.length ? `${Math.round((reelCount / posts.length) * 100)}% of posts` : undefined,
       },
       { label: "Stories With Tag", value: "—", pending: true },
-      { label: "Sentiment", value: "—", pending: true },
+      sentiment
+        ? { label: "Sentiment", value: `${sentiment.positivePct}% pos`, delta: `${classifiedCount}/${posts.length} classified` }
+        : { label: "Sentiment", value: "—", pending: true },
     ],
     hourlyVolume,
     peakLabel,
-    sentimentPending: true,
+    sentiment,
     geoSpreadPending: {
       reason: "No location signal in current scrape scope — public post scrapes don't carry geo data.",
     },
-    keywordsPending: true,
+    keywordPills,
     stream,
   };
 }
@@ -307,15 +350,18 @@ export async function getTrackedHashtags() {
   }));
 }
 
-export async function trackHashtag(tagInput: string) {
+// Returns the db ids of every post currently tagged with this hashtag, so callers can queue
+// them for sentiment classification (see trackHashtagAction and poll-hashtags) without a
+// second, parallel post-lookup mechanism.
+export async function trackHashtag(tagInput: string): Promise<string[]> {
   const { getPublicContentProvider } = await import("@/lib/providers");
   const tag = tagInput.replace(/^#/, "").trim().toLowerCase();
   if (!tag) throw new Error("hashtag is required");
 
   await getPublicContentProvider().scrapeByHashtag(tag);
 
-  const matched = await prisma.$queryRaw<{ likes: number | null; comments: number | null }[]>`
-    SELECT likes, comments FROM posts WHERE raw -> 'hashtags' @> to_jsonb(ARRAY[${tag}]::text[])
+  const matched = await prisma.$queryRaw<{ id: string; likes: number | null; comments: number | null }[]>`
+    SELECT id, likes, comments FROM posts WHERE raw -> 'hashtags' @> to_jsonb(ARRAY[${tag}]::text[])
   `;
   const postCount = matched.length;
   const avgEngRate = postCount
@@ -325,4 +371,6 @@ export async function trackHashtag(tagInput: string) {
   await prisma.hashtagSnapshot.create({
     data: { hashtag: tag, postCount, avgEngRate },
   });
+
+  return matched.map((m) => m.id);
 }

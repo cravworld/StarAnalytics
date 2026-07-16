@@ -5,6 +5,7 @@ import { KpiGrid, Kpi } from "@/components/ui/Kpi";
 import { Card } from "@/components/ui/Card";
 import { Pill, LiveDot } from "@/components/ui/Pill";
 import { LiveStream } from "@/components/campaigns/LiveStream";
+import { SentimentBar } from "@/components/campaigns/SentimentBar";
 
 export default async function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -75,9 +76,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
           </div>
           <div style={{ marginTop: 14 }}>
             <div className="card-title">Sentiment</div>
-            <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0" }}>
-              Sentiment analysis pending — lands in Phase 4 (LLM classification pass).
-            </div>
+            <SentimentBar sentiment={v.sentiment} />
           </div>
         </Card>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -87,9 +86,19 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
             </div>
           </Card>
           <Card title="Top Keywords">
-            <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0" }}>
-              Keyword extraction pending — lands in Phase 4 (LLM classification pass).
-            </div>
+            {v.keywordPills.length > 0 ? (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "8px 0" }}>
+                {v.keywordPills.map((kw) => (
+                  <Pill key={kw}>{kw}</Pill>
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0" }}>
+                {v.sentiment
+                  ? "No keywords extracted yet for classified posts."
+                  : "Keyword extraction pending — no posts classified yet."}
+              </div>
+            )}
           </Card>
         </div>
       </div>

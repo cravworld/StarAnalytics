@@ -1,6 +1,7 @@
 import { getDatasetItems, runActor, waitForRun } from "@/lib/apify/client";
 import { prisma } from "@/lib/prisma";
 import {
+  normalizeCommentItem,
   normalizeHashtagItem,
   normalizePostUrlItem,
   normalizeProfileItem,
@@ -119,6 +120,49 @@ async function trackedRun<T>(kind: string, actorId: string, input: Record<string
       data: { status: "error", finishedAt: new Date(), error: err instanceof Error ? err.message : String(err) },
     });
     throw err;
+  }
+}
+
+// Comments matching the DPR's suggested cap — a viral post's comment section can run into
+// the thousands, and this is a per-post limit passed straight to the actor's own
+// resultsLimit input, not a client-side truncation after the fact.
+const COMMENTS_PER_POST_LIMIT = 20;
+
+// Only ever called from the sentiment pipeline (src/lib/data/sentiment.ts) for posts about
+// to be classified — never wired to the hashtag cron or agency batch scrape directly (see
+// AGENTS.md Phase 4 §A4). Comments aren't re-scraped once captured, so this is insert-only;
+// callers are responsible for only passing posts that don't already have post_comments rows.
+export async function scrapeCommentsForPosts(posts: { id: string; externalUrl: string }[]): Promise<void> {
+  const targets = posts.filter((p) => p.externalUrl);
+  if (targets.length === 0) return;
+
+  // One actor run per batch: apify/instagram-comment-scraper's `directUrls` input accepts
+  // multiple post/reel URLs at once (confirmed against a live 2-URL sample run, 2026-07-16),
+  // so this is 1 Apify run for the whole batch, not N sequential runs.
+  const urlToPostId = new Map(targets.map((p) => [p.externalUrl, p.id]));
+  const items = await trackedRun<Record<string, unknown>>("comment_scrape", actorEnv("APIFY_ACTOR_COMMENTS"), {
+    directUrls: targets.map((p) => p.externalUrl),
+    resultsLimit: COMMENTS_PER_POST_LIMIT,
+    includeNestedComments: false,
+  });
+
+  for (const item of items) {
+    // `postUrl` echoes the input directUrls entry verbatim — this is how a single batched
+    // run's mixed-order results get attributed back to the right post (see apify-normalize.ts).
+    const postUrl = typeof item.postUrl === "string" ? item.postUrl : null;
+    const postId = postUrl ? urlToPostId.get(postUrl) : undefined;
+    if (!postId) continue;
+    const comment = normalizeCommentItem(item, postId);
+    await prisma.postComment.create({
+      data: {
+        postId: comment.postId,
+        igCommentId: comment.igCommentId,
+        authorHandle: comment.authorHandle,
+        text: comment.text,
+        postedAt: comment.postedAt ? new Date(comment.postedAt) : null,
+        raw: comment.raw as object,
+      },
+    });
   }
 }
 

@@ -1,5 +1,6 @@
 import type { Agency } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { queueSentimentClassification } from "@/lib/data/sentiment";
 import { getPublicContentProvider, type RawPost } from "@/lib/providers";
 import { computeCohortStats } from "@/lib/scoring/cohort";
 import { getActiveThresholdConfig } from "@/lib/scoring/config";
@@ -122,6 +123,13 @@ export async function runAgencyBatchJob(runId: string, rows: AgencyUrlRow[]): Pr
     const scoredPosts = await prisma.post.findMany({
       where: { igShortcode: { in: Array.from(shortcodeToAgencyId.keys()) } },
     });
+
+    // Queue comment-scrape + sentiment classification for every post this batch touched —
+    // already running inside this job's own after() callback (see analyseAgencyPostsAction),
+    // so a plain inline call is simplest rather than nesting another after(). Uses the
+    // fire-and-forget wrapper so a sentiment failure can't fail the agency run itself —
+    // scoring is the job this run is tracked for.
+    await queueSentimentClassification(scoredPosts.map((p) => p.id));
 
     const forScoring: PostForScoring[] = scoredPosts.map((p) => ({
       id: p.id,

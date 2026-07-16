@@ -1,4 +1,5 @@
 import { ApifyPublicContentProvider } from "./apify-public-content";
+import { ClaudeSentimentProvider, sentimentModelId } from "./claude-sentiment";
 import { MockInstagramInsightsProvider } from "./mock-instagram-insights";
 import { MockNotifierProvider } from "./mock-notifier";
 import { MockPublicContentProvider } from "./mock-public-content";
@@ -31,9 +32,15 @@ export function getPublicContentProvider() {
 export function getSentimentProvider() {
   const mode = modeFor("DATA_MODE_SENTIMENT");
   if (mode === "live") {
-    throw new Error("Live SentimentProvider not implemented until Phase 4.");
+    return new ClaudeSentimentProvider();
   }
   return new MockSentimentProvider();
+}
+
+// The exact model string sentiment rows should be stamped with — mirrors getSentimentProvider's
+// own mode switch so the two never disagree about which provider actually ran.
+export function getSentimentModelId(): string {
+  return modeFor("DATA_MODE_SENTIMENT") === "live" ? sentimentModelId() : "mock-sentiment";
 }
 
 export function getNotifierProvider() {

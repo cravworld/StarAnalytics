@@ -74,6 +74,33 @@ export function normalizePostUrlItem(item: ActorItem, source: RawPost["source"] 
   return toRawPost(item, source);
 }
 
+// apify/instagram-comment-scraper — field names confirmed against a live 2-URL sample run
+// (2026-07-16, resultsLimit 2, includeNestedComments false). The actor's own README sample
+// JSON omits the per-comment post-correlation field entirely (a real gap, not an oversight
+// on our part) — the real dataset item carries `postUrl` (echoes the input directUrls entry
+// verbatim), which is what lets one batched run's mixed-order results be attributed back to
+// the right post. `owner` duplicates `ownerUsername`/`ownerProfilePicUrl` as a nested object;
+// the top-level fields are used here, `owner` is preserved only via `raw`.
+export interface NormalizedComment {
+  postId: string;
+  igCommentId: string | null;
+  authorHandle: string | null;
+  text: string;
+  postedAt: string | null;
+  raw: Record<string, unknown>;
+}
+
+export function normalizeCommentItem(item: ActorItem, postId: string): NormalizedComment {
+  return {
+    postId,
+    igCommentId: str(item, "id"),
+    authorHandle: str(item, "ownerUsername"),
+    text: str(item, "text") ?? "",
+    postedAt: str(item, "timestamp"),
+    raw: item,
+  };
+}
+
 export interface ProfileSnapshotFields {
   followers: number;
   displayName: string;

@@ -1,0 +1,126 @@
+// Direct Claude API call — plain fetch to /v1/messages, deliberately not routed through any
+// SDK or the multi-model orchestration infra used elsewhere in the project (see AGENTS.md
+// Phase 4 §B0). Kept simple and isolated to this one feature.
+import type { SentimentProvider, SentimentResult } from "./types";
+
+const API_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_VERSION = "2023-06-01";
+
+// Model string is env-configurable (not hardcoded) precisely because model names/versions
+// change — confirm the current one against Anthropic API docs at build time rather than
+// trusting this default forever. claude-sonnet-5 is current as of writing and cost-appropriate
+// for a batched classification+extraction call (not a hard reasoning task).
+const DEFAULT_MODEL = "claude-sonnet-5";
+
+function apiKey(): string {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error("ANTHROPIC_API_KEY is not set — required for the live SentimentProvider");
+  return key;
+}
+
+function model(): string {
+  return process.env.ANTHROPIC_SENTIMENT_MODEL || DEFAULT_MODEL;
+}
+
+// Exposed so the orchestration layer (src/lib/data/sentiment.ts) can stamp `sentiment.model`
+// with the exact string used — same "know which posts were scored under which approach"
+// principle as thresholdConfigVersion in Phase 3 — without duplicating the env lookup.
+export function sentimentModelId(): string {
+  return model();
+}
+
+const SYSTEM_PROMPT = `You are classifying sentiment and extracting keywords from Instagram captions and comments about Malayalam film/celebrity campaigns.
+
+The text is a mix of romanized Malayalam ("adipoli", "pwoli", "mass"), Malayalam script, English, and emojis — often all three within the same caption or across a caption and its comments. Read fan-culture and slang terms ("mass", "adipoli", "goosebumps", "blockbuster", "fire") as intensity/positivity signals, not literally.
+
+For each input item, return:
+- "label": one of "pos", "neu", "neg"
+- "score": a 0-1 number for confidence/intensity of that label (not just positive/negative — how strongly positive, neutral, or negative)
+- "keywords": a short list (3-6) of extracted terms/phrases that best capture the reaction — short fan-culture phrases are fine ("can't wait", "goosebumps"), not full sentences
+
+Respond with JSON only — a single JSON array, no markdown code fences, no preamble or explanation. The array must have exactly one object per input item, in this shape, with "id" copied exactly from the input:
+[{"id": "...", "label": "pos", "score": 0.8, "keywords": ["...", "..."]}]`;
+
+function stripJsonFences(text: string): string {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+  return fenced ? fenced[1] : trimmed;
+}
+
+function parseResponse(text: string, expectedIds: string[]): SentimentResult[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripJsonFences(text));
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+
+  const byId = new Map<string, SentimentResult>();
+  for (const entry of parsed) {
+    if (
+      entry &&
+      typeof entry === "object" &&
+      typeof (entry as Record<string, unknown>).id === "string" &&
+      ["pos", "neu", "neg"].includes((entry as Record<string, unknown>).label as string) &&
+      typeof (entry as Record<string, unknown>).score === "number" &&
+      Array.isArray((entry as Record<string, unknown>).keywords)
+    ) {
+      const e = entry as { id: string; label: "pos" | "neu" | "neg"; score: number; keywords: unknown[] };
+      byId.set(e.id, { id: e.id, label: e.label, score: e.score, keywords: e.keywords.map(String) });
+    }
+  }
+
+  if (!expectedIds.every((id) => byId.has(id))) return null;
+  return expectedIds.map((id) => byId.get(id)!);
+}
+
+async function callClaude(batch: { id: string; text: string }[]): Promise<string> {
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey(),
+      "anthropic-version": ANTHROPIC_VERSION,
+    },
+    body: JSON.stringify({
+      model: model(),
+      max_tokens: 4096,
+      thinking: { type: "disabled" },
+      output_config: { effort: "low" },
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: JSON.stringify(batch) }],
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Claude sentiment call failed: ${res.status} ${await res.text()}`);
+  }
+  const json = await res.json();
+  const textBlock = (json.content as { type: string; text?: string }[]).find((b) => b.type === "text");
+  return textBlock?.text ?? "";
+}
+
+// If parsing fails or the returned array doesn't cover every input id, retry the batch split
+// in half rather than failing the whole job silently — see AGENTS.md Phase 4 §B1.
+async function classifyBatch(batch: { id: string; text: string }[]): Promise<SentimentResult[]> {
+  const responseText = await callClaude(batch);
+  const parsed = parseResponse(responseText, batch.map((b) => b.id));
+  if (parsed) return parsed;
+
+  if (batch.length <= 1) {
+    throw new Error(`Claude sentiment: failed to parse a valid response for post ${batch[0]?.id}`);
+  }
+  const mid = Math.ceil(batch.length / 2);
+  const [left, right] = await Promise.all([
+    classifyBatch(batch.slice(0, mid)),
+    classifyBatch(batch.slice(mid)),
+  ]);
+  return [...left, ...right];
+}
+
+export class ClaudeSentimentProvider implements SentimentProvider {
+  async classify(posts: { id: string; text: string }[]): Promise<SentimentResult[]> {
+    if (posts.length === 0) return [];
+    return classifyBatch(posts);
+  }
+}
