@@ -162,7 +162,11 @@ model AgencyPostScore {
   post                   Post     @relation(fields: [postId], references: [id])
   perfScore              Float    @map("perf_score")
   authScore              Float    @map("auth_score")
-  effScore               Float    @map("eff_score")
+  // Nullable: efficiency has no independent signal this phase (no reach/
+  // follower/spend data) — see EFFICIENCY_NOT_EVALUATED_REASON in
+  // src/lib/scoring/types.ts. Null, never a placeholder number that would
+  // look like a real measurement, and excluded from totalScore accordingly.
+  effScore               Float?   @map("eff_score")
   totalScore             Float    @map("total_score")
   flags                  Json
   thresholdConfigVersion Int      @map("threshold_config_version")

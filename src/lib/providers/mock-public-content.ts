@@ -3,22 +3,43 @@ import { AGENCIES, POSTS, TRACKED_HASHTAGS, VIJAYAM_DETAIL } from "./seed";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function toRawPost(p: (typeof POSTS)[number], i: number): RawPost {
+// "18.4K" / "920" -> 18400 / 920. Lets the mock reuse POSTS' real clean-vs-
+// flagged like:comment spread (seed.ts: clean agencies ~20:1, flagged ones
+// 250-325:1) instead of returning all-zero engagement regardless of input —
+// which used to make dev-mode "sane relative rankings" checks meaningless
+// without live Apify credentials.
+function parseCompactNumber(s: string): number {
+  const cleaned = s.replace(/,/g, "");
+  if (cleaned.endsWith("K")) return Math.round(parseFloat(cleaned) * 1_000);
+  if (cleaned.endsWith("M")) return Math.round(parseFloat(cleaned) * 1_000_000);
+  return Math.round(parseFloat(cleaned)) || 0;
+}
+
+const ENGAGEMENT_PATTERNS = POSTS.map((p) => ({
+  likes: parseCompactNumber(p.likes),
+  comments: parseCompactNumber(p.comments),
+}));
+
+const SHORTCODE_RE = /instagram\.com\/(?:p|reel|reels)\/([A-Za-z0-9_-]+)/i;
+
+function toRawPost(url: string, i: number): RawPost {
+  const pattern = ENGAGEMENT_PATTERNS[i % ENGAGEMENT_PATTERNS.length];
+  const shortcode = url.match(SHORTCODE_RE)?.[1] ?? `mock-${i}`;
   return {
     id: `agency-post-${i}`,
     source: "agency",
-    igShortcode: p.url,
-    externalUrl: `https://${p.url}`,
-    authorHandle: p.ag,
+    igShortcode: shortcode,
+    externalUrl: url,
+    authorHandle: "",
     mediaType: "photo",
     caption: "",
     postedAt: new Date().toISOString(),
     reach: null,
-    likes: 0,
-    comments: 0,
+    likes: pattern.likes,
+    comments: pattern.comments,
     saves: null,
     shares: null,
-    raw: { ...p },
+    raw: { mockPattern: pattern },
   };
 }
 
@@ -62,8 +83,7 @@ export class MockPublicContentProvider implements PublicContentProvider {
 
   async scrapeByUrls(urls: string[]): Promise<RawPost[]> {
     await delay(150);
-    void urls;
-    return POSTS.map(toRawPost);
+    return urls.map((url, i) => toRawPost(url, i));
   }
 }
 

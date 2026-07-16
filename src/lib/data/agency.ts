@@ -1,30 +1,298 @@
-import { getPublicContentProvider } from "@/lib/providers";
-import { AGENCIES, AUTH_FLAGS, POSITIVE_SIGNALS, POSTS } from "@/lib/providers/seed";
+import type { Agency } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import { getPublicContentProvider, type RawPost } from "@/lib/providers";
+import { computeCohortStats } from "@/lib/scoring/cohort";
+import { getActiveThresholdConfig } from "@/lib/scoring/config";
+import { scorePost } from "@/lib/scoring/scorePost";
+import { FLAG_REGISTRY, type Flag, type PostForScoring } from "@/lib/scoring/types";
+import type { AgencyUrlRow } from "@/lib/upload/parseAgencySheet";
 
-export async function getAgencyUploadData() {
-  return { agencies: AGENCIES };
+const AGENCY_COLOR_PALETTE = [
+  "#E1306C",
+  "#833AB4",
+  "#F77737",
+  "#1a7a4a",
+  "#558b2f",
+  "#00838f",
+  "#ad1457",
+  "#1565c0",
+  "#6a1b9a",
+  "#4527a0",
+];
+
+// Apify's Instagram Post Scraper documents no hard cap on the `username`
+// array (confirmed against its input-schema page), but a few hundred URLs per
+// run is the sane operational ceiling AGENTS.md asks for — keeps each Apify
+// run (and the waitForRun poll it's wrapped in) within a reasonable time box.
+const AGENCY_SCRAPE_BATCH_SIZE = 200;
+
+export async function resolveOrCreateAgency(name: string): Promise<Agency> {
+  const trimmed = name.trim();
+  const existing = await prisma.agency.findFirst({ where: { name: { equals: trimmed, mode: "insensitive" } } });
+  if (existing) return existing;
+  const count = await prisma.agency.count();
+  return prisma.agency.create({
+    data: { name: trimmed, colourHex: AGENCY_COLOR_PALETTE[count % AGENCY_COLOR_PALETTE.length] },
+  });
 }
 
-export async function runAgencyAnalysis() {
-  // In Phase 3 this enqueues a real Apify batch run over the uploaded URLs and
-  // scores each post with the deterministic scorePost() function. For Phase 0
-  // the "Analyse All Posts" action reads the same seeded scores.
-  await getPublicContentProvider().scrapeByUrls(POSTS.map((p) => p.url));
+function extractShortcode(url: string): string | null {
+  const match = url.match(/instagram\.com\/(?:p|reel|reels)\/([A-Za-z0-9_-]+)/i);
+  return match ? match[1] : null;
+}
+
+function chunk<T>(xs: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += size) out.push(xs.slice(i, i + size));
+  return out;
+}
+
+// Upserts by ig_shortcode, same as storePosts in apify-public-content.ts, with
+// agencyId resolved and set directly at insert time. Written here rather than
+// relying on the provider's own internal persistence: the live provider does
+// persist as a side effect of scrapeByUrls, but MockPublicContentProvider
+// deliberately never touches Prisma (Phase 0's mock-without-a-DB contract),
+// so relying on that side effect would leave agency scoring unrunnable in
+// mock mode. Upserting again here is idempotent and harmless when the live
+// provider already wrote the same row.
+async function storeAgencyPosts(posts: RawPost[], shortcodeToAgencyId: Map<string, string>): Promise<void> {
+  for (const p of posts) {
+    if (!p.igShortcode) continue;
+    const agencyId = shortcodeToAgencyId.get(p.igShortcode) ?? null;
+    const data = {
+      externalUrl: p.externalUrl,
+      authorHandle: p.authorHandle,
+      mediaType: p.mediaType,
+      caption: p.caption,
+      postedAt: new Date(p.postedAt),
+      reach: p.reach,
+      likes: p.likes,
+      comments: p.comments,
+      saves: p.saves,
+      shares: p.shares,
+      raw: p.raw as object,
+      agencyId,
+    };
+    await prisma.post.upsert({
+      where: { igShortcode: p.igShortcode },
+      create: { source: "agency", igShortcode: p.igShortcode, ...data },
+      update: { ...data, scrapedAt: new Date() },
+    });
+  }
+}
+
+export async function getAgencyUploadData() {
+  const agencies = await prisma.agency.findMany({ orderBy: { name: "asc" } });
+  return { agencies };
+}
+
+// Runs after analyseAgencyPostsAction's response is sent (via next/server's
+// after()) — this is the part that can't fit inside a normal request/response
+// cycle for a few hundred URLs. Every exit path (success or failure) updates
+// the scrape_runs row, so /api/agency-run/[id]/status always has something
+// truthful to report rather than a run stuck at "running" forever.
+export async function runAgencyBatchJob(runId: string, rows: AgencyUrlRow[]): Promise<void> {
+  await prisma.scrapeRun.update({ where: { id: runId }, data: { status: "running", startedAt: new Date() } });
+
+  try {
+    // Resolve/create every distinct agency up front, and map each row's URL
+    // shortcode to its agency so storeAgencyPosts can set agencyId directly
+    // at insert time — same upsert-by-shortcode pipe Phase 1/2 already built
+    // (storePosts in apify-public-content.ts), no second ingestion path.
+    const agencyByName = new Map<string, Agency>();
+    const shortcodeToAgencyId = new Map<string, string>();
+    for (const row of rows) {
+      const key = row.agencyName.trim().toLowerCase();
+      let agency = agencyByName.get(key);
+      if (!agency) {
+        agency = await resolveOrCreateAgency(row.agencyName);
+        agencyByName.set(key, agency);
+      }
+      const shortcode = extractShortcode(row.url);
+      if (shortcode) shortcodeToAgencyId.set(shortcode, agency.id);
+    }
+
+    const provider = getPublicContentProvider();
+    const urls = rows.map((r) => r.url);
+    for (const batch of chunk(urls, AGENCY_SCRAPE_BATCH_SIZE)) {
+      const posts = await provider.scrapeByUrls(batch);
+      await storeAgencyPosts(posts, shortcodeToAgencyId);
+    }
+
+    const scoredPosts = await prisma.post.findMany({
+      where: { igShortcode: { in: Array.from(shortcodeToAgencyId.keys()) } },
+    });
+
+    const forScoring: PostForScoring[] = scoredPosts.map((p) => ({
+      id: p.id,
+      likes: p.likes,
+      comments: p.comments,
+      postedAt: p.postedAt ? p.postedAt.toISOString() : null,
+    }));
+    const cohort = computeCohortStats(forScoring);
+    const { version, params } = await getActiveThresholdConfig();
+
+    const scoreRows = scoredPosts
+      .filter((p) => p.agencyId) // a post whose URL didn't yield a shortcode never got linked — skip rather than score with a null agency
+      .map((p) => {
+        const result = scorePost(
+          { id: p.id, likes: p.likes, comments: p.comments, postedAt: p.postedAt ? p.postedAt.toISOString() : null },
+          cohort,
+          params,
+        );
+        return {
+          runId,
+          agencyId: p.agencyId as string,
+          postId: p.id,
+          perfScore: result.perfScore,
+          authScore: result.authScore,
+          effScore: result.effScore,
+          totalScore: result.totalScore,
+          flags: result.flags as unknown as object,
+          thresholdConfigVersion: version,
+        };
+      });
+
+    await prisma.agencyPostScore.createMany({ data: scoreRows });
+    await prisma.scrapeRun.update({
+      where: { id: runId },
+      data: { status: "done", finishedAt: new Date(), itemCount: scoreRows.length },
+    });
+  } catch (err) {
+    await prisma.scrapeRun.update({
+      where: { id: runId },
+      data: { status: "error", finishedAt: new Date(), error: err instanceof Error ? err.message : String(err) },
+    });
+  }
+}
+
+function fmtCompact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(Math.round(n));
+}
+
+export interface AgencyResultRow {
+  id: string;
+  name: string;
+  color: string;
+  score: number;
+  perf: number;
+  auth: number;
+  // null: efficiency not evaluated this phase — see EFFICIENCY_NOT_EVALUATED_REASON.
+  eff: number | null;
+  postCount: number;
+  flaggedPostCount: number;
+  // Reach is a private Insights metric, never available for scraped
+  // third-party posts (established Phase 1) — engagement (likes+comments) is
+  // the honest substitute, same convention as src/lib/data/campaigns.ts.
+  engagementTotal: string;
+}
+
+export interface AgencyPostRow {
+  id: string;
+  url: string;
+  agencyId: string;
+  agencyName: string;
+  agencyColor: string;
+  likes: number | null;
+  comments: number | null;
+  reach: number | null;
+  saves: number | null;
+  authScore: number;
+  totalScore: number;
+  flags: Flag[];
+}
+
+export interface AgencyRunResults {
+  runId: string;
+  agencies: AgencyResultRow[];
+  posts: AgencyPostRow[];
+  flagRegistry: typeof FLAG_REGISTRY;
+  summary: {
+    postsAnalysed: number;
+    totalEngagement: string;
+    avgEngagementPerPost: string;
+    avgAuthenticity: number;
+    avgPerformance: number;
+    // null: not evaluated this phase, not averaged in — see EFFICIENCY_NOT_EVALUATED_REASON.
+    avgEfficiency: null;
+    flaggedAgencies: number;
+    topAgency: { name: string; score: number } | null;
+  };
+}
+
+function round(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+export async function getAgencyResults(runId: string): Promise<AgencyRunResults> {
+  const scores = await prisma.agencyPostScore.findMany({
+    where: { runId },
+    include: { agency: true, post: true },
+    orderBy: { totalScore: "desc" },
+  });
+
+  const byAgency = new Map<string, { agency: Agency; rows: typeof scores }>();
+  for (const s of scores) {
+    const entry = byAgency.get(s.agencyId) ?? { agency: s.agency, rows: [] };
+    entry.rows.push(s);
+    byAgency.set(s.agencyId, entry);
+  }
+
+  const agencies: AgencyResultRow[] = Array.from(byAgency.values())
+    .map(({ agency, rows }) => {
+      const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+      const flaggedPostCount = rows.filter((r) => (r.flags as unknown as Flag[]).length > 0).length;
+      const engagementTotal = rows.reduce((sum, r) => sum + (r.post.likes ?? 0) + (r.post.comments ?? 0), 0);
+      return {
+        id: agency.id,
+        name: agency.name,
+        color: agency.colourHex,
+        score: round(mean(rows.map((r) => r.totalScore))),
+        perf: round(mean(rows.map((r) => r.perfScore))),
+        auth: round(mean(rows.map((r) => r.authScore))),
+        eff: null, // not evaluated this phase for any post — see EFFICIENCY_NOT_EVALUATED_REASON
+        postCount: rows.length,
+        flaggedPostCount,
+        engagementTotal: fmtCompact(engagementTotal),
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const posts: AgencyPostRow[] = scores.map((s) => ({
+    id: s.post.id,
+    url: s.post.externalUrl ?? "",
+    agencyId: s.agencyId,
+    agencyName: s.agency.name,
+    agencyColor: s.agency.colourHex,
+    likes: s.post.likes,
+    comments: s.post.comments,
+    reach: s.post.reach,
+    saves: s.post.saves,
+    authScore: round(s.authScore),
+    totalScore: round(s.totalScore),
+    flags: s.flags as unknown as Flag[],
+  }));
+
+  const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+  const flaggedAgencies = agencies.filter((a) => a.flaggedPostCount > 0).length;
+  const totalEngagement = scores.reduce((sum, s) => sum + (s.post.likes ?? 0) + (s.post.comments ?? 0), 0);
+
   return {
-    agencies: AGENCIES,
-    posts: POSTS,
-    authFlags: AUTH_FLAGS,
-    positiveSignals: POSITIVE_SIGNALS,
+    runId,
+    agencies,
+    posts,
+    flagRegistry: FLAG_REGISTRY,
     summary: {
-      postsAnalysed: 500,
-      totalReach: "84.2M",
-      avgEngagement: "4.8%",
-      authenticityPct: 71,
-      flaggedAgencies: 3,
-      topAgency: AGENCIES[0],
-      avgAuthenticity: 71,
-      avgPerformance: 78,
-      avgEfficiency: 74,
+      postsAnalysed: scores.length,
+      totalEngagement: fmtCompact(totalEngagement),
+      avgEngagementPerPost: fmtCompact(scores.length ? totalEngagement / scores.length : 0),
+      avgAuthenticity: round(mean(agencies.map((a) => a.auth))),
+      avgPerformance: round(mean(agencies.map((a) => a.perf))),
+      avgEfficiency: null,
+      flaggedAgencies,
+      topAgency: agencies[0] ? { name: agencies[0].name, score: agencies[0].score } : null,
     },
   };
 }
