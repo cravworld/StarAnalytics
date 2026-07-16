@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { getNotifierProvider } from "@/lib/providers";
+import { getNotifierChannel, getNotifierProvider } from "@/lib/providers";
 
 // Named constants, not a DB-versioned config — matches getTrackedHashtags's convention
 // (src/lib/data/campaigns.ts) rather than the scoring engine's ThresholdConfig, which is
@@ -61,11 +61,22 @@ export async function checkFanPageVelocityAlerts(postIds: string[]): Promise<voi
       },
     });
 
-    await notifier.send({
-      id: alert.id,
-      type: alert.type,
-      message: alert.message,
-      createdAt: alert.createdAt.toISOString(),
-    });
+    // A delivery failure (provider down, bad credentials) must never look like a
+    // successful send — deliveredAt/channel only get set once send() actually resolves.
+    // The Alert row itself is never lost either way; it just stays "not yet delivered".
+    try {
+      await notifier.send({
+        id: alert.id,
+        type: alert.type,
+        message: alert.message,
+        createdAt: alert.createdAt.toISOString(),
+      });
+      await prisma.alert.update({
+        where: { id: alert.id },
+        data: { deliveredAt: new Date(), channel: getNotifierChannel() },
+      });
+    } catch (err) {
+      console.error(`[fanPageAlerts] delivery failed for alert ${alert.id}:`, err);
+    }
   }
 }

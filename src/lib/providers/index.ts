@@ -1,5 +1,6 @@
 import { ApifyPublicContentProvider } from "./apify-public-content";
 import { ClaudeSentimentProvider, sentimentModelId } from "./claude-sentiment";
+import { EmailNotifierProvider } from "./email-notifier";
 import { MockInstagramInsightsProvider } from "./mock-instagram-insights";
 import { MockNotifierProvider } from "./mock-notifier";
 import { MockPublicContentProvider } from "./mock-public-content";
@@ -43,14 +44,21 @@ export function getSentimentModelId(): string {
   return modeFor("DATA_MODE_SENTIMENT") === "live" ? sentimentModelId() : "mock-sentiment";
 }
 
+// DPR §8 Q13 (alert delivery channel) is decided: email, via Resend, once
+// RESEND_API_KEY/ALERT_EMAIL_FROM/ALERT_EMAIL_TO are set and DATA_MODE_NOTIFIER flips
+// to "live" — same "flip the mode once the credential lands" pattern as sentiment.
 export function getNotifierProvider() {
   const mode = modeFor("DATA_MODE_NOTIFIER");
   if (mode === "live") {
-    // Phase 5 deliberately keeps alert delivery in-app only (real detection, mock
-    // delivery) until a channel (email/WhatsApp/push) is chosen — see DPR §8 Q13.
-    throw new Error("Live NotifierProvider not implemented — delivery channel not yet decided (DPR §8 Q13).");
+    return new EmailNotifierProvider();
   }
   return new MockNotifierProvider();
+}
+
+// Mirrors getSentimentModelId()'s pattern — lets callers stamp Alert.channel with the
+// exact channel a send was attempted on, without duplicating the mode lookup.
+export function getNotifierChannel(): string {
+  return modeFor("DATA_MODE_NOTIFIER") === "live" ? "email" : "console";
 }
 
 export * from "./types";
