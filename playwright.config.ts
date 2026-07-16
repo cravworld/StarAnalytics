@@ -28,5 +28,15 @@ export default defineConfig({
     url: "http://localhost:3000/login",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    // Phase 0's "renders seeded mock data" suite (and Compare Pages / Agency Report,
+    // which call the provider directly on every render/click) must run against the
+    // mock provider — pinning here stops the e2e run from making real, metered Apify
+    // calls regardless of what DATA_MODE_APIFY is set to in .env.local for normal dev.
+    env: {
+      DATA_MODE_APIFY: "mock",
+      DATA_MODE_INSTAGRAM: "mock",
+      DATA_MODE_SENTIMENT: "mock",
+      DATA_MODE_NOTIFIER: "mock",
+    },
   },
 });

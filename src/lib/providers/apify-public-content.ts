@@ -17,7 +17,12 @@ function actorEnv(name: string): string {
 // Upserts by ig_shortcode: re-scraping the same post updates its metrics instead of
 // duplicating the row. Posts without a shortcode (shouldn't happen for real actor
 // output, but the schema allows null) are skipped rather than upserted on an empty key.
-async function storePosts(posts: RawPost[]): Promise<void> {
+//
+// campaignId is set on the INSERT itself (not backfilled after) because Supabase
+// Realtime's live post stream subscribes to INSERT events filtered by campaign_id —
+// an insert with campaign_id NULL followed by a later UPDATE would never fire that
+// filter, silently breaking the live stream (it'd only ever show up on a refresh).
+async function storePosts(posts: RawPost[], campaignId: string | null = null): Promise<void> {
   for (const p of posts) {
     if (!p.igShortcode) continue;
     await prisma.post.upsert({
@@ -36,6 +41,7 @@ async function storePosts(posts: RawPost[]): Promise<void> {
         saves: p.saves,
         shares: p.shares,
         raw: p.raw as object,
+        campaignId,
       },
       update: {
         externalUrl: p.externalUrl,
@@ -53,6 +59,31 @@ async function storePosts(posts: RawPost[]): Promise<void> {
       },
     });
   }
+}
+
+// Resolves the live campaign (if any) that tracks this hashtag — tag must already
+// be lowercased to match createCampaign/trackHashtag's normalization.
+async function findCampaignForTag(tag: string): Promise<string | null> {
+  const campaign = await prisma.campaign.findFirst({
+    where: { status: "live", hashtags: { has: tag } },
+    select: { id: true },
+  });
+  return campaign?.id ?? null;
+}
+
+// Backfill for posts upserted by a *previous* scrape (the UPDATE branch of
+// storePosts's upsert), e.g. a post first scraped before the campaign existed, or
+// before this campaign started tracking the tag. New inserts get campaignId set
+// directly by storePosts so the Realtime INSERT filter matches immediately —
+// this only catches the update-path case, which Realtime doesn't need to see live.
+async function backfillCampaignLink(tag: string, campaignId: string | null): Promise<void> {
+  if (!campaignId) return;
+  await prisma.$executeRaw`
+    UPDATE posts
+    SET campaign_id = ${campaignId}
+    WHERE campaign_id IS NULL
+      AND raw -> 'hashtags' @> to_jsonb(ARRAY[${tag}]::text[])
+  `;
 }
 
 // Runs one actor to completion inside a tracked scrape_runs row: queued -> running ->
@@ -93,13 +124,17 @@ async function trackedRun<T>(kind: string, actorId: string, input: Record<string
 
 export class ApifyPublicContentProvider implements PublicContentProvider {
   async scrapeByHashtag(tag: string): Promise<RawPost[]> {
-    const cleanTag = tag.replace(/^#/, "");
+    // Lowercased to match createCampaign/trackHashtag's normalization — hashtags:{has}
+    // is case-sensitive, so an un-lowercased tag here would silently fail to link.
+    const cleanTag = tag.replace(/^#/, "").toLowerCase();
+    const campaignId = await findCampaignForTag(cleanTag);
     const items = await trackedRun<Record<string, unknown>>("hashtag", actorEnv("APIFY_ACTOR_HASHTAG"), {
       hashtags: [cleanTag],
       resultsLimit: 150,
     });
     const posts = items.map(normalizeHashtagItem);
-    await storePosts(posts);
+    await storePosts(posts, campaignId);
+    await backfillCampaignLink(cleanTag, campaignId);
     return posts;
   }
 
