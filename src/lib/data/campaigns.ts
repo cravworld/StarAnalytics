@@ -372,5 +372,11 @@ export async function trackHashtag(tagInput: string): Promise<string[]> {
     data: { hashtag: tag, postCount, avgEngRate },
   });
 
-  return matched.map((m) => m.id);
+  const postIds = matched.map((m) => m.id);
+  // Cheap (DB reads/writes only, no external calls) — a direct awaited call is fine
+  // here, unlike the sentiment pipeline's after()-deferred queueSentimentClassification.
+  const { checkFanPageVelocityAlerts } = await import("@/lib/data/fanPageAlerts");
+  await checkFanPageVelocityAlerts(postIds);
+
+  return postIds;
 }

@@ -46,7 +46,9 @@ export function getSentimentModelId(): string {
 export function getNotifierProvider() {
   const mode = modeFor("DATA_MODE_NOTIFIER");
   if (mode === "live") {
-    throw new Error("Live NotifierProvider not implemented until Phase 5.");
+    // Phase 5 deliberately keeps alert delivery in-app only (real detection, mock
+    // delivery) until a channel (email/WhatsApp/push) is chosen — see DPR §8 Q13.
+    throw new Error("Live NotifierProvider not implemented — delivery channel not yet decided (DPR §8 Q13).");
   }
   return new MockNotifierProvider();
 }

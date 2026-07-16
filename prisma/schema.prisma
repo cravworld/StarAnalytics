@@ -69,6 +69,7 @@ model Post {
   sentiment          Sentiment?
   agencyPostScores   AgencyPostScore[]
   postComments       PostComment[]
+  alerts             Alert[]
 
   @@map("posts")
 }
@@ -224,6 +225,10 @@ model Alert {
   fanPageId   String?   @map("fan_page_id")
   fanPage     FanPage?  @relation(fields: [fanPageId], references: [id])
   campaignId  String?   @map("campaign_id")
+  // Set for velocity-alert dedup: one Alert per post that triggered it, so
+  // re-polling the same hashtag within the window never creates a duplicate.
+  postId      String?   @map("post_id")
+  post        Post?     @relation(fields: [postId], references: [id])
   message     String
   createdAt   DateTime  @default(now()) @map("created_at")
   deliveredAt DateTime? @map("delivered_at")

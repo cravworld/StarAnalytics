@@ -1,73 +1,43 @@
 import { getFanPagesData } from "@/lib/data/fanpages";
 import { KpiGrid, Kpi } from "@/components/ui/Kpi";
-import { Card } from "@/components/ui/Card";
-import { Pill } from "@/components/ui/Pill";
+import { AddFanPageForm, PromoteSuggestionButton } from "@/components/fanpages/AddFanPageForm";
+import { FanPageList } from "@/components/fanpages/FanPageList";
 
 export default async function FanPagesPage() {
-  const { fanPages, totalTracked, kpis, alerts } = await getFanPagesData();
+  const { fanPages, totalTracked, kpis, alerts, suggestions } = await getFanPagesData();
 
   return (
     <>
       <KpiGrid cols={3}>
         <Kpi label="Total Fan Reach" value={kpis.totalReach} delta="Combined followers" />
-        <Kpi label="Active Today" value={kpis.activeToday} delta="75% posting rate" deltaDirection="up" />
-        <Kpi label="Posting #vijayam" value={kpis.postingVijayam} delta="87% coverage" deltaDirection="up" />
+        <Kpi label="Active Today" value={kpis.activeToday} delta="posted in last 24h" />
+        <Kpi label="Posting Campaign Tags" value={kpis.postingCampaignTags} delta="linked to a live campaign" />
       </KpiGrid>
 
-      <div className="add-btn">＋ Add fan page to track</div>
+      <AddFanPageForm />
 
-      <div className="inner-tabs">
-        <button className="itab active">All ({totalTracked})</button>
-        <button className="itab">Most Active</button>
-        <button className="itab">Posting #vijayam</button>
-        <button className="itab">Largest Reach</button>
-      </div>
-
-      <div className="card" style={{ marginBottom: 16 }}>
-        {fanPages.length === 0 ? (
-          <div style={{ textAlign: "center", color: "var(--muted)", fontSize: 12 }}>No fan pages tracked yet.</div>
-        ) : (
-          fanPages.map((f) => {
-            const maxSpark = Math.max(...f.spark);
-            return (
-              <div className="fan-row" key={f.handle}>
-                <div className="fan-av" style={{ background: f.bg, color: f.c }}>{f.init}</div>
-                <div className="fan-info">
-                  <div className="fan-name">
-                    {f.name} {f.init === "NF" ? <Pill kind="fan">Verified fan</Pill> : null}
-                  </div>
-                  <div className="fan-handle">{f.handle}</div>
-                  <div className="fan-stats">
-                    <span className="fan-stat"><strong>{f.followers}</strong> followers</span>
-                    <span className="fan-stat"><strong>{f.eng}</strong> eng</span>
-                    <span className="fan-stat"><strong>{f.posts}</strong> today</span>
-                  </div>
-                </div>
-                <div className="fan-right">
-                  <div className="mini-spark">
-                    {f.spark.map((v, i) => (
-                      <div
-                        className={`ms-bar${v >= maxSpark ? " mhi" : ""}`}
-                        style={{ height: `${v}%` }}
-                        key={i}
-                      />
-                    ))}
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <div className={`sdot ${f.status ? "sdot-on" : "sdot-off"}`} />
-                    <span style={{ fontSize: 10, color: "var(--muted)" }}>{f.status ? "Active now" : "Idle"}</span>
-                  </div>
-                  {f.vijayam ? (
-                    <span className="pill pill-hot" style={{ fontSize: 10 }}>#vijayam</span>
-                  ) : (
-                    <span className="pill" style={{ fontSize: 10 }}>Not yet</span>
-                  )}
-                </div>
+      {suggestions.length > 0 ? (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-title">Suggested Fan Pages</div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+            Repeat posters of your tracked campaign hashtags, not yet tracked as fan pages.
+          </div>
+          {suggestions.map((s) => (
+            <div
+              key={s.handle}
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--border)" }}
+            >
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>@{s.handle}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>{s.postCount} posts under tracked campaigns</div>
               </div>
-            );
-          })
-        )}
-      </div>
+              <PromoteSuggestionButton handle={s.handle} />
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <FanPageList fanPages={fanPages} />
 
       <div className="section-title">Alerts</div>
       {alerts.length === 0 ? (

@@ -15,6 +15,15 @@ function actorEnv(name: string): string {
   return v;
 }
 
+// Handle -> FanPage.id for every currently-tracked (active) fan page, lowercased so
+// matching against a post's author_handle is case-insensitive. Fetched once per
+// storePosts call rather than per-post — the fan_pages table is small and this avoids
+// N redundant queries across a 150-post hashtag scrape.
+async function activeFanPageMap(): Promise<Map<string, string>> {
+  const pages = await prisma.fanPage.findMany({ where: { isActive: true }, select: { id: true, igHandle: true } });
+  return new Map(pages.map((p) => [p.igHandle.toLowerCase(), p.id]));
+}
+
 // Upserts by ig_shortcode: re-scraping the same post updates its metrics instead of
 // duplicating the row. Posts without a shortcode (shouldn't happen for real actor
 // output, but the schema allows null) are skipped rather than upserted on an empty key.
@@ -23,9 +32,16 @@ function actorEnv(name: string): string {
 // Realtime's live post stream subscribes to INSERT events filtered by campaign_id —
 // an insert with campaign_id NULL followed by a later UPDATE would never fire that
 // filter, silently breaking the live stream (it'd only ever show up on a refresh).
+// fanPageId has no such Realtime dependency, so it's set on both the create AND
+// update branches directly — no separate "backfill on the update path" trick needed
+// for posts touched by *this* scrape. backfillFanPageLink() below only covers posts
+// that a scrape never re-touches at all (already-scraped history for a handle that
+// becomes a tracked fan page only just now).
 async function storePosts(posts: RawPost[], campaignId: string | null = null): Promise<void> {
+  const fanPageMap = await activeFanPageMap();
   for (const p of posts) {
     if (!p.igShortcode) continue;
+    const fanPageId = p.authorHandle ? (fanPageMap.get(p.authorHandle.toLowerCase()) ?? null) : null;
     await prisma.post.upsert({
       where: { igShortcode: p.igShortcode },
       create: {
@@ -43,6 +59,7 @@ async function storePosts(posts: RawPost[], campaignId: string | null = null): P
         shares: p.shares,
         raw: p.raw as object,
         campaignId,
+        fanPageId,
       },
       update: {
         externalUrl: p.externalUrl,
@@ -56,10 +73,24 @@ async function storePosts(posts: RawPost[], campaignId: string | null = null): P
         saves: p.saves,
         shares: p.shares,
         raw: p.raw as object,
+        fanPageId,
         scrapedAt: new Date(),
       },
     });
   }
+}
+
+// Called once when a handle is newly added (or promoted from a suggestion) as a
+// tracked FanPage — attributes any posts scraped *before* that handle was tracked
+// (storePosts only sets fanPageId going forward). Case-insensitive on author_handle,
+// scoped to this one handle so it's cheap even against a large posts table.
+export async function backfillFanPageLink(handle: string, fanPageId: string): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE posts
+    SET fan_page_id = ${fanPageId}
+    WHERE fan_page_id IS NULL
+      AND lower(author_handle) = lower(${handle})
+  `;
 }
 
 // Resolves the live campaign (if any) that tracks this hashtag — tag must already
@@ -166,6 +197,30 @@ export async function scrapeCommentsForPosts(posts: { id: string; externalUrl: s
   }
 }
 
+// Profile-only Apify call, factored out of scrapeByHandle so fan-page onboarding
+// (Phase 5) can get a followers/display-name snapshot without also paying for the
+// post-history scrape leg — a newly-added fan page's post history accumulates for
+// free from the hashtag stream via fanPageId linking instead.
+export async function fetchProfileSnapshot(handle: string): Promise<AccountSnapshot> {
+  const cleanHandle = handle.replace(/^@/, "");
+  const profileItems = await trackedRun<Record<string, unknown>>("profile", actorEnv("APIFY_ACTOR_PROFILE"), {
+    usernames: [cleanHandle],
+  });
+  const snapshot = profileItems[0]
+    ? normalizeProfileItem(profileItems[0])
+    : { followers: 0, displayName: cleanHandle, postsCount: null };
+  return {
+    handle: cleanHandle,
+    displayName: snapshot.displayName || cleanHandle,
+    followers: snapshot.followers,
+    avgLikesPerPost: 0,
+    postsPerWeek: 0,
+    reelAvgViews: 0,
+    engagementRateEstimate: 0,
+    storyResponseRate: null,
+  };
+}
+
 export class ApifyPublicContentProvider implements PublicContentProvider {
   async scrapeByHashtag(tag: string): Promise<RawPost[]> {
     // Lowercased to match createCampaign/trackHashtag's normalization — hashtags:{has}
@@ -184,11 +239,7 @@ export class ApifyPublicContentProvider implements PublicContentProvider {
 
   async scrapeByHandle(handle: string): Promise<AccountSnapshot & { posts: RawPost[] }> {
     const cleanHandle = handle.replace(/^@/, "");
-
-    const profileItems = await trackedRun<Record<string, unknown>>("profile", actorEnv("APIFY_ACTOR_PROFILE"), {
-      usernames: [cleanHandle],
-    });
-    const snapshot = profileItems[0] ? normalizeProfileItem(profileItems[0]) : { followers: 0, displayName: cleanHandle, postsCount: null };
+    const snapshot = await fetchProfileSnapshot(cleanHandle);
 
     const postItems = await trackedRun<Record<string, unknown>>("handle-posts", actorEnv("APIFY_ACTOR_POST"), {
       username: [cleanHandle],
@@ -201,14 +252,11 @@ export class ApifyPublicContentProvider implements PublicContentProvider {
     const engagementRateEstimate = snapshot.followers > 0 ? (avgLikesPerPost / snapshot.followers) * 100 : 0;
 
     return {
-      handle: cleanHandle,
-      displayName: snapshot.displayName || cleanHandle,
-      followers: snapshot.followers,
+      ...snapshot,
       avgLikesPerPost,
       postsPerWeek: 0, // not derivable from a single post-history page; Phase 2+ can compute from posted_at spread
       reelAvgViews: 0, // videoViewCount isn't reach and isn't collected here yet
       engagementRateEstimate: Math.round(engagementRateEstimate * 100) / 100,
-      storyResponseRate: null, // Graph-API-only, never available for a non-owned account
       posts,
     };
   }
