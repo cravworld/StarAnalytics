@@ -6,6 +6,7 @@ import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { trackHashtag } from "@/lib/data/campaigns";
 import { queueSentimentClassification } from "@/lib/data/sentiment";
+import { refreshStaleCompetitors } from "@/lib/data/compare";
 
 // The comment-scrape + classify pipeline queued below now runs inside this route's lifetime
 // (via after()) — give it room. Once the sentiment staleness cache is warm, steady-state
@@ -45,5 +46,10 @@ export async function GET(request: Request) {
     after(() => queueSentimentClassification(touchedPostIds));
   }
 
-  return NextResponse.json({ polled: results.length, results });
+  // Same 15-minute heartbeat also refreshes any tracked /compare competitor whose data
+  // has aged past its TTL — this is the only background refresh path (see
+  // src/lib/data/compare.ts), so it stays TTL-gated rather than re-scraping every cycle.
+  const competitorResults = await refreshStaleCompetitors();
+
+  return NextResponse.json({ polled: results.length, results, competitorsRefreshed: competitorResults });
 }
