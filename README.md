@@ -104,9 +104,15 @@ against the HTML prototype (`staranalytics_prototype.html`).
 ## Project status
 
 Phases 0–6 are merged to `main` (prototype parity, real providers, sentiment pipeline,
-campaign/agency scoring, fan page alerts, hashtag search). The remaining phase — a
-Graph API–backed self-account dashboard — is gated on Meta App Review and not yet
-started.
+campaign/agency scoring, fan page alerts, hashtag search). Phase 7 (a Graph API–backed
+self-account dashboard) has a real `GraphInstagramInsightsProvider` implementation
+(`src/lib/providers/graph-instagram-insights.ts`) wired behind `DATA_MODE_INSTAGRAM=live`,
+written and unit-tested against documented API response shapes — but never exercised
+against a live account, since that requires Meta App Review (Business/Creator account
+conversion, a registered Meta app, and approved `instagram_basic`/`instagram_manage_insights`
+permissions). Re-verify field names against a real response once a token exists. Two
+fields (`AccountInsights.profileVisits`, `Demographics.heatmap`) have no current Graph API
+equivalent and are flagged inline in that file for a product decision before shipping.
 
 ## Known limitations
 

@@ -1,6 +1,7 @@
 import { ApifyPublicContentProvider } from "./apify-public-content";
 import { ClaudeSentimentProvider, sentimentModelId } from "./claude-sentiment";
 import { EmailNotifierProvider } from "./email-notifier";
+import { GraphInstagramInsightsProvider } from "./graph-instagram-insights";
 import { MockInstagramInsightsProvider } from "./mock-instagram-insights";
 import { MockNotifierProvider } from "./mock-notifier";
 import { MockPublicContentProvider } from "./mock-public-content";
@@ -17,7 +18,7 @@ function modeFor(envVar: string): DataMode {
 export function getInstagramInsightsProvider() {
   const mode = modeFor("DATA_MODE_INSTAGRAM");
   if (mode === "live") {
-    throw new Error("Live InstagramInsightsProvider not implemented until Phase 7.");
+    return new GraphInstagramInsightsProvider();
   }
   return new MockInstagramInsightsProvider();
 }
