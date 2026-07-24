@@ -10,7 +10,7 @@ engagement, sentiment, and campaign scorecards in one place.
 - NextAuth (Auth.js v5) with Google OAuth, JWT sessions, email-domain/allowlist gating
 - Prisma + Postgres (Supabase)
 - Chart.js / react-chartjs-2
-- Apify (public Instagram scraping) + Claude (sentiment classification)
+- Apify (public Instagram scraping) + Claude (sentiment classification) + Resend (fan-page alert emails)
 - Playwright (e2e) + Vitest (unit)
 
 ## Getting started
@@ -35,10 +35,14 @@ See `.env.example` for the full annotated list. Highlights:
   local dev.
 - `DATA_MODE_INSTAGRAM` / `DATA_MODE_APIFY` / `DATA_MODE_SENTIMENT` / `DATA_MODE_NOTIFIER`
   — per-provider `mock` | `live` switches (see Providers below).
-- `APIFY_TOKEN`, `APIFY_ACTOR_HASHTAG`, `APIFY_ACTOR_HANDLE`, `APIFY_ACTOR_URLS`,
+- `APIFY_TOKEN`, `APIFY_ACTOR_HASHTAG`, `APIFY_ACTOR_PROFILE`, `APIFY_ACTOR_POST`,
   `APIFY_ACTOR_COMMENTS` — Apify actor wiring for live scraping.
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_SENTIMENT_MODEL` — Claude sentiment classification
   (direct `fetch` call, no SDK).
+- `RESEND_API_KEY`, `ALERT_EMAIL_FROM`, `ALERT_EMAIL_TO` — fan-page velocity alert
+  emails (direct `fetch` call, no SDK). `ALERT_EMAIL_FROM` can be Resend's sandbox
+  address (`onboarding@resend.dev`, delivers only to the email your Resend account was
+  signed up with) until a domain is verified for real recipients.
 
 ## Scripts
 
@@ -103,6 +107,21 @@ Phases 0–6 are merged to `main` (prototype parity, real providers, sentiment p
 campaign/agency scoring, fan page alerts, hashtag search). The remaining phase — a
 Graph API–backed self-account dashboard — is gated on Meta App Review and not yet
 started.
+
+## Known limitations
+
+- **Cron cadence is once/day, not every 15 minutes.** `vercel.json`'s `poll-hashtags`
+  cron was originally built for a 15-minute interval, but Vercel's Hobby plan caps
+  crons at once/day — every deploy since the cron was added had been silently failing
+  (`deploy_failed`) as a result, discovered only during a later full walkthrough. It's
+  currently pinned to `0 6 * * *` to unblock deploys. Hashtag volume, fan-page linking,
+  velocity alerts, and `/compare` competitor refresh are all only as fresh as the last
+  daily run — move back to `*/15` (or an external scheduler hitting the cron routes
+  directly) once the project is on a paid Vercel plan.
+- **Fan-page alert emails are sandboxed.** With `ALERT_EMAIL_FROM` set to Resend's
+  sandbox address, delivery only works to the single email your Resend account was
+  signed up with. Verify a domain with Resend before relying on alerts reaching anyone
+  else.
 
 ## Repo-specific note
 
