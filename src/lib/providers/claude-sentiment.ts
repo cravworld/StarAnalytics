@@ -34,6 +34,8 @@ const SYSTEM_PROMPT = `You are classifying sentiment and extracting keywords fro
 
 The text is a mix of romanized Malayalam ("adipoli", "pwoli", "mass"), Malayalam script, English, and emojis — often all three within the same caption or across a caption and its comments. Read fan-culture and slang terms ("mass", "adipoli", "goosebumps", "blockbuster", "fire") as intensity/positivity signals, not literally.
 
+Watch for negation and sarcasm flipping an otherwise-positive slang term ("not mass", "adipoli aayirunnu ennu paranja aarelum?" said mockingly, "blockbuster 😒") — these are neg, not pos, despite containing hype words. Weigh the overall tone of the comment, not just the presence of a hype word. Emoji-only or very short inputs ("🔥🔥🔥", "👍") should still get a real label from the emoji's tone rather than a default neutral. If a single input mixes both positive and negative reactions (e.g. praising the actor but criticizing the trailer's pacing), label by the dominant sentiment and let "keywords" reflect both sides.
+
 For each input item, return:
 - "label": one of "pos", "neu", "neg"
 - "score": a 0-1 number for confidence/intensity of that label (not just positive/negative — how strongly positive, neutral, or negative)
@@ -86,9 +88,9 @@ async function callClaude(batch: { id: string; text: string }[]): Promise<string
     },
     body: JSON.stringify({
       model: model(),
-      max_tokens: 4096,
-      thinking: { type: "disabled" },
-      output_config: { effort: "low" },
+      max_tokens: 8192,
+      thinking: { type: "adaptive" },
+      output_config: { effort: "high" },
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: JSON.stringify(batch) }],
     }),
