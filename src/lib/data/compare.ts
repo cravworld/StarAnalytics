@@ -1,15 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import { getInstagramInsightsProvider, getPublicContentProvider, getYouTubeContentProvider } from "@/lib/providers";
+import { getInstagramInsightsProvider } from "@/lib/providers";
+import { PLATFORM_HANDLE_VALIDATORS as HANDLE_VALIDATORS, contentProviderFor } from "@/lib/providers/platform-utils";
 import type { PlatformId, RawPost } from "@/lib/providers/types";
-
-const HANDLE_VALIDATORS: Record<PlatformId, { pattern: RegExp; label: string }> = {
-  instagram: { pattern: /^[a-zA-Z0-9._]{1,30}$/, label: "Instagram" },
-  youtube: { pattern: /^[a-zA-Z0-9._-]{3,30}$/, label: "YouTube" },
-};
-
-function contentProviderFor(platform: PlatformId) {
-  return platform === "youtube" ? getYouTubeContentProvider() : getPublicContentProvider();
-}
 
 // Comparison numbers aren't real-time — a follower count or engagement estimate a few
 // hours stale doesn't change a strategic read. Named constant, not a magic number

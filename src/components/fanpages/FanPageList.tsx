@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { Pill } from "@/components/ui/Pill";
+import type { PlatformId } from "@/lib/providers/types";
 
 export interface FanPageRow {
   name: string;
+  platform: PlatformId;
   handle: string;
   bg: string;
   c: string;
@@ -69,7 +71,14 @@ export function FanPageList({ fanPages }: { fanPages: FanPageRow[] }) {
                   <div className="fan-name">
                     {f.name} {f.isVerifiedFan ? <Pill kind="fan">Verified fan</Pill> : null}
                   </div>
-                  <div className="fan-handle">{f.handle}</div>
+                  <div className="fan-handle">
+                    <span
+                      style={{ fontSize: 9, fontWeight: 700, color: f.platform === "youtube" ? "#c4302b" : "#E1306C", marginRight: 4 }}
+                    >
+                      {f.platform === "youtube" ? "YT" : "IG"}
+                    </span>
+                    {f.handle}
+                  </div>
                   <div className="fan-stats">
                     <span className="fan-stat">
                       <strong>{f.followers}</strong> followers

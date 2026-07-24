@@ -13,6 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { trackHashtag } from "@/lib/data/campaigns";
 import { queueSentimentClassification } from "@/lib/data/sentiment";
 import { refreshStaleCompetitors } from "@/lib/data/compare";
+import { refreshStaleFanPages } from "@/lib/data/fanpages";
 
 // The comment-scrape + classify pipeline queued below now runs inside this route's lifetime
 // (via after()) — give it room. Once the sentiment staleness cache is warm, steady-state
@@ -57,5 +58,15 @@ export async function GET(request: Request) {
   // src/lib/data/compare.ts), so it stays TTL-gated rather than re-scraping every cycle.
   const competitorResults = await refreshStaleCompetitors();
 
-  return NextResponse.json({ polled: results.length, results, competitorsRefreshed: competitorResults });
+  // And any YouTube fan channel past its TTL — Instagram fan pages don't need this (they
+  // update passively via the hashtag scrape above), but YouTube has no such pipeline to
+  // piggyback on (see fanpages.ts's refreshStaleFanPages).
+  const fanPageResults = await refreshStaleFanPages();
+
+  return NextResponse.json({
+    polled: results.length,
+    results,
+    competitorsRefreshed: competitorResults,
+    fanPagesRefreshed: fanPageResults,
+  });
 }

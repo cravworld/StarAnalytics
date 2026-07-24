@@ -3,9 +3,16 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { addFanPageAction } from "@/lib/actions/fanpages";
+import type { PlatformId } from "@/lib/providers/types";
+
+const PLACEHOLDERS: Record<PlatformId, string> = {
+  instagram: "Instagram handle (e.g. @fanpage_handle)…",
+  youtube: "YouTube handle (e.g. @channelname)…",
+};
 
 export function AddFanPageForm() {
   const router = useRouter();
+  const [platform, setPlatform] = useState<PlatformId>("instagram");
   const [handle, setHandle] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -15,9 +22,10 @@ export function AddFanPageForm() {
     setPending(true);
     setError(null);
     try {
-      // A real Apify profile-only scrape runs synchronously here — same pattern as
-      // TrackHashtagForm's hashtag scrape, so the list reflects real data immediately.
-      await addFanPageAction(handle);
+      // Instagram: a real Apify profile-only scrape runs synchronously here, same pattern
+      // as TrackHashtagForm's hashtag scrape. YouTube: pulls the channel's own uploads
+      // directly (no hashtag pipeline to lean on) — see fanpages.ts.
+      await addFanPageAction(handle, platform);
       setHandle("");
       router.refresh();
     } catch (e) {
@@ -30,8 +38,17 @@ export function AddFanPageForm() {
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", gap: 10 }}>
+        <select
+          value={platform}
+          onChange={(e) => setPlatform(e.target.value as PlatformId)}
+          disabled={pending}
+          style={{ width: 110 }}
+        >
+          <option value="instagram">Instagram</option>
+          <option value="youtube">YouTube</option>
+        </select>
         <input
-          placeholder="Instagram handle (e.g. @fanpage_handle)…"
+          placeholder={PLACEHOLDERS[platform]}
           style={{ flex: 1 }}
           value={handle}
           onChange={(e) => setHandle(e.target.value)}

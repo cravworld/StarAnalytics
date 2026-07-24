@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { fetchProfileSnapshot, backfillFanPageLink } from "@/lib/providers/apify-public-content";
+import { PLATFORM_HANDLE_VALIDATORS, contentProviderFor } from "@/lib/providers/platform-utils";
+import type { PlatformId, RawPost } from "@/lib/providers/types";
 
 function fmtCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -37,6 +39,7 @@ const RECENT_POSTS_FOR_ENG_SAMPLE = 20;
 
 async function fanPageRow(page: {
   id: string;
+  platform: PlatformId;
   igHandle: string;
   displayName: string | null;
   followers: number | null;
@@ -83,6 +86,7 @@ async function fanPageRow(page: {
 
   return {
     name: displayName,
+    platform: page.platform,
     handle: `@${page.igHandle}`,
     bg,
     c,
@@ -180,19 +184,88 @@ export async function getSuggestedFanPages(): Promise<{ handle: string; postCoun
   return rows.map((r) => ({ handle: r.author_handle, postCount: Number(r.post_count) }));
 }
 
-// Manual add, or promoting a suggestion — same code path either way. Spends the one
-// Apify profile-only call this action costs, then backfills fanPageId onto any posts
-// already scraped under this handle so the tracked list shows real data immediately
-// rather than waiting for the next poll cycle.
-export async function addFanPage(handleInput: string): Promise<void> {
+const FAN_PAGE_SCRAPE_TTL_HOURS = 12;
+
+function isStale(lastCheckedAt: Date | null): boolean {
+  if (!lastCheckedAt) return true;
+  return Date.now() - lastCheckedAt.getTime() > FAN_PAGE_SCRAPE_TTL_HOURS * 60 * 60 * 1000;
+}
+
+// Instagram fan pages get posts linked passively (backfillFanPageLink at add-time, then
+// activeFanPageMap during hashtag scrapes going forward) — there's a real ongoing pipeline
+// to piggyback on. YouTube has no equivalent (its hashtag/campaign tracking is out of
+// scope, see the multi-platform migration notes), so a YouTube fan channel needs its own
+// posts pulled directly from its own uploads — same mechanism as Compare's competitor
+// tracking, just linked via fanPageId instead of competitorId.
+async function storeFanPagePosts(fanPageId: string, posts: RawPost[]): Promise<void> {
+  for (const p of posts) {
+    if (!p.igShortcode) continue;
+    await prisma.post.upsert({
+      where: { platform_igShortcode: { platform: p.platform, igShortcode: p.igShortcode } },
+      create: {
+        source: "fanpage",
+        platform: p.platform,
+        igShortcode: p.igShortcode,
+        externalUrl: p.externalUrl,
+        authorHandle: p.authorHandle,
+        mediaType: p.mediaType,
+        caption: p.caption,
+        postedAt: new Date(p.postedAt),
+        reach: p.reach,
+        likes: p.likes,
+        comments: p.comments,
+        raw: p.raw as object,
+        fanPageId,
+      },
+      update: {
+        externalUrl: p.externalUrl,
+        mediaType: p.mediaType,
+        caption: p.caption,
+        postedAt: new Date(p.postedAt),
+        reach: p.reach,
+        likes: p.likes,
+        comments: p.comments,
+        raw: p.raw as object,
+        fanPageId,
+        scrapedAt: new Date(),
+      },
+    });
+  }
+}
+
+// The only place a real channel scrape happens for a YouTube fan page — called from
+// addFanPage (first add) and refreshStaleFanPages (cron, TTL-gated), never from render.
+async function scrapeYouTubeFanChannel(handle: string): Promise<void> {
+  const snapshot = await contentProviderFor("youtube").scrapeByHandle(handle);
+  const fanPage = await prisma.fanPage.upsert({
+    where: { platform_igHandle: { platform: "youtube", igHandle: snapshot.handle } },
+    create: { platform: "youtube", igHandle: snapshot.handle, displayName: snapshot.displayName, followers: snapshot.followers, lastCheckedAt: new Date() },
+    update: { displayName: snapshot.displayName, followers: snapshot.followers, lastCheckedAt: new Date() },
+  });
+  await storeFanPagePosts(fanPage.id, snapshot.posts);
+}
+
+// Manual add, or promoting a suggestion — same code path either way for Instagram.
+// Instagram: spends the one Apify profile-only call this action costs, then backfills
+// fanPageId onto any posts already scraped under this handle (relies on the ongoing
+// hashtag-pipeline linkage going forward). YouTube: pulls the channel's own uploads
+// directly (no hashtag pipeline to lean on — see storeFanPagePosts above).
+export async function addFanPage(handleInput: string, platform: PlatformId = "instagram"): Promise<void> {
   const handle = handleInput.replace(/^@/, "").trim();
   if (!handle) throw new Error("handle is required");
+  const validator = PLATFORM_HANDLE_VALIDATORS[platform];
+  if (!validator.pattern.test(handle)) throw new Error(`not a valid ${validator.label} handle`);
 
-  const existing = await prisma.fanPage.findUnique({ where: { platform_igHandle: { platform: "instagram", igHandle: handle } } });
+  const existing = await prisma.fanPage.findUnique({ where: { platform_igHandle: { platform, igHandle: handle } } });
   if (existing) {
     if (!existing.isActive) {
       await prisma.fanPage.update({ where: { id: existing.id }, data: { isActive: true } });
     }
+    return;
+  }
+
+  if (platform === "youtube") {
+    await scrapeYouTubeFanChannel(handle);
     return;
   }
 
@@ -201,4 +274,24 @@ export async function addFanPage(handleInput: string): Promise<void> {
     data: { igHandle: handle, displayName: snapshot.displayName, followers: snapshot.followers, lastCheckedAt: new Date() },
   });
   await backfillFanPageLink(handle, fanPage.id);
+}
+
+// Called only from the polling cron — refreshes any tracked YouTube fan channel whose
+// data is past the TTL. Instagram fan pages are deliberately excluded: they update
+// passively through the hashtag-scrape pipeline and have never needed (or had) their own
+// refresh path. One channel's scrape failing shouldn't block the others, same discipline
+// as refreshStaleCompetitors.
+export async function refreshStaleFanPages(): Promise<{ handle: string; ok: boolean; error?: string }[]> {
+  const youtubePages = await prisma.fanPage.findMany({ where: { platform: "youtube", isActive: true } });
+  const results: { handle: string; ok: boolean; error?: string }[] = [];
+  for (const p of youtubePages) {
+    if (!isStale(p.lastCheckedAt)) continue;
+    try {
+      await scrapeYouTubeFanChannel(p.igHandle);
+      results.push({ handle: p.igHandle, ok: true });
+    } catch (err) {
+      results.push({ handle: p.igHandle, ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return results;
 }
