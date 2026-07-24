@@ -32,9 +32,20 @@ export function sentimentModelId(): string {
 
 const SYSTEM_PROMPT = `You are classifying sentiment and extracting keywords from Instagram captions and comments about Malayalam film/celebrity campaigns.
 
-The text is a mix of romanized Malayalam ("adipoli", "pwoli", "mass"), Malayalam script, English, and emojis — often all three within the same caption or across a caption and its comments. Read fan-culture and slang terms ("mass", "adipoli", "goosebumps", "blockbuster", "fire") as intensity/positivity signals, not literally.
+Think it through, don't pattern-match. For each item, reason about what this specific commenter's underlying attitude toward the movie/actor/campaign actually is — never just the literal emotional tone of the words. The same surface-level sadness, hype word, or slang term can mean completely different things depending on what it's actually aimed at and whether it's meant literally. Before assigning a label, work through:
+1. What is this comment actually about — the film's story/characters/themes, or the film/actor/campaign's own quality?
+2. Is the commenter expressing admiration, engagement, nostalgia, or appreciation — or are they actually criticizing, disappointed in, or dismissive of the movie/actor/campaign itself?
+3. Could this be sarcastic, negated, or ironic rather than literal?
 
-Watch for negation and sarcasm flipping an otherwise-positive slang term ("not mass", "adipoli aayirunnu ennu paranja aarelum?" said mockingly, "blockbuster 😒") — these are neg, not pos, despite containing hype words. Weigh the overall tone of the comment, not just the presence of a hype word. Emoji-only or very short inputs ("🔥🔥🔥", "👍") should still get a real label from the emoji's tone rather than a default neutral. If a single input mixes both positive and negative reactions (e.g. praising the actor but criticizing the trailer's pacing), label by the dominant sentiment and let "keywords" reflect both sides.
+Only label something "neg" when it reflects real criticism or disappointment aimed at the movie/actor/campaign — bad acting, weak plot, "waste of money/time", boring, trolling, hate. Emotional content that isn't a judgment of quality (sadness, nostalgia, longing, excitement, humor) is "pos" or "neu" depending on how engaged/appreciative it reads, even when the words themselves sound negative.
+
+Below are examples of applying that reasoning — treat them as illustrations of the thinking, not an exhaustive checklist of rules to match against. The same judgment applies to anything you encounter, including patterns not listed here:
+- Many of these films (romance, tragedy, heartbreak dramas — "Premam" is a real example) are ABOUT sadness, loss, and unrequited love. A wistful, nostalgic, or tearful comment quoting or riffing on the film's themes ("she'll always be mine, only in my memories 🖤", "some people don't leave your heart, they just leave your life") is a fan moved by the story, not a critic of it — that's positive-to-neutral engagement despite the sad words.
+- Fan-culture slang ("mass", "adipoli", "pwoli", "goosebumps", "blockbuster", "fire") signals intensity/positivity — but check whether it's negated or sarcastic first ("not mass", "adipoli aayirunnu ennu paranja aarelum?" said mockingly, "blockbuster 😒") — those are neg despite the hype word.
+- Emoji-only or very short inputs ("🔥🔥🔥", "👍") still carry a real signal from the emoji's tone — don't default to neutral just because there's little text.
+- If a comment mixes reactions (e.g. praising the actor but criticizing the trailer's pacing), weigh which one is dominant and let "keywords" capture both sides.
+
+The text is a mix of romanized Malayalam, Malayalam script, English, and emojis — often all three within the same caption or across a caption and its comments.
 
 For each input item, return:
 - "label": one of "pos", "neu", "neg"
