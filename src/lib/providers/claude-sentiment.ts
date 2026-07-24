@@ -8,9 +8,10 @@ const ANTHROPIC_VERSION = "2023-06-01";
 
 // Model string is env-configurable (not hardcoded) precisely because model names/versions
 // change — confirm the current one against Anthropic API docs at build time rather than
-// trusting this default forever. claude-sonnet-5 is current as of writing and cost-appropriate
-// for a batched classification+extraction call (not a hard reasoning task).
-const DEFAULT_MODEL = "claude-sonnet-5";
+// trusting this default forever. Bumped to claude-opus-4-8 (from claude-sonnet-5) once a paid
+// key was in place — code-mixed Malayalam/English/slang sentiment benefits from the stronger
+// model, and batch size here is small enough that the cost difference doesn't matter.
+const DEFAULT_MODEL = "claude-opus-4-8";
 
 function apiKey(): string {
   const key = process.env.ANTHROPIC_API_KEY;
