@@ -90,8 +90,25 @@ export async function classifyPostsForSentiment(postIds: string[]): Promise<void
   const batches = chunk(inputs, BATCH_SIZE);
   console.log(`sentiment pipeline: classifying ${inputs.length} posts across ${batches.length} batch(es)`);
 
-  for (const batch of batches) {
-    const results = await provider.classify(batch);
+  // One batch failing (a Claude call error, or a response that never parses even after
+  // classifyBatch's recursive halving bottoms out) must not abandon every batch queued
+  // after it — same "one failure shouldn't block the rest" discipline as poll-hashtags'
+  // per-hashtag try/catch. Before this, a single bad batch mid-run silently truncated the
+  // whole classification pass; anything after it just never got attempted until the next
+  // trigger (next day's cron, at best), with no signal beyond a swallowed console.error.
+  let failedBatches = 0;
+  for (const [i, batch] of batches.entries()) {
+    let results;
+    try {
+      results = await provider.classify(batch);
+    } catch (err) {
+      failedBatches++;
+      console.error(
+        `sentiment pipeline: batch ${i + 1}/${batches.length} (${batch.length} posts) failed, continuing with remaining batches:`,
+        err,
+      );
+      continue;
+    }
     // 6. Upsert sentiment rows.
     for (const r of results) {
       await prisma.sentiment.upsert({
@@ -112,5 +129,8 @@ export async function classifyPostsForSentiment(postIds: string[]): Promise<void
         },
       });
     }
+  }
+  if (failedBatches > 0) {
+    console.error(`sentiment pipeline: ${failedBatches}/${batches.length} batch(es) failed — unclassified posts remain stale and will retry next run`);
   }
 }
