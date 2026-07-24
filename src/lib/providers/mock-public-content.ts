@@ -86,5 +86,3 @@ export class MockPublicContentProvider implements PublicContentProvider {
     return urls.map((url, i) => toRawPost(url, i));
   }
 }
-
-export const MOCK_AGENCIES = AGENCIES;

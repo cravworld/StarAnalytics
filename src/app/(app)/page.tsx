@@ -1,4 +1,5 @@
 import { getDashboardData } from "@/lib/data/dashboard";
+import { formatCompactNumber } from "@/lib/format";
 import { KpiGrid, Kpi } from "@/components/ui/Kpi";
 import { Card } from "@/components/ui/Card";
 import { GrowthChart } from "@/components/charts/GrowthChart";
@@ -12,7 +13,7 @@ export default async function DashboardPage() {
       <KpiGrid cols={4}>
         <Kpi
           label="Followers"
-          value="7.4M"
+          value={formatCompactNumber(insights.followers)}
           delta={`↑ +${(insights.followersDeltaWeek / 1000).toFixed(1)}K this week`}
           deltaDirection="up"
         />
@@ -22,10 +23,15 @@ export default async function DashboardPage() {
           delta={`↑ +${insights.engagementRateDeltaMonth}% vs last month`}
           deltaDirection="up"
         />
-        <Kpi label="Reach (30d)" value="28.1M" delta={`↓ ${insights.reach30dDeltaPct}% vs prev period`} deltaDirection="dn" />
+        <Kpi
+          label="Reach (30d)"
+          value={formatCompactNumber(insights.reach30d)}
+          delta={`↓ ${insights.reach30dDeltaPct}% vs prev period`}
+          deltaDirection="dn"
+        />
         <Kpi
           label="Profile Visits"
-          value="312K"
+          value={formatCompactNumber(insights.profileVisits)}
           delta={`↑ +${insights.profileVisitsDeltaPct}% this week`}
           deltaDirection="up"
         />

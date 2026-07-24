@@ -1,5 +1,5 @@
 // Seed data ported verbatim from staranalytics_prototype.html (AGENCIES, POSTS,
-// FAN_PAGES, heatData, chart series) so Phase 0 renders identically to the prototype.
+// heatData, chart series) so Phase 0 renders identically to the prototype.
 
 export const AGENCIES = [
   { name: "Pixelwave Media", color: "#E1306C", score: 91, perf: 94, auth: 90, eff: 89, reach: "9.4M", flags: 0 },
@@ -25,14 +25,6 @@ export const POSTS = [
   { url: "instagram.com/p/Ws8h…", ag: "NovaSocial", color: "#4527a0", reach: "290K", likes: "19.4K", comments: "72", saves: "110", eng: "6.8%", auth: 26, score: 48, flags: ["Off-hours", "Bot comments"] },
   { url: "instagram.com/p/Vt9i…", ag: "TrendTide Media", color: "#558b2f", reach: "172K", likes: "9.8K", comments: "440", saves: "1.5K", eng: "5.4%", auth: 79, score: 77, flags: [] as string[] },
   { url: "instagram.com/p/Uj0j…", ag: "CreatorHub", color: "#00838f", reach: "165K", likes: "9.1K", comments: "398", saves: "1.3K", eng: "5.2%", auth: 77, score: 74, flags: [] as string[] },
-];
-
-export const FAN_PAGES = [
-  { name: "Nivin Fanz Official", handle: "@nivin_fanz_official", bg: "#fde8ef", c: "#E1306C", init: "NF", followers: "284K", eng: "9.2%", posts: "4 posts", status: true, spark: [40, 70, 50, 100, 90], vijayam: true },
-  { name: "Fan Fire Nivin", handle: "@fanfire_nivin", bg: "#e8f5e9", c: "#1a7a4a", init: "FF", followers: "176K", eng: "7.8%", posts: "3 posts", status: true, spark: [30, 100, 90, 75, 60], vijayam: true },
-  { name: "NP Fan Club Kerala", handle: "@np_fanclub_kerala", bg: "#f3e5f5", c: "#6a1b9a", init: "NK", followers: "142K", eng: "6.1%", posts: "2 posts", status: true, spark: [50, 60, 100, 80, 70], vijayam: true },
-  { name: "Mollywood King Fans", handle: "@mollywood_king", bg: "#e3f2fd", c: "#1565c0", init: "MK", followers: "98K", eng: "5.4%", posts: "1 post", status: false, spark: [70, 50, 30, 30, 60], vijayam: true },
-  { name: "Nivin Empire Gulf", handle: "@nivin_empire_gulf", bg: "#fff8e1", c: "#e65100", init: "GF", followers: "67K", eng: "4.9%", posts: "0 posts", status: false, spark: [80, 60, 40, 20, 8], vijayam: false },
 ];
 
 export const HEAT_DATA: Record<string, number[]> = {

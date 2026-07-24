@@ -209,6 +209,9 @@ async function selfColumn(): Promise<CompareColumn> {
     reelAvgViews: insights.avgReelViews,
     engagementRateEstimate: insights.engagementRate,
     isEngagementEstimate: false,
+    // Same "self stays mock this phase" situation as avgLikesPerPost above — Graph API
+    // only reports story reply/interaction metrics once Phase 7 is live, so this is a
+    // placeholder mock value too, not a derived one.
     storyResponseRate: 1.8,
     lastUpdatedLabel: null,
   };

@@ -1,4 +1,5 @@
 import { getContentData } from "@/lib/data/content";
+import { formatCompactNumber } from "@/lib/format";
 import { KpiGrid, Kpi } from "@/components/ui/Kpi";
 import { Card } from "@/components/ui/Card";
 import { PostTypeBar } from "@/components/charts/PostTypeBar";
@@ -13,7 +14,12 @@ export default async function ContentPage() {
         <Kpi label="Best Format" value={insights.bestFormat} delta={`${insights.bestFormatEngagement}% avg eng`} deltaDirection="up" />
         <Kpi label="Best Time" value={insights.bestPostTime} delta="Peak engagement" />
         <Kpi label="Posts This Month" value={String(insights.postsThisMonth)} delta={`↑ +${insights.postsThisMonthDelta} vs last`} deltaDirection="up" />
-        <Kpi label="Avg Reel Views" value="2.8M" delta={`↑ +${insights.avgReelViewsDeltaPct}%`} deltaDirection="up" />
+        <Kpi
+          label="Avg Reel Views"
+          value={formatCompactNumber(insights.avgReelViews)}
+          delta={`↑ +${insights.avgReelViewsDeltaPct}%`}
+          deltaDirection="up"
+        />
       </KpiGrid>
 
       <div className="g2">
