@@ -15,6 +15,25 @@ export async function createCampaignAction(input: {
 }) {
   const campaign = await createCampaign(input);
   revalidatePath("/campaigns");
+
+  // Auto-track every hashtag the campaign was created with — without this, a new
+  // campaign sits at zero posts until someone separately searches each tag on the
+  // Hashtag Search page, which isn't the workflow anyone actually expects. Queued
+  // after the response so campaign creation itself stays fast; the live stream
+  // picks up new posts via Supabase Realtime (or a refresh) once scraping lands.
+  after(async () => {
+    for (const tag of campaign.hashtags) {
+      try {
+        const postIds = await trackHashtag(tag);
+        await queueSentimentClassification(postIds);
+      } catch (err) {
+        // One hashtag failing (rate limit, actor error) shouldn't block the rest —
+        // same discipline as the poll-hashtags cron.
+        console.error(`auto-track failed for #${tag} on campaign ${campaign.id}:`, err);
+      }
+    }
+  });
+
   return campaign;
 }
 
