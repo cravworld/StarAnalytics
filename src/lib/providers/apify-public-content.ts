@@ -43,9 +43,10 @@ async function storePosts(posts: RawPost[], campaignId: string | null = null): P
     if (!p.igShortcode) continue;
     const fanPageId = p.authorHandle ? (fanPageMap.get(p.authorHandle.toLowerCase()) ?? null) : null;
     await prisma.post.upsert({
-      where: { igShortcode: p.igShortcode },
+      where: { platform_igShortcode: { platform: p.platform, igShortcode: p.igShortcode } },
       create: {
         source: p.source,
+        platform: p.platform,
         igShortcode: p.igShortcode,
         externalUrl: p.externalUrl,
         authorHandle: p.authorHandle,

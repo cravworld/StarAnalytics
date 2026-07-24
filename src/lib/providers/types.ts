@@ -50,9 +50,15 @@ export interface InstagramInsightsProvider {
   getAudienceDemographics(): Promise<Demographics>;
 }
 
+// Decoupled from Prisma's generated Platform enum on purpose — this seam shouldn't import
+// generated client types, same reasoning as `source` below being a literal union rather
+// than the PostSource Prisma enum.
+export type PlatformId = "instagram" | "youtube";
+
 export interface RawPost {
   id: string;
   source: "self" | "competitor" | "agency" | "fanpage" | "campaign";
+  platform: PlatformId;
   igShortcode: string;
   externalUrl: string;
   authorHandle: string;

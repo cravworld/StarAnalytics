@@ -75,8 +75,8 @@ async function storeAgencyPosts(posts: RawPost[], shortcodeToAgencyId: Map<strin
       agencyId,
     };
     await prisma.post.upsert({
-      where: { igShortcode: p.igShortcode },
-      create: { source: "agency", igShortcode: p.igShortcode, ...data },
+      where: { platform_igShortcode: { platform: p.platform, igShortcode: p.igShortcode } },
+      create: { source: "agency", platform: p.platform, igShortcode: p.igShortcode, ...data },
       update: { ...data, scrapedAt: new Date() },
     });
   }

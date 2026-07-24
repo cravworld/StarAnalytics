@@ -188,7 +188,7 @@ export async function addFanPage(handleInput: string): Promise<void> {
   const handle = handleInput.replace(/^@/, "").trim();
   if (!handle) throw new Error("handle is required");
 
-  const existing = await prisma.fanPage.findUnique({ where: { igHandle: handle } });
+  const existing = await prisma.fanPage.findUnique({ where: { platform_igHandle: { platform: "instagram", igHandle: handle } } });
   if (existing) {
     if (!existing.isActive) {
       await prisma.fanPage.update({ where: { id: existing.id }, data: { isActive: true } });

@@ -37,6 +37,16 @@ export default async function ComparePage() {
               </div>
               <div style={{ fontSize: 13, fontWeight: 700 }}>{col.displayName}</div>
               <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 700,
+                    color: col.platform === "youtube" ? "#c4302b" : "#E1306C",
+                    marginRight: 4,
+                  }}
+                >
+                  {col.platform === "youtube" ? "YT" : "IG"}
+                </span>
                 {col.handle} · {col.followersDisplay}
               </div>
               {col.lastUpdatedLabel ? (

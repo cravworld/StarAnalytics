@@ -6,6 +6,8 @@ import { MockInstagramInsightsProvider } from "./mock-instagram-insights";
 import { MockNotifierProvider } from "./mock-notifier";
 import { MockPublicContentProvider } from "./mock-public-content";
 import { MockSentimentProvider } from "./mock-sentiment";
+import { MockYouTubePublicContentProvider } from "./mock-youtube-public-content";
+import { YouTubePublicContentProvider } from "./youtube-public-content";
 import type { DataMode } from "./types";
 
 // Each source flips mock -> live independently as its credential arrives
@@ -29,6 +31,18 @@ export function getPublicContentProvider() {
     return new ApifyPublicContentProvider();
   }
   return new MockPublicContentProvider();
+}
+
+// Separate mode switch from Instagram's (DATA_MODE_YOUTUBE, not DATA_MODE_APIFY) — YouTube
+// isn't Apify-backed at all, it's a direct call to the official Data API v3. Kept as its
+// own provider slot (not folded into getPublicContentProvider) since callers need to pick
+// a platform explicitly, not get one swapped in behind a single function.
+export function getYouTubeContentProvider() {
+  const mode = modeFor("DATA_MODE_YOUTUBE");
+  if (mode === "live") {
+    return new YouTubePublicContentProvider();
+  }
+  return new MockYouTubePublicContentProvider();
 }
 
 export function getSentimentProvider() {

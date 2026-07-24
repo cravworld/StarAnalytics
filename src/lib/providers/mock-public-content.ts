@@ -28,6 +28,7 @@ function toRawPost(url: string, i: number): RawPost {
   return {
     id: `agency-post-${i}`,
     source: "agency",
+    platform: "instagram",
     igShortcode: shortcode,
     externalUrl: url,
     authorHandle: "",
@@ -51,6 +52,7 @@ export class MockPublicContentProvider implements PublicContentProvider {
     return VIJAYAM_DETAIL.stream.map((s, i) => ({
       id: `htag-${tag}-${i}`,
       source: "campaign",
+      platform: "instagram",
       igShortcode: `${tag}-${i}`,
       externalUrl: "",
       authorHandle: s.handle,

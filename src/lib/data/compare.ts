@@ -1,6 +1,15 @@
 import { prisma } from "@/lib/prisma";
-import { getInstagramInsightsProvider, getPublicContentProvider } from "@/lib/providers";
-import type { RawPost } from "@/lib/providers/types";
+import { getInstagramInsightsProvider, getPublicContentProvider, getYouTubeContentProvider } from "@/lib/providers";
+import type { PlatformId, RawPost } from "@/lib/providers/types";
+
+const HANDLE_VALIDATORS: Record<PlatformId, { pattern: RegExp; label: string }> = {
+  instagram: { pattern: /^[a-zA-Z0-9._]{1,30}$/, label: "Instagram" },
+  youtube: { pattern: /^[a-zA-Z0-9._-]{3,30}$/, label: "YouTube" },
+};
+
+function contentProviderFor(platform: PlatformId) {
+  return platform === "youtube" ? getYouTubeContentProvider() : getPublicContentProvider();
+}
 
 // Comparison numbers aren't real-time — a follower count or engagement estimate a few
 // hours stale doesn't change a strategic read. Named constant, not a magic number
@@ -31,9 +40,10 @@ async function storeCompetitorPosts(competitorId: string, posts: RawPost[]): Pro
   for (const p of posts) {
     if (!p.igShortcode) continue;
     await prisma.post.upsert({
-      where: { igShortcode: p.igShortcode },
+      where: { platform_igShortcode: { platform: p.platform, igShortcode: p.igShortcode } },
       create: {
         source: "competitor",
+        platform: p.platform,
         igShortcode: p.igShortcode,
         externalUrl: p.externalUrl,
         authorHandle: p.authorHandle,
@@ -60,30 +70,31 @@ async function storeCompetitorPosts(competitorId: string, posts: RawPost[]): Pro
   }
 }
 
-// The only place a real Apify call for a competitor happens. Called from addCompetitor
+// The only place a real scrape/API call for a competitor happens. Called from addCompetitor
 // (first add) and refreshStaleCompetitors (cron, TTL-gated) — never from a page render.
-async function scrapeCompetitor(handle: string): Promise<void> {
-  const snapshot = await getPublicContentProvider().scrapeByHandle(handle);
+async function scrapeCompetitor(handle: string, platform: PlatformId): Promise<void> {
+  const snapshot = await contentProviderFor(platform).scrapeByHandle(handle);
   const competitor = await prisma.competitorAccount.upsert({
-    where: { igHandle: snapshot.handle },
-    create: { igHandle: snapshot.handle, displayName: snapshot.displayName, followers: snapshot.followers, lastScrapedAt: new Date() },
+    where: { platform_igHandle: { platform, igHandle: snapshot.handle } },
+    create: { platform, igHandle: snapshot.handle, displayName: snapshot.displayName, followers: snapshot.followers, lastScrapedAt: new Date() },
     update: { displayName: snapshot.displayName, followers: snapshot.followers, lastScrapedAt: new Date() },
   });
   await storeCompetitorPosts(competitor.id, snapshot.posts);
 }
 
-export async function addCompetitor(handleInput: string): Promise<void> {
+export async function addCompetitor(handleInput: string, platform: PlatformId = "instagram"): Promise<void> {
   const handle = handleInput.replace(/^@/, "").trim();
   if (!handle) throw new Error("handle is required");
-  if (!/^[a-zA-Z0-9._]{1,30}$/.test(handle)) throw new Error("not a valid Instagram handle");
+  const validator = HANDLE_VALIDATORS[platform];
+  if (!validator.pattern.test(handle)) throw new Error(`not a valid ${validator.label} handle`);
 
-  const existing = await prisma.competitorAccount.findUnique({ where: { igHandle: handle } });
+  const existing = await prisma.competitorAccount.findUnique({ where: { platform_igHandle: { platform, igHandle: handle } } });
   if (existing) return;
 
   // A brand-new row has no lastScrapedAt, so this is the one case that always scrapes —
   // it falls out of the same "does this row need a fresh scrape" question refreshStaleCompetitors
   // asks, not a special first-add exception.
-  await scrapeCompetitor(handle);
+  await scrapeCompetitor(handle, platform);
 }
 
 export async function removeCompetitor(id: string): Promise<void> {
@@ -102,7 +113,7 @@ export async function refreshStaleCompetitors(): Promise<{ handle: string; ok: b
   for (const c of all) {
     if (!isStale(c.lastScrapedAt)) continue;
     try {
-      await scrapeCompetitor(c.igHandle);
+      await scrapeCompetitor(c.igHandle, c.platform);
       results.push({ handle: c.igHandle, ok: true });
     } catch (err) {
       results.push({ handle: c.igHandle, ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -122,6 +133,7 @@ function relativeTime(date: Date): string {
 
 export interface CompareColumn {
   id: string;
+  platform: PlatformId;
   handle: string;
   displayName: string;
   followers: number;
@@ -136,7 +148,7 @@ export interface CompareColumn {
   lastUpdatedLabel: string | null;
 }
 
-async function competitorColumn(c: { id: string; igHandle: string; displayName: string | null; followers: number | null; lastScrapedAt: Date | null }): Promise<CompareColumn> {
+async function competitorColumn(c: { id: string; platform: PlatformId; igHandle: string; displayName: string | null; followers: number | null; lastScrapedAt: Date | null }): Promise<CompareColumn> {
   const recentPosts = await prisma.post.findMany({
     where: { competitorId: c.id },
     orderBy: { postedAt: "desc" },
@@ -163,17 +175,20 @@ async function competitorColumn(c: { id: string; igHandle: string; displayName: 
 
   return {
     id: c.id,
+    platform: c.platform,
     handle: `@${c.igHandle}`,
     displayName: c.displayName ?? c.igHandle,
     followers,
     followersDisplay: fmtCompact(followers),
     avgLikesPerPost: Math.round(avgLikesPerPost),
     postsPerWeek: Math.round(postsPerWeek * 10) / 10,
-    // Apify's post-scraper only exposes video view counts under a paid "detailed data"
-    // tier this integration doesn't request (see apify-normalize.ts) — reach/views are
-    // never collected for any scraped post (Phase 1 rule), competitors included. Marking
-    // this "not evaluated" rather than fabricating a number to match the DPR's table,
-    // same discipline as Phase 3's FLAG_REGISTRY and Phase 4's partial-sentiment states.
+    // Instagram: Apify's post-scraper only exposes video view counts under a paid
+    // "detailed data" tier this integration doesn't request (see apify-normalize.ts) —
+    // reach/views are never collected for a scraped Instagram post. YouTube's `Post.reach`
+    // DOES hold a real public view count (see youtube-normalize.ts) but this recomputation
+    // pass doesn't yet derive a per-platform "reel avg views" from it — left null here for
+    // both platforms rather than half-computing one and not the other; a real follow-up if
+    // YouTube competitor view-count comparison turns out to matter.
     reelAvgViews: null,
     engagementRateEstimate: Math.round(engagementRateEstimate * 100) / 100,
     isEngagementEstimate: true,
@@ -200,6 +215,7 @@ async function selfColumn(): Promise<CompareColumn> {
   const avgLikesPerPost = SELF_AVG_LIKES_PER_POST_MOCK;
   return {
     id: "self",
+    platform: "instagram",
     handle: "@nivinpauly",
     displayName: "Nivin Pauly",
     followers: insights.followers,

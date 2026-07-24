@@ -38,10 +38,21 @@ enum PostSource {
   campaign
 }
 
+// Instagram-only originally — YouTube added as a second platform. Kept as an
+// extensible enum (not a boolean) so a third platform is additive, not another migration.
+enum Platform {
+  instagram
+  youtube
+}
+
 model Post {
   id            String     @id @default(uuid())
   source        PostSource
-  igShortcode   String?    @unique @map("ig_shortcode")
+  // Platform-neutral despite the name, kept as-is (not renamed) to avoid touching every
+  // one of its 9 call sites across the ingestion pipeline on a table with real production
+  // data — see the multi-platform migration notes. Holds a YouTube video ID too now.
+  platform      Platform   @default(instagram)
+  igShortcode   String?    @map("ig_shortcode")
   externalUrl   String?    @map("external_url")
   authorHandle  String?    @map("author_handle")
   mediaType     String?    @map("media_type")
@@ -71,6 +82,11 @@ model Post {
   postComments       PostComment[]
   alerts             Alert[]
 
+  // Composite, not single-column: a YouTube video ID and an Instagram shortcode occupy the
+  // same string space and could theoretically collide. Every existing row defaults to
+  // platform=instagram, so this is equivalent to the old single-column @unique for current
+  // data — additive, non-destructive.
+  @@unique([platform, igShortcode])
   @@map("posts")
 }
 
@@ -143,7 +159,11 @@ model Agency {
 
 model CompetitorAccount {
   id            String    @id @default(uuid())
-  igHandle      String    @unique @map("ig_handle")
+  platform      Platform  @default(instagram)
+  // Kept as igHandle (not renamed to `handle`) for the same reason as Post.igShortcode —
+  // holds a YouTube channel handle too now, but renaming touches every call site for a
+  // cosmetic win. See the multi-platform migration notes.
+  igHandle      String    @map("ig_handle")
   displayName   String?   @map("display_name")
   followers     Int?
   addedBy       String?   @map("added_by")
@@ -151,12 +171,14 @@ model CompetitorAccount {
 
   posts Post[]
 
+  @@unique([platform, igHandle])
   @@map("competitor_accounts")
 }
 
 model FanPage {
   id            String    @id @default(uuid())
-  igHandle      String    @unique @map("ig_handle")
+  platform      Platform  @default(instagram)
+  igHandle      String    @map("ig_handle")
   displayName   String?   @map("display_name")
   followers     Int?
   lastCheckedAt DateTime? @map("last_checked_at")
@@ -166,6 +188,7 @@ model FanPage {
   posts  Post[]
   alerts Alert[]
 
+  @@unique([platform, igHandle])
   @@map("fan_pages")
 }
 

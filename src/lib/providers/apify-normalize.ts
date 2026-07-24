@@ -47,6 +47,7 @@ function toRawPost(item: ActorItem, source: RawPost["source"]): RawPost {
   return {
     id: shortcode || crypto.randomUUID(),
     source,
+    platform: "instagram",
     igShortcode: shortcode,
     externalUrl: str(item, "url", "inputUrl") ?? "",
     authorHandle: str(item, "ownerUsername", "username") ?? "",
