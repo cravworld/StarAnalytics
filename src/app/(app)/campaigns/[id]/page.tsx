@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/Card";
 import { Pill, LiveDot } from "@/components/ui/Pill";
 import { LiveStream } from "@/components/campaigns/LiveStream";
 import { SentimentBar } from "@/components/campaigns/SentimentBar";
+import { SentimentTrendLine } from "@/components/charts/SentimentTrendLine";
 
 export default async function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -102,6 +103,18 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
           </Card>
         </div>
       </div>
+
+      <Card title="Sentiment Over Time">
+        {v.sentimentTrend.length >= 2 ? (
+          <SentimentTrendLine data={v.sentimentTrend} />
+        ) : (
+          <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0" }}>
+            {v.sentimentTrend.length === 0
+              ? "No classified posts yet — a trend needs at least two days with classified posts."
+              : "Only one day of classified posts so far — a trend needs at least two."}
+          </div>
+        )}
+      </Card>
 
       <Card title="Live Post Stream">
         <LiveStream campaignId={v.id} initial={v.stream} />

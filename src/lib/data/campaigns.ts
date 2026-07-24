@@ -173,6 +173,14 @@ export interface CampaignSentimentItem {
   keywords: string[];
 }
 
+// One entry per calendar day that has at least one classified post — sparse, not padded
+// to a fixed window, since campaigns vary widely in how long they've been tracked.
+export interface SentimentTrendPoint {
+  date: string; // YYYY-MM-DD
+  positivePct: number;
+  classified: number;
+}
+
 export interface CampaignDetail {
   id: string;
   tag: string;
@@ -183,6 +191,7 @@ export interface CampaignDetail {
   peakLabel: string;
   sentiment: CampaignSentiment | null;
   sentimentItems: { pos: CampaignSentimentItem[]; neu: CampaignSentimentItem[]; neg: CampaignSentimentItem[] };
+  sentimentTrend: SentimentTrendPoint[];
   geoSpreadPending: { reason: string };
   keywordPills: string[];
   stream: StreamItem[];
@@ -280,6 +289,25 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
   sentimentItems.neu.sort((a, b) => b.score - a.score);
   sentimentItems.neg.sort((a, b) => b.score - a.score);
 
+  // Bucketed by the post's actual postedAt date, not analyzedAt — analyzedAt reflects
+  // when a backfill/cron happened to classify it (often clustered in one run), while
+  // postedAt reflects the real campaign timeline this chart is meant to show.
+  const dayBuckets = new Map<string, { pos: number; neu: number; neg: number }>();
+  for (const s of sentiments) {
+    const post = postsById.get(s.postId);
+    const day = (post?.postedAt ?? post?.scrapedAt)?.toISOString().slice(0, 10);
+    if (!day) continue;
+    const bucket = dayBuckets.get(day) ?? { pos: 0, neu: 0, neg: 0 };
+    bucket[s.label]++;
+    dayBuckets.set(day, bucket);
+  }
+  const sentimentTrend: SentimentTrendPoint[] = Array.from(dayBuckets.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, b]) => {
+      const classified = b.pos + b.neu + b.neg;
+      return { date, positivePct: classified ? Math.round((b.pos / classified) * 100) : 0, classified };
+    });
+
   const keywordFreq = new Map<string, number>();
   for (const s of sentiments) {
     for (const kw of s.keywords) {
@@ -321,6 +349,7 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     peakLabel,
     sentiment,
     sentimentItems,
+    sentimentTrend,
     geoSpreadPending: {
       reason: "No location signal in current scrape scope — public post scrapes don't carry geo data.",
     },
