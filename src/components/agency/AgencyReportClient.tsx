@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { Agency } from "@prisma/client";
 import { analyseAgencyPostsAction, getAgencyRunResultsAction } from "@/lib/actions/agency";
 import { parseAgencyFile, parsePastedText, type AgencyUrlRow } from "@/lib/upload/parseAgencySheet";
@@ -50,6 +50,7 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
   const [result, setResult] = useState<AgencyRunResults | null>(null);
   const [selectedFlag, setSelectedFlag] = useState<Flag | null>(null);
   const [isPending, startTransition] = useTransition();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [search, setSearch] = useState("");
   const [agencyFilter, setAgencyFilter] = useState("all");
@@ -197,7 +198,13 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
         <div className="g2">
           <div>
             <label className="upload-zone" style={{ display: "block" }}>
-              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} style={{ display: "none" }} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={handleFile}
+                style={{ display: "none" }}
+              />
               <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                 <polyline points="14,2 14,8 20,8" />
@@ -208,7 +215,20 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
               <div style={{ fontSize: 12, color: "var(--muted)" }}>
                 Excel or CSV · columns: Agency Name, Post URL
               </div>
-              <button type="button" className="btn" style={{ marginTop: 12, fontSize: 12 }}>
+              <button
+                type="button"
+                className="btn"
+                style={{ marginTop: 12, fontSize: 12 }}
+                onClick={(e) => {
+                  // A nested interactive element inside the <label> makes browsers'
+                  // click-to-input forwarding unreliable — take over explicitly rather
+                  // than relying on it, and stop the label's own forwarding from also
+                  // firing (which would open two file dialogs back to back).
+                  e.preventDefault();
+                  e.stopPropagation();
+                  fileInputRef.current?.click();
+                }}
+              >
                 Browse file
               </button>
             </label>

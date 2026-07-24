@@ -78,58 +78,6 @@ export const RECENT_POSTS = [
   { icon: "🎬", stat: "310K views" },
 ];
 
-export const COMPARE_METRICS = [
-  { label: "Followers", self: "7.4M", selfPct: 81, other: "9.1M", otherPct: 100, otherWins: true },
-  { label: "Engagement Rate", self: "4.2%", selfPct: 100, other: "3.7%", otherPct: 88, otherWins: false },
-  { label: "Avg Likes/Post", self: "621K", selfPct: 100, other: "588K", otherPct: 94, otherWins: false },
-  { label: "Posts/Week", self: "2.1", selfPct: 52, other: "4.0", otherPct: 100, otherWins: true },
-  { label: "Reel Avg Views", self: "2.8M", selfPct: 82, other: "3.4M", otherPct: 100, otherWins: true },
-  { label: "Story Response Rate", self: "1.8%", selfPct: 100, other: null, otherPct: 0, otherWins: false, otherPrivate: true },
-];
-
-export const CAMPAIGNS = [
-  {
-    id: "vijayam",
-    icon: "🎬",
-    iconBg: "#fde8ef",
-    name: "#vijayam — Movie Announcement",
-    status: "live" as const,
-    featured: true,
-    meta: "Started Jul 8, 2026 · #vijayam · #NivinPauly · #vijayammovie",
-    stats: [
-      { label: "posts today", value: "3,847" },
-      { label: "reach", value: "14.2M" },
-      { label: "avg eng", value: "8.4%" },
-      { label: "positive sentiment", value: "78%" },
-    ],
-  },
-  {
-    id: "bku",
-    icon: "🎥",
-    iconBg: "#e3f2fd",
-    name: "Bethleham Kudumba Unit — Launch Campaign",
-    status: "live" as const,
-    featured: false,
-    meta: "Jun 19 – Jul 10, 2026 · #BethlehemKudumbaUnit · #BKULaunch · #NivinPauly",
-    stats: [
-      { label: "posts", value: "60.9K" },
-      { label: "reach", value: "14.2M" },
-      { label: "avg eng", value: "5.8%" },
-      { label: "team posts", value: "22" },
-    ],
-  },
-  {
-    id: "kalyan",
-    icon: "🏠",
-    iconBg: "#e8f5e9",
-    name: "Kalyan Homes — Brand Partnership",
-    status: "planned" as const,
-    featured: false,
-    meta: "Starts Jul 15, 2026 · Hashtags TBD · 4 posts scheduled",
-    stats: [],
-  },
-];
-
 export const VIJAYAM_DETAIL = {
   tag: "#vijayam",
   startedLabel: "Announcement campaign · Started Jul 8, 2026",
@@ -179,21 +127,3 @@ export const TRACKED_HASHTAGS = [
   { name: "#NivinFans", fillPct: 22, posts: "28K posts", eng: "5.1%", tag: "Active" },
 ];
 
-export const AUTH_FLAGS = [
-  { severity: "red" as const, icon: "⚠️", title: "Engagement velocity anomaly", desc: "Posts gained 10K+ likes within 2 minutes of publishing — consistent with purchased engagement.", tags: ["Influx Kerala · 12 posts", "NovaSocial · 8 posts"] },
-  { severity: "red" as const, icon: "🤖", title: "Generic comment patterns", desc: "High volume of single-emoji or copy-paste comments from accounts with 0 posts.", tags: ["BuzzBridge · 9 posts", "Influx Kerala · 6 posts"] },
-  { severity: "amber" as const, icon: "👁", title: "Low save-to-like ratio", desc: "Unusually high likes but near-zero saves — real audiences save valuable content.", tags: ["BuzzBridge · 14 posts"] },
-  { severity: "amber" as const, icon: "🕐", title: "Off-hours engagement spike", desc: "Significant engagement between 2–4 AM IST, inconsistent with Kerala audience active hours.", tags: ["NovaSocial · 5 posts"] },
-];
-
-export const POSITIVE_SIGNALS = [
-  { icon: "💬", title: "Real conversations", desc: "7 agencies show organic comment threads with replies — strong authenticity signal." },
-  { icon: "📤", title: "High share rate", desc: "Pixelwave, Reelcraft, SocialSpark show share rates 3× above campaign avg — genuine virality." },
-  { icon: "✅", title: "Audience overlap verified", desc: "62% of engaging accounts follow @nivinpauly — genuinely relevant audience." },
-];
-
-export const ALERTS = [
-  { icon: "🔔", bold: "@nivin_fanz_official", text: " posted about #vijayam — 6.1K likes in 14 min", time: "14m", dim: false },
-  { icon: "🔔", bold: "@fanfire_nivin", text: " Reel about #vijayam crossed 100K views", time: "1h", dim: true },
-  { icon: "🔔", bold: "@nivin_vijayadal", text: " (12K followers) started posting #vijayam", time: "2h", dim: true, prefix: "New fan page detected: " },
-];

@@ -16,11 +16,3 @@ export function ScreenError({ message = "Something went wrong loading this scree
     </div>
   );
 }
-
-export function ScreenEmpty({ message }: { message: string }) {
-  return (
-    <div className="card" style={{ textAlign: "center", color: "var(--muted)", fontSize: 12 }}>
-      {message}
-    </div>
-  );
-}
