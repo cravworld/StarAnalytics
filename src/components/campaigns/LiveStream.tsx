@@ -31,6 +31,7 @@ interface PostRow {
   caption: string | null;
   likes: number | null;
   comments: number | null;
+  external_url: string | null;
 }
 
 function rowToStreamItem(row: PostRow, i: number): StreamItem {
@@ -49,6 +50,7 @@ function rowToStreamItem(row: PostRow, i: number): StreamItem {
     // Realtime inserts don't re-run the fan-page lookup that the initial server
     // render does — new items show as "Public" until the next full page load.
     tag: "Public",
+    externalUrl: row.external_url ?? null,
   };
 }
 
@@ -106,9 +108,22 @@ export function LiveStream({ campaignId, initial }: { campaignId: string; initia
               {s.av}
             </div>
             <div className="stream-body">
-              <span className="stream-handle">{s.handle}</span>
+              <a
+                className="stream-handle"
+                href={`https://instagram.com/${s.handle.replace(/^@/, "")}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {s.handle}
+              </a>
               <span className="stream-time">{s.time}</span>
-              <StreamText text={s.text} />
+              {s.externalUrl ? (
+                <a href={s.externalUrl} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
+                  <StreamText text={s.text} />
+                </a>
+              ) : (
+                <StreamText text={s.text} />
+              )}
               <div className="stream-stats">
                 <span className="sst">♥ {s.likes}</span>
                 <span className="sst">💬 {s.comments}</span>

@@ -115,6 +115,7 @@ export interface StreamItem {
   likes: string;
   comments: string;
   tag: "Fan page" | "Public";
+  externalUrl: string | null;
 }
 
 function toStreamItem(
@@ -126,6 +127,7 @@ function toStreamItem(
     caption: string | null;
     likes: number | null;
     comments: number | null;
+    externalUrl?: string | null;
   },
   isFanPage: boolean,
   i: number,
@@ -143,6 +145,7 @@ function toStreamItem(
     likes: String(p.likes ?? 0),
     comments: String(p.comments ?? 0),
     tag: isFanPage ? "Fan page" : "Public",
+    externalUrl: p.externalUrl ?? null,
   };
 }
 
@@ -157,6 +160,19 @@ export interface CampaignSentiment {
   negativePct: number;
 }
 
+// One entry per classified post — sentiment is scored per post (caption + up to 20
+// comments combined into one text block, see classifyPostsForSentiment), not per
+// individual comment, so this is "posts whose overall sentiment came out negative",
+// not a list of individual negative comments.
+export interface CampaignSentimentItem {
+  id: string;
+  handle: string;
+  externalUrl: string | null;
+  caption: string;
+  score: number;
+  keywords: string[];
+}
+
 export interface CampaignDetail {
   id: string;
   tag: string;
@@ -166,6 +182,7 @@ export interface CampaignDetail {
   hourlyVolume: number[];
   peakLabel: string;
   sentiment: CampaignSentiment | null;
+  sentimentItems: { pos: CampaignSentimentItem[]; neu: CampaignSentimentItem[]; neg: CampaignSentimentItem[] };
   geoSpreadPending: { reason: string };
   keywordPills: string[];
   stream: StreamItem[];
@@ -239,6 +256,30 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
       }
     : null;
 
+  const postsById = new Map(posts.map((p) => [p.id, p]));
+  const sentimentItems: { pos: CampaignSentimentItem[]; neu: CampaignSentimentItem[]; neg: CampaignSentimentItem[] } = {
+    pos: [],
+    neu: [],
+    neg: [],
+  };
+  for (const s of sentiments) {
+    const post = postsById.get(s.postId);
+    if (!post) continue;
+    const handle = (post.authorHandle ?? "").replace(/^@/, "");
+    sentimentItems[s.label].push({
+      id: post.id,
+      handle: handle ? `@${handle}` : "@unknown",
+      externalUrl: post.externalUrl ?? null,
+      caption: post.caption ?? "",
+      score: s.score,
+      keywords: s.keywords,
+    });
+  }
+  // Most confident/intense first within each label — surfaces the clearest examples up top.
+  sentimentItems.pos.sort((a, b) => b.score - a.score);
+  sentimentItems.neu.sort((a, b) => b.score - a.score);
+  sentimentItems.neg.sort((a, b) => b.score - a.score);
+
   const keywordFreq = new Map<string, number>();
   for (const s of sentiments) {
     for (const kw of s.keywords) {
@@ -279,6 +320,7 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     hourlyVolume,
     peakLabel,
     sentiment,
+    sentimentItems,
     geoSpreadPending: {
       reason: "No location signal in current scrape scope — public post scrapes don't carry geo data.",
     },

@@ -1,8 +1,63 @@
-import type { CampaignSentiment } from "@/lib/data/campaigns";
+"use client";
+
+import { useState } from "react";
+import type { CampaignSentiment, CampaignSentimentItem } from "@/lib/data/campaigns";
 
 // Renders a partial (not "complete-looking but actually partial") aggregate — see
 // AGENTS.md Phase 4 §B4. sentiment is null only when zero posts are classified yet.
-export function SentimentBar({ sentiment }: { sentiment: CampaignSentiment | null }) {
+
+const LABEL_META = {
+  pos: { color: "#1a7a4a", noun: "positive" },
+  neu: { color: "#bdbdbd", noun: "neutral" },
+  neg: { color: "#c62828", noun: "negative" },
+} as const;
+
+type Label = keyof typeof LABEL_META;
+
+function ItemList({ items }: { items: CampaignSentimentItem[] }) {
+  if (items.length === 0) {
+    return <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0" }}>Nothing in this bucket.</div>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8, maxHeight: 280, overflowY: "auto" }}>
+      {items.map((item) => (
+        <div
+          key={item.id}
+          style={{ padding: "8px 10px", background: "var(--faint)", borderRadius: 6, fontSize: 12 }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+            {item.externalUrl ? (
+              <a href={item.externalUrl} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 600 }}>
+                {item.handle}
+              </a>
+            ) : (
+              <span style={{ fontWeight: 600 }}>{item.handle}</span>
+            )}
+            <span style={{ color: "var(--muted)" }}>{Math.round(item.score * 100)}%</span>
+          </div>
+          {item.caption && (
+            <div style={{ color: "var(--muted)", marginTop: 4, whiteSpace: "pre-wrap" }}>
+              {item.caption.length > 200 ? `${item.caption.slice(0, 200)}…` : item.caption}
+            </div>
+          )}
+          {item.keywords.length > 0 && (
+            <div style={{ marginTop: 4, color: "var(--faint)" }}>{item.keywords.join(" · ")}</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function SentimentBar({
+  sentiment,
+  items,
+}: {
+  sentiment: CampaignSentiment | null;
+  items: { pos: CampaignSentimentItem[]; neu: CampaignSentimentItem[]; neg: CampaignSentimentItem[] };
+}) {
+  const [open, setOpen] = useState<Label | null>(null);
+
   if (!sentiment) {
     return (
       <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0" }}>
@@ -12,24 +67,55 @@ export function SentimentBar({ sentiment }: { sentiment: CampaignSentiment | nul
   }
 
   const { positivePct, neutralPct, negativePct, classifiedCount, totalCount } = sentiment;
+  const pct: Record<Label, number> = { pos: positivePct, neu: neutralPct, neg: negativePct };
 
   return (
     <div style={{ padding: "8px 0" }}>
       <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", background: "var(--faint)" }}>
-        <div style={{ width: `${positivePct}%`, background: "#1a7a4a" }} />
-        <div style={{ width: `${neutralPct}%`, background: "#bdbdbd" }} />
-        <div style={{ width: `${negativePct}%`, background: "#c62828" }} />
+        {(Object.keys(LABEL_META) as Label[]).map((label) => (
+          <button
+            key={label}
+            type="button"
+            aria-label={`Show ${LABEL_META[label].noun} posts`}
+            onClick={() => setOpen((prev) => (prev === label ? null : label))}
+            style={{
+              width: `${pct[label]}%`,
+              background: LABEL_META[label].color,
+              border: "none",
+              padding: 0,
+              cursor: pct[label] > 0 ? "pointer" : "default",
+              opacity: open && open !== label ? 0.5 : 1,
+            }}
+          />
+        ))}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 11 }}>
-        <span style={{ color: "#1a7a4a" }}>{positivePct}% positive</span>
-        <span style={{ color: "var(--muted)" }}>{neutralPct}% neutral</span>
-        <span style={{ color: "#c62828" }}>{negativePct}% negative</span>
+        {(Object.keys(LABEL_META) as Label[]).map((label) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => setOpen((prev) => (prev === label ? null : label))}
+            disabled={items[label].length === 0}
+            style={{
+              background: "none",
+              border: "none",
+              padding: 0,
+              color: LABEL_META[label].color === "#bdbdbd" ? "var(--muted)" : LABEL_META[label].color,
+              cursor: items[label].length > 0 ? "pointer" : "default",
+              fontWeight: open === label ? 700 : 400,
+              textDecoration: open === label ? "underline" : "none",
+            }}
+          >
+            {pct[label]}% {LABEL_META[label].noun}
+          </button>
+        ))}
       </div>
       {classifiedCount < totalCount && (
         <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 6 }}>
           {classifiedCount} of {totalCount} posts classified
         </div>
       )}
+      {open && <ItemList items={items[open]} />}
     </div>
   );
 }

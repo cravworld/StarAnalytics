@@ -76,7 +76,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
           </div>
           <div style={{ marginTop: 14 }}>
             <div className="card-title">Sentiment</div>
-            <SentimentBar sentiment={v.sentiment} />
+            <SentimentBar sentiment={v.sentiment} items={v.sentimentItems} />
           </div>
         </Card>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
