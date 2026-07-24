@@ -3,6 +3,11 @@ import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
 import { TrackHashtagForm } from "@/components/campaigns/TrackHashtagForm";
 
+// trackHashtagAction's after()-queued comment-scrape + sentiment classification can
+// take well past the default serverless timeout for a hashtag with many posts — same
+// fix as the agency page's maxDuration export, needed here for the same reason.
+export const maxDuration = 300;
+
 const TAG_KIND: Record<string, "new" | "hot" | "live" | "default"> = {
   New: "new",
   Trending: "hot",
