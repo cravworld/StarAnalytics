@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { prisma } from "@/lib/prisma";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
+import { TopbarExportProvider } from "./TopbarExportContext";
 
 export async function AppShell({ children }: { children: ReactNode }) {
   // Was a hardcoded "24" left over from the Phase 0 prototype — wired to a real count
@@ -10,12 +11,12 @@ export async function AppShell({ children }: { children: ReactNode }) {
   const fanPageCount = await prisma.fanPage.count({ where: { isActive: true } });
 
   return (
-    <>
+    <TopbarExportProvider>
       <Sidebar fanPageCount={fanPageCount} />
       <div className="main">
         <Topbar />
         <div className="content">{children}</div>
       </div>
-    </>
+    </TopbarExportProvider>
   );
 }

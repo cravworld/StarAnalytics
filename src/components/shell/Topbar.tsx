@@ -1,6 +1,8 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { downloadCsv } from "@/lib/csv";
+import { useTopbarExportConfig } from "./TopbarExportContext";
 
 const BREADCRUMBS: Record<string, string[]> = {
   "/": ["Dashboard"],
@@ -18,6 +20,7 @@ const KNOWN_CAMPAIGN_SUBROUTES = ["/campaigns/hashtag", "/campaigns/agency", "/c
 
 export function Topbar() {
   const pathname = usePathname();
+  const { config } = useTopbarExportConfig();
   // Campaign detail routes are /campaigns/[id] — id is a DB-generated uuid, not a
   // fixed slug, so it can't live in the static BREADCRUMBS map above.
   const isCampaignDetail =
@@ -39,8 +42,21 @@ export function Topbar() {
         ))}
       </div>
       <div className="topbar-actions">
-        <button className="tb-btn">Last 30 days ▾</button>
-        <button className="tb-btn primary">Export</button>
+        {/* Dashboard/Content/Audience run on mock InstagramInsights until Phase 7 (real
+            Graph API, since/until-based) — a date range here would either do nothing or
+            fabricate per-range numbers. Disabled rather than faked; re-enable once Phase 7
+            wires a real date dimension into at least one screen. */}
+        <button className="tb-btn" disabled title="Date range filtering lands with Phase 7 (Instagram Graph API) — no honest range-backed data exists yet">
+          Last 30 days ▾
+        </button>
+        <button
+          className="tb-btn primary"
+          disabled={!config}
+          title={config ? `Export ${config.filename}` : "No exportable data on this screen"}
+          onClick={() => config && downloadCsv(config.filename, config.csv())}
+        >
+          Export
+        </button>
       </div>
     </div>
   );
