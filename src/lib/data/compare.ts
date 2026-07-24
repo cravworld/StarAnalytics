@@ -50,6 +50,11 @@ async function storeCompetitorPosts(competitorId: string, posts: RawPost[]): Pro
         mediaType: p.mediaType,
         caption: p.caption,
         postedAt: new Date(p.postedAt),
+        // Was never persisted here before YouTube existed — Instagram's reach is always
+        // null for scraped posts (see Phase 1 rule), so the gap was invisible. YouTube's
+        // reach holds a real public view count (see youtube-normalize.ts) that this was
+        // silently dropping.
+        reach: p.reach,
         likes: p.likes,
         comments: p.comments,
         raw: p.raw as object,
@@ -60,6 +65,7 @@ async function storeCompetitorPosts(competitorId: string, posts: RawPost[]): Pro
         mediaType: p.mediaType,
         caption: p.caption,
         postedAt: new Date(p.postedAt),
+        reach: p.reach,
         likes: p.likes,
         comments: p.comments,
         raw: p.raw as object,
