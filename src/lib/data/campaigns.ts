@@ -149,6 +149,24 @@ function toStreamItem(
   };
 }
 
+// Recent-30 stream for a single campaign, independent of getCampaignDetail's full-history
+// query — this is the poll target for LiveStream.tsx (see requireSession()-gated
+// getCampaignStreamAction), so it stays a light, single-purpose query rather than
+// recomputing hourly volume/sentiment/etc. on every ~8s poll tick.
+export async function getCampaignStream(campaignId: string): Promise<StreamItem[]> {
+  const posts = await prisma.post.findMany({
+    where: { campaignId },
+    orderBy: { postedAt: "desc" },
+    take: 30,
+  });
+  const fanPageHandles = new Set(
+    (await prisma.fanPage.findMany({ where: { isActive: true }, select: { igHandle: true } })).map((f) =>
+      f.igHandle.replace(/^@/, "").toLowerCase(),
+    ),
+  );
+  return posts.map((p, i) => toStreamItem(p, fanPageHandles.has((p.authorHandle ?? "").replace(/^@/, "").toLowerCase()), i));
+}
+
 // null when zero posts are classified yet — render the full "Pending" placeholder in that
 // case. Otherwise these percentages are computed over classifiedCount posts, not totalCount —
 // classifiedCount/totalCount are shown alongside so a partial campaign never looks complete.
