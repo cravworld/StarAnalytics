@@ -57,6 +57,7 @@ See `.env.example` for the full annotated list. Highlights:
 | `npm run db:migrate` | `prisma migrate dev` against `DATABASE_URL` |
 | `npm run db:validate` | Validate the Prisma schema |
 | `npm run db:studio` | Prisma Studio |
+| `npm run data-rights:lookup -- <handle>` | Read-only DPDP access/deletion-request lookup — see `DATA-PRIVACY.md` |
 
 ## Architecture
 

@@ -13,7 +13,8 @@
     "test:unit": "vitest run",
     "db:migrate": "node --env-file=.env.local node_modules/prisma/build/index.js migrate dev",
     "db:validate": "node --env-file=.env.local node_modules/prisma/build/index.js validate",
-    "db:studio": "node --env-file=.env.local node_modules/prisma/build/index.js studio"
+    "db:studio": "node --env-file=.env.local node_modules/prisma/build/index.js studio",
+    "data-rights:lookup": "node --env-file=.env.local scripts/lookup-personal-data.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
