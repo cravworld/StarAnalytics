@@ -15,8 +15,10 @@ export interface ParseResult {
 }
 
 // Plausible IG post/reel URL — rows that don't match are dropped and counted,
-// never silently queued as if they were valid.
-const IG_POST_URL_RE = /instagram\.com\/(p|reel|reels)\/[A-Za-z0-9_-]+/i;
+// never silently queued as if they were valid. Exported so the server-side action
+// can re-validate: this file runs in the browser, so its checks are a UX nicety,
+// not a security boundary — the server must never trust them.
+export const IG_POST_URL_RE = /instagram\.com\/(p|reel|reels)\/[A-Za-z0-9_-]+/i;
 
 function toRows(records: unknown[][]): ParseResult {
   const rows: AgencyUrlRow[] = [];

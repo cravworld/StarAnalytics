@@ -4,6 +4,7 @@ import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createCampaign, trackHashtag } from "@/lib/data/campaigns";
 import { queueSentimentClassification } from "@/lib/data/sentiment";
+import { requireSession } from "@/lib/require-session";
 
 export async function createCampaignAction(input: {
   name: string;
@@ -13,6 +14,7 @@ export async function createCampaignAction(input: {
   endDate?: string;
   type?: string;
 }) {
+  await requireSession();
   const campaign = await createCampaign(input);
   revalidatePath("/campaigns");
 
@@ -38,6 +40,7 @@ export async function createCampaignAction(input: {
 }
 
 export async function trackHashtagAction(tag: string) {
+  await requireSession();
   const postIds = await trackHashtag(tag);
   // Comment-scrape + classify queued as a side effect of this ingestion path, not a manual
   // trigger the team has to remember to run — see AGENTS.md Phase 4 §B3.
