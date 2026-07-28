@@ -8,7 +8,7 @@ Not user-facing — this is the operating record from a DPDP (India's Digital Pe
 |---|---|---|---|
 | Account email/name/role | `users` | Internal team / agency logins | Access control for the app itself |
 | Post caption, author handle, engagement counts | `posts` | Public post authors (third parties, not our users) | Campaign/competitor analytics |
-| Full raw scrape payload | `posts.raw` | Same | Not yet audited for exact contents — see Open Items |
+| Full raw scrape payload | `posts.raw`, `post_comments.raw` | Same | Never read back by the app (confirmed by grep) — kept only as an ingestion artifact. Run `npm run audit:raw-payload` to see what's actually in it. Pruned after `RAW_PAYLOAD_RETENTION_DAYS` (default 90) by the `prune-raw-payloads` cron |
 | Comment text + author handle | `post_comments` | Public commenters (third parties) | Sentiment analysis input |
 | Handle, display name, follower count | `competitor_accounts`, `fan_pages` | Public account owners | Competitor/fan tracking |
 | Sentiment label/score/keywords | `sentiment` | Derived from the above | Campaign performance signal |
@@ -34,7 +34,9 @@ Not user-facing — this is the operating record from a DPDP (India's Digital Pe
 
 ## Retention
 
-No automated retention or deletion exists — scraped data accumulates indefinitely. Not built here since a retention window (how long to keep raw payloads vs. structured/aggregated data) is a product decision, not an engineering default to invent unilaterally. Recommend defining one and then building a pruning job — flagging as an open item below.
+`prune-raw-payloads` (cron, once/day, `src/app/api/cron/prune-raw-payloads/route.ts`) nulls out `posts.raw`/`post_comments.raw` once a row is older than `RAW_PAYLOAD_RETENTION_DAYS` (default **90**, set as a default because nothing in the codebase implied a real number — change the env var if that's wrong for how this data actually gets used). Safe to run: confirmed by grep that no code path reads `raw` back out, so nulling it doesn't touch any feature — only `caption`, `authorHandle`, and the engagement-count columns (already extracted at ingest time) are ever used.
+
+This only covers the one clearly-unused field. Structured data (captions, comments, sentiment, engagement counts) still accumulates indefinitely — a real retention policy for *that* is still a product decision, not something this audit should invent.
 
 ## Handling an access/correction/deletion request
 
@@ -51,6 +53,6 @@ npm run data-rights:lookup -- <handle>
 ## Open items (flagged, not built)
 
 These came out of the audit as real gaps but are scope/product decisions, not something to build unprompted:
-1. **Link `User` to `Agency`** in the schema if `agency_viewer` scoping is ever actually needed — currently structurally impossible without this.
-2. **Define and automate a retention window**, especially for `posts.raw` (unbounded JSON, likely over-collecting beyond what any feature reads).
-3. **Audit `posts.raw` contents** against what Apify's actors actually return, and strip fields nothing in the app uses.
+1. **Link `User` to `Agency`** in the schema if `agency_viewer` scoping is ever actually needed — currently structurally impossible without this. Deferred: no `agency_viewer` account exists yet, so this would be speculative work. Do this **before** onboarding the first external agency login, not after.
+2. **Get the DPDP §3(c)(ii) "public data" legal basis formally confirmed by counsel.** Everything else in this document rests on that holding — it's the single highest-leverage open item.
+3. **Decide a real retention policy for structured data** (captions, comments, sentiment, engagement counts) — `posts.raw` pruning is now automated, but the actual analytics data still accumulates forever.

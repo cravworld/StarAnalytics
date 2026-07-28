@@ -129,6 +129,9 @@ equivalent and are flagged inline in that file for a product decision before shi
   sandbox address, delivery only works to the single email your Resend account was
   signed up with. Verify a domain with Resend before relying on alerts reaching anyone
   else.
+- **Two cron jobs are now configured** (`poll-hashtags`, `prune-raw-payloads`) — both
+  once/day, which fits Vercel Hobby's typical 2-cron-job cap, but confirm against your
+  actual plan before deploying if that limit has changed.
 
 ## Repo-specific note
 

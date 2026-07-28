@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/poll-hashtags",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/prune-raw-payloads",
+      "schedule": "0 7 * * *"
     }
   ]
 }
