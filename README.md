@@ -218,11 +218,14 @@ raw-payload minimization — see the bullets below.
   `RAW_PAYLOAD_RETENTION_DAYS` (default 90, a flagged assumption, not a researched
   number). Structured data (captions, comments, sentiment, engagement counts) still has
   **no** retention policy — that's a real open product decision, not an oversight.
-- **DPDP legal basis is a working assumption, not a confirmed legal position.** Everything
-  scraped (posts, comments, competitor/fan accounts) relies on DPDP §3(c)(ii)'s public-data
-  exclusion — reasonable, but not yet confirmed by counsel. See `DATA-PRIVACY.md` for the
-  full posture, the rights-request lookup tool (`npm run data-rights:lookup -- <handle>`,
-  read-only), and what else is flagged vs. actually built.
+- **DPDP legal basis is a working assumption, not a confirmed legal position, and formal
+  counsel confirmation is deliberately not being pursued.** Everything scraped (posts,
+  comments, competitor/fan accounts) relies on DPDP §3(c)(ii)'s public-data exclusion —
+  reasonable, but never legally confirmed, by product decision rather than oversight.
+  Nothing else in the app or in `DATA-PRIVACY.md` is blocked on this. See
+  `DATA-PRIVACY.md` for the full posture, the rights-request lookup tool
+  (`npm run data-rights:lookup -- <handle>`, read-only), and what else is flagged vs.
+  actually built.
 
 ## Repo-specific note
 

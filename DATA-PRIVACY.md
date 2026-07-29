@@ -16,7 +16,7 @@ Not user-facing — this is the operating record from a DPDP (India's Digital Pe
 ## Legal basis
 
 - **Internal `users` table**: legitimate use — this is access control for an internal tool, not personal data collected from the public.
-- **Everything scraped** (posts, comments, competitor/fan-page accounts, sentiment): the operative basis is **DPDP §3(c)(ii)**, which excludes personal data "made publicly available by the Data Principal" from the Act's scope — applicable as long as scraping stays limited to genuinely public posts/profiles/comments (not private/locked accounts, not DM content). **This has not been formally confirmed by counsel** — it's the audit's working assumption, not a settled legal position. Get that confirmed before treating it as closed, especially as scale grows.
+- **Everything scraped** (posts, comments, competitor/fan-page accounts, sentiment): the operative basis is **DPDP §3(c)(ii)**, which excludes personal data "made publicly available by the Data Principal" from the Act's scope — applicable as long as scraping stays limited to genuinely public posts/profiles/comments (not private/locked accounts, not DM content). **Formal counsel confirmation of this basis is not being pursued** — a product decision, not an oversight. The app proceeds on this working assumption; if that ever needs revisiting (e.g. a regulator inquiry, a scale change), this paragraph is where that conversation starts.
 - Sentiment scoring is algorithmic profiling of public commenters whose age is unknowable from a scraped handle. There's no way to exclude possible minors from this — treat it as a standing structural risk to disclose if this is ever formally reviewed, not something fixable in code.
 
 ## Access control status
@@ -53,6 +53,9 @@ npm run data-rights:lookup -- <handle>
 ## Open items (flagged, not built)
 
 These came out of the audit as real gaps but are scope/product decisions, not something to build unprompted:
-1. **Link `User` to `Agency`** in the schema if `agency_viewer` scoping is ever actually needed — currently structurally impossible without this. Deferred: no `agency_viewer` account exists yet, so this would be speculative work. Do this **before** onboarding the first external agency login, not after.
-2. **Get the DPDP §3(c)(ii) "public data" legal basis formally confirmed by counsel.** Everything else in this document rests on that holding — it's the single highest-leverage open item.
-3. **Decide a real retention policy for structured data** (captions, comments, sentiment, engagement counts) — `posts.raw` pruning is now automated, but the actual analytics data still accumulates forever.
+1. **Link `User` to `Agency`** in the schema if `agency_viewer` scoping is ever actually needed — currently structurally impossible without this. Deferred: no `agency_viewer` account exists yet, so this would be speculative work. Do this **before** onboarding the first external agency login, not after. Independent of item 2 below — this is an access-control gap, not a legal one.
+2. **Decide a real retention policy for structured data** (captions, comments, sentiment, engagement counts) — `posts.raw` pruning is now automated, but the actual analytics data still accumulates forever.
+
+## Deliberately not pursued (a decision was made, not a gap)
+
+- **Formal counsel confirmation of the DPDP §3(c)(ii) legal basis** — decided against pursuing this. The app continues to operate on the working assumption described in "Legal basis" above without a formal legal opinion behind it. Nothing else in this document, nor any open item above, is blocked on this — the two open items above stand on their own regardless of whether that confirmation ever happens.
