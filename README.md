@@ -112,6 +112,37 @@ See `.env.example` for the full annotated list. Highlights:
 Postgres on login (falls back to `role: "team"` if the database isn't reachable, so
 local dev works without a live Supabase project).
 
+## Deploying auth
+
+The deployed app lives at **`https://staranalytics.vercel.app`** (Vercel project
+`star-analytics`). Steps to get Google sign-in working there:
+
+1. **Google Cloud Console** (console.cloud.google.com) → create/select a project →
+   **OAuth consent screen**: External, add your own account under "Test users" while
+   unverified. → **Credentials → Create Credentials → OAuth client ID → Web
+   application**. Authorized redirect URIs — add **both**:
+   ```
+   https://staranalytics.vercel.app/api/auth/callback/google
+   http://localhost:3000/api/auth/callback/google
+   ```
+   Copy the Client ID and Client Secret.
+2. **Vercel** (Project Settings → Environment Variables, set for **Production**;
+   `.env.local` already has the `localhost` equivalents for dev):
+   ```
+   NEXTAUTH_URL=https://staranalytics.vercel.app
+   NEXTAUTH_SECRET=<generate with: openssl rand -base64 32>
+   GOOGLE_CLIENT_ID=<from step 1>
+   GOOGLE_CLIENT_SECRET=<from step 1>
+   ALLOWED_EMAIL_DOMAIN=<your team's domain>   # or ALLOWED_EMAILS — at least one is required outside local dev, the signIn callback fails closed without it
+   ```
+   Auth.js v5 auto-trusts the host on Vercel deployments even without `NEXTAUTH_URL`
+   set, so this isn't a hard blocker the way it was in `next-auth` v4 — but set it
+   explicitly anyway, since it's what has to match the redirect URI above exactly.
+3. If a custom domain is ever attached in place of `staranalytics.vercel.app`, both the
+   Google Cloud Console redirect URI and `NEXTAUTH_URL` need updating together — a
+   mismatch between the two is the most common way Google OAuth fails silently or
+   bounces back to `/login`.
+
 ## Testing
 
 `npm run test:e2e` drives all 9 screens (12 captures) in a real browser against seeded
