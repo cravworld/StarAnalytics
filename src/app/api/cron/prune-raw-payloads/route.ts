@@ -10,6 +10,28 @@
 // defaulted to 90 here since nothing in the codebase implied a real number.
 // Change the env var if that default is wrong for how this data actually
 // gets used.
+//
+// Second job in the same handler, same reasoning: DATA-PRIVACY.md flagged
+// "structured data (captions, comments, sentiment, engagement counts) still
+// accumulates indefinitely" as an open product decision. Resolved as follows,
+// not as a blanket policy — the structured-data bucket splits into two very
+// different things:
+//   - Post.caption/engagement counts (reach/likes/comments/saves/shares) are
+//     the tracked accounts' OWN public content and the entire analytics
+//     product (trend charts, "Top Posts This Month") is built on it staying
+//     available indefinitely. Not pruned — there is no retention argument for
+//     deleting a business's own historical performance data.
+//   - Sentiment rows are an already-minimized derived signal (a label, a
+//     score, a few keywords) with no raw text in them. Also not pruned, for
+//     the same reason a rolled-up statistic isn't a data-minimization target.
+//   - PostComment.text/authorHandle is the one bucket that's actually a
+//     third party's personal data (a commenter's handle and words, not the
+//     tracked account's own), and — confirmed by grep, same check used for
+//     `raw` above — is read exactly once, by the sentiment classifier, and
+//     never again afterward (see src/lib/data/sentiment.ts). That makes it
+//     the structured-data analog of the raw-payload case, so it gets the
+//     same treatment: nulled out after COMMENT_RETENTION_DAYS. The comment
+//     row itself is kept (not hard-deleted) so comment counts stay accurate.
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -17,9 +39,10 @@ import { prisma } from "@/lib/prisma";
 export const maxDuration = 60;
 
 const DEFAULT_RETENTION_DAYS = 90;
+const DEFAULT_COMMENT_RETENTION_DAYS = 90;
 
-function retentionCutoff(): Date {
-  const days = Number(process.env.RAW_PAYLOAD_RETENTION_DAYS) || DEFAULT_RETENTION_DAYS;
+function cutoffFrom(envVar: string, defaultDays: number): Date {
+  const days = Number(process.env[envVar]) || defaultDays;
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 }
 
@@ -35,21 +58,30 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const cutoff = retentionCutoff();
+  const rawCutoff = cutoffFrom("RAW_PAYLOAD_RETENTION_DAYS", DEFAULT_RETENTION_DAYS);
 
   const posts = await prisma.post.updateMany({
-    where: { scrapedAt: { lt: cutoff }, raw: { not: Prisma.DbNull } },
+    where: { scrapedAt: { lt: rawCutoff }, raw: { not: Prisma.DbNull } },
     data: { raw: Prisma.DbNull },
   });
 
   const comments = await prisma.postComment.updateMany({
-    where: { scrapedAt: { lt: cutoff }, raw: { not: Prisma.DbNull } },
+    where: { scrapedAt: { lt: rawCutoff }, raw: { not: Prisma.DbNull } },
     data: { raw: Prisma.DbNull },
   });
 
+  const commentTextCutoff = cutoffFrom("COMMENT_RETENTION_DAYS", DEFAULT_COMMENT_RETENTION_DAYS);
+
+  const commentText = await prisma.postComment.updateMany({
+    where: { scrapedAt: { lt: commentTextCutoff }, text: { not: null } },
+    data: { text: null, authorHandle: null },
+  });
+
   return NextResponse.json({
-    cutoff: cutoff.toISOString(),
+    rawCutoff: rawCutoff.toISOString(),
     postsPruned: posts.count,
-    commentsPruned: comments.count,
+    commentsRawPruned: comments.count,
+    commentTextCutoff: commentTextCutoff.toISOString(),
+    commentTextPruned: commentText.count,
   });
 }

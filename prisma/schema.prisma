@@ -1,6 +1,5 @@
 // StarAnalytics — consolidated schema (build plan §3).
-// Not yet migrated against a real database: no Supabase project exists yet.
-// Once DATABASE_URL is supplied, run `npx prisma migrate dev --name init`.
+// Migrated against a live Supabase project — see prisma/migrations/ for history.
 
 generator client {
   provider = "prisma-client-js"
@@ -95,8 +94,13 @@ model PostComment {
   postId       String    @map("post_id")
   post         Post      @relation(fields: [postId], references: [id])
   igCommentId  String?   @map("ig_comment_id")
+  // Nullable: both this and authorHandle are nulled out by the prune-raw-payloads cron
+  // once COMMENT_RETENTION_DAYS has passed — see that route for why (structured-data
+  // retention policy, DATA-PRIVACY.md "Retention"). The row itself (id/postId/scrapedAt)
+  // is kept so comment counts stay accurate; only the third-party commenter's text and
+  // handle are cleared.
   authorHandle String?   @map("author_handle")
-  text         String
+  text         String?
   postedAt     DateTime? @map("posted_at")
   scrapedAt    DateTime  @default(now()) @map("scraped_at")
   raw          Json?

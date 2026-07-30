@@ -9,7 +9,7 @@ Not user-facing — this is the operating record from a DPDP (India's Digital Pe
 | Account email/name/role | `users` | Internal team / agency logins | Access control for the app itself |
 | Post caption, author handle, engagement counts | `posts` | Public post authors (third parties, not our users) | Campaign/competitor analytics |
 | Full raw scrape payload | `posts.raw`, `post_comments.raw` | Same | Never read back by the app (confirmed by grep) — kept only as an ingestion artifact. Run `npm run audit:raw-payload` to see what's actually in it. Pruned after `RAW_PAYLOAD_RETENTION_DAYS` (default 90) by the `prune-raw-payloads` cron |
-| Comment text + author handle | `post_comments` | Public commenters (third parties) | Sentiment analysis input |
+| Comment text + author handle | `post_comments` | Public commenters (third parties) | Sentiment analysis input. Read exactly once (by the classifier) and never again — nulled after `COMMENT_RETENTION_DAYS` (default 90) by the same cron; the row itself is kept so comment counts stay accurate |
 | Handle, display name, follower count | `competitor_accounts`, `fan_pages` | Public account owners | Competitor/fan tracking |
 | Sentiment label/score/keywords | `sentiment` | Derived from the above | Campaign performance signal |
 
@@ -34,9 +34,18 @@ Not user-facing — this is the operating record from a DPDP (India's Digital Pe
 
 ## Retention
 
-`prune-raw-payloads` (cron, once/day, `src/app/api/cron/prune-raw-payloads/route.ts`) nulls out `posts.raw`/`post_comments.raw` once a row is older than `RAW_PAYLOAD_RETENTION_DAYS` (default **90**, set as a default because nothing in the codebase implied a real number — change the env var if that's wrong for how this data actually gets used). Safe to run: confirmed by grep that no code path reads `raw` back out, so nulling it doesn't touch any feature — only `caption`, `authorHandle`, and the engagement-count columns (already extracted at ingest time) are ever used.
+`prune-raw-payloads` (cron, once/day, `src/app/api/cron/prune-raw-payloads/route.ts`) runs two jobs:
 
-This only covers the one clearly-unused field. Structured data (captions, comments, sentiment, engagement counts) still accumulates indefinitely — a real retention policy for *that* is still a product decision, not something this audit should invent.
+1. Nulls out `posts.raw`/`post_comments.raw` once a row is older than `RAW_PAYLOAD_RETENTION_DAYS` (default **90**). Safe to run: confirmed by grep that no code path reads `raw` back out, so nulling it doesn't touch any feature — only `caption`, `authorHandle`, and the engagement-count columns (already extracted at ingest time) are ever used.
+2. Nulls out `post_comments.text`/`post_comments.author_handle` once a row is older than `COMMENT_RETENTION_DAYS` (default **90**). Same reasoning, same "confirmed by grep it's never read back" bar: comment text/handle is read exactly once, by the sentiment classifier (`src/lib/data/sentiment.ts`), to derive a `sentiment` row, and never again after. The row itself isn't hard-deleted — `id`/`postId`/`scrapedAt` stay so comment counts remain accurate; only the third-party commenter's actual content is cleared.
+
+Both defaults are policy decisions, not engineering ones — 90 days each because nothing in the codebase implied a real number. Change the env var if that's wrong for how this data actually gets used.
+
+**Deliberately not pruned**, and why each is a real "not yet" rather than an oversight:
+- `posts.caption` / engagement counts (`reach`/`likes`/`comments`/`saves`/`shares`) — this is the tracked accounts' own public content, and it's the entire analytics product (trend charts, "Top Posts This Month"). There's no data-minimization argument for deleting a business's own historical performance data; a retention policy here would be a product regression, not a privacy improvement.
+- `sentiment` rows — already a minimized derived signal (a label, a score, a handful of keywords), no raw text. Nothing left to minimize further.
+
+So "structured data" wasn't one policy decision, it was two different buckets that needed two different answers — the personal-data one (comments) now has a retention window; the business-data one (posts/sentiment) deliberately doesn't, and shouldn't.
 
 ## Handling an access/correction/deletion request
 
@@ -53,8 +62,11 @@ npm run data-rights:lookup -- <handle>
 ## Open items (flagged, not built)
 
 These came out of the audit as real gaps but are scope/product decisions, not something to build unprompted:
-1. **Link `User` to `Agency`** in the schema if `agency_viewer` scoping is ever actually needed — currently structurally impossible without this. Deferred: no `agency_viewer` account exists yet, so this would be speculative work. Do this **before** onboarding the first external agency login, not after. Independent of item 2 below — this is an access-control gap, not a legal one.
-2. **Decide a real retention policy for structured data** (captions, comments, sentiment, engagement counts) — `posts.raw` pruning is now automated, but the actual analytics data still accumulates forever.
+1. **Link `User` to `Agency`** in the schema if `agency_viewer` scoping is ever actually needed — currently structurally impossible without this. Deferred: no `agency_viewer` account exists yet, so this would be speculative work. Do this **before** onboarding the first external agency login, not after. Independent of the retention policy above — this is an access-control gap, not a legal one.
+
+~~2. Decide a real retention policy for structured data~~ — **resolved 2026-07-30**: see "Retention" above. `post_comments.text`/`author_handle` (the actual third-party personal data in the structured-data set) now prunes on `COMMENT_RETENTION_DAYS`; posts' own caption/engagement data and derived `sentiment` rows are deliberately kept indefinitely, for reasons documented in that section.
+
+**Migration not yet applied**: `prisma/migrations/20260730120000_post_comment_text_nullable` was hand-written (this environment's local DB credentials fail auth against Supabase — see below) and needs `npm run db:migrate` run once that's sorted, before the new pruning job can run against the live DB.
 
 ## Deliberately not pursued (a decision was made, not a gap)
 

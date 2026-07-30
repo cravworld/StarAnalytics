@@ -242,13 +242,20 @@ raw-payload minimization — see the bullets below.
   fixed that while reintroducing a public, non-expiring credential with direct read
   access to Confidential campaign data. Replaced with 8-second authenticated polling
   through the same `requireSession()`-gated data layer as the rest of the app instead.
-- **Raw scrape payloads are minimized, not fully retained forever.** `posts.raw` /
-  `post_comments.raw` store the complete Apify response but nothing reads them back
-  (confirmed by grep — `npm run audit:raw-payload` reports what's actually in them
-  without ever printing values). The `prune-raw-payloads` cron nulls `raw` past
-  `RAW_PAYLOAD_RETENTION_DAYS` (default 90, a flagged assumption, not a researched
-  number). Structured data (captions, comments, sentiment, engagement counts) still has
-  **no** retention policy — that's a real open product decision, not an oversight.
+- **Raw scrape payloads and comment text are minimized, not retained forever.**
+  `posts.raw` / `post_comments.raw` store the complete Apify response but nothing reads
+  them back (confirmed by grep — `npm run audit:raw-payload` reports what's actually in
+  them without ever printing values); the `prune-raw-payloads` cron nulls `raw` past
+  `RAW_PAYLOAD_RETENTION_DAYS` (default 90). The same cron also nulls
+  `post_comments.text`/`author_handle` past `COMMENT_RETENTION_DAYS` (default 90,
+  resolved 2026-07-30) — comment text is a third party's (the commenter's) data, read
+  exactly once by the sentiment classifier and never again, so it gets the same
+  treatment as the raw payload. Posts' own caption/engagement data and derived
+  `sentiment` rows are **deliberately kept indefinitely** — that's the tracked account's
+  own business data and the entire analytics product depends on it; see
+  `DATA-PRIVACY.md`'s "Retention" section for the full reasoning. The migration making
+  `post_comments.text` nullable (`20260730120000_post_comment_text_nullable`) still
+  needs `npm run db:migrate` run against the live DB to take effect.
 - **DPDP legal basis is a working assumption, not a confirmed legal position, and formal
   counsel confirmation is deliberately not being pursued.** Everything scraped (posts,
   comments, competitor/fan accounts) relies on DPDP §3(c)(ii)'s public-data exclusion —

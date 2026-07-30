@@ -21,10 +21,12 @@ function chunk<T>(xs: T[], size: number): T[][] {
 // comments captured, e.g. a fresh scrape that hasn't reached the comment step) still classify.
 function buildClassifyText(
   post: { caption: string | null },
-  comments: { text: string }[],
+  comments: { text: string | null }[],
 ): string {
   const parts = [post.caption ?? ""];
-  for (const c of comments.slice(0, COMMENTS_PER_POST_LIMIT)) parts.push(c.text);
+  // text is null once the prune-raw-payloads cron has cleared old comment rows past
+  // COMMENT_RETENTION_DAYS — falls back to caption-only, same as a fresh zero-comment post.
+  for (const c of comments.slice(0, COMMENTS_PER_POST_LIMIT)) if (c.text) parts.push(c.text);
   return parts.filter(Boolean).join("\n");
 }
 
@@ -74,7 +76,7 @@ export async function classifyPostsForSentiment(postIds: string[]): Promise<void
     where: { postId: { in: workingIds } },
     select: { postId: true, text: true },
   });
-  const commentsByPost = new Map<string, { text: string }[]>();
+  const commentsByPost = new Map<string, { text: string | null }[]>();
   for (const c of allComments) {
     const list = commentsByPost.get(c.postId) ?? [];
     list.push({ text: c.text });
