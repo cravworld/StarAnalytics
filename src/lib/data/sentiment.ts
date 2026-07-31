@@ -5,10 +5,20 @@
 import { prisma } from "@/lib/prisma";
 import { getSentimentModelId, getSentimentProvider } from "@/lib/providers";
 import { scrapeCommentsForPosts } from "@/lib/providers/apify-public-content";
+import { runWithConcurrency } from "@/lib/concurrency";
 
 const STALENESS_HOURS = 24;
 const BATCH_SIZE = 20;
+// Only bounds how many comments get blended into this post-level aggregate's classify text
+// (see buildClassifyText below) — unrelated to apify-public-content.ts's own
+// COMMENTS_PER_POST_LIMIT (how many comments get scraped) or commentSentiment.ts (which
+// classifies every individual scraped comment regardless of this number). Left as 20 on
+// purpose: stuffing thousands of comments into one blended prompt for a single aggregate
+// row isn't what "classify all comments" asked for — that's what the per-comment pipeline
+// in commentSentiment.ts is for.
 const COMMENTS_PER_POST_LIMIT = 20;
+// Same reasoning as commentSentiment.ts's BATCH_CONCURRENCY — see that file.
+const BATCH_CONCURRENCY = Number(process.env.SENTIMENT_BATCH_CONCURRENCY) || 5;
 
 function chunk<T>(xs: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -98,20 +108,27 @@ export async function classifyPostsForSentiment(postIds: string[]): Promise<void
   // per-hashtag try/catch. Before this, a single bad batch mid-run silently truncated the
   // whole classification pass; anything after it just never got attempted until the next
   // trigger (next day's cron, at best), with no signal beyond a swallowed console.error.
+  //
+  // Batches run concurrently (see commentSentiment.ts for the same pattern at higher
+  // volume) — on Vercel Pro's raised maxDuration, wall-clock per invocation is the real
+  // constraint, and running batches one at a time leaves that budget unused.
   let failedBatches = 0;
-  for (const [i, batch] of batches.entries()) {
-    let results;
+  const batchResults = await runWithConcurrency(batches, BATCH_CONCURRENCY, async (batch, i) => {
     try {
-      results = await provider.classify(batch);
+      return await provider.classify(batch);
     } catch (err) {
       failedBatches++;
       console.error(
         `sentiment pipeline: batch ${i + 1}/${batches.length} (${batch.length} posts) failed, continuing with remaining batches:`,
         err,
       );
-      continue;
+      return [];
     }
-    // 6. Upsert sentiment rows.
+  });
+  // Upsert sentiment rows — sequential, not bulk: unlike comments (always a fresh insert),
+  // a post can already have a stale Sentiment row that needs updating, so this stays a
+  // real upsert per row rather than createMany.
+  for (const results of batchResults) {
     for (const r of results) {
       await prisma.sentiment.upsert({
         where: { postId: r.id },

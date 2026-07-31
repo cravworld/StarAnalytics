@@ -2,11 +2,19 @@
   "crons": [
     {
       "path": "/api/cron/poll-hashtags",
-      "schedule": "0 6 * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/prune-raw-payloads",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/backfill-sentiment",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/backfill-comment-sentiment",
+      "schedule": "* * * * *"
     }
   ]
 }

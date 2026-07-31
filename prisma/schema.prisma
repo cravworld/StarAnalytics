@@ -105,7 +105,30 @@ model PostComment {
   scrapedAt    DateTime  @default(now()) @map("scraped_at")
   raw          Json?
 
+  sentiment CommentSentiment?
+
   @@map("post_comments")
+}
+
+// Per-comment sentiment — separate from the post-level `Sentiment` model (which blends a
+// post's caption + a sample of its comments into one aggregate row for the existing
+// campaign dashboards) so hater/repeat-offender detection has a real per-commenter signal
+// to work from, without touching that existing aggregate or its call sites.
+model CommentSentiment {
+  postCommentId String      @id @map("post_comment_id")
+  postComment   PostComment @relation(fields: [postCommentId], references: [id])
+  // Denormalized at classification time, not read from post_comments.author_handle later:
+  // that column gets nulled by the prune-raw-payloads cron after COMMENT_RETENTION_DAYS,
+  // but classification always happens well inside that window, so this is a snapshot taken
+  // before the handle can be pruned — without it, a hater registry would lose attribution
+  // the moment the retention cron runs.
+  authorHandle String?        @map("author_handle")
+  label        SentimentLabel
+  score        Float
+  model        String
+  analyzedAt   DateTime       @default(now()) @map("analyzed_at")
+
+  @@map("comment_sentiment")
 }
 
 enum ScrapeRunStatus {
@@ -270,4 +293,19 @@ model ThresholdConfig {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("threshold_configs")
+}
+
+// Row-based mutex for cron routes, not a Postgres session advisory lock — DATABASE_URL
+// runs through pgbouncer in transaction-pooling mode (?pgbouncer=true), which can
+// interleave different callers' statements on the same underlying connection between
+// queries, so a session-held lock wouldn't reliably protect anything. This is a single
+// atomic UPDATE instead (see src/lib/cronLock.ts) — safe under transaction pooling because
+// it never spans more than one statement. TTL-based rather than a strict acquire/release
+// pair alone: if an invocation crashes or times out without releasing, the lock
+// self-expires instead of wedging the job forever.
+model CronLock {
+  name     String    @id
+  lockedAt DateTime? @map("locked_at")
+
+  @@map("cron_locks")
 }

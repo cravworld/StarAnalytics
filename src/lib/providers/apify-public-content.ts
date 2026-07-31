@@ -155,10 +155,14 @@ async function trackedRun<T>(kind: string, actorId: string, input: Record<string
   }
 }
 
-// Comments matching the DPR's suggested cap — a viral post's comment section can run into
-// the thousands, and this is a per-post limit passed straight to the actor's own
-// resultsLimit input, not a client-side truncation after the fact.
-const COMMENTS_PER_POST_LIMIT = 20;
+// Previously the DPR's suggested cap of 20 — raised because the product now wants every
+// available comment classified, cost accepted as a deliberate tradeoff. No hard ceiling
+// exists on the actor side to raise this against (confirmed against Apify's own docs,
+// 2026-07-31: pay-per-result, ~$1.90-2.30/1000 comments, no documented resultsLimit cap —
+// real output is bounded only by how many comments Instagram exposes to a logged-out
+// viewer, not by this number). Env-configurable so the ceiling is a policy knob, not a
+// redeploy, if it ever needs tuning back down.
+const COMMENTS_PER_POST_LIMIT = Number(process.env.COMMENTS_PER_POST_LIMIT) || 100_000;
 
 // Only ever called from the sentiment pipeline (src/lib/data/sentiment.ts) for posts about
 // to be classified — never wired to the hashtag cron or agency batch scrape directly (see
