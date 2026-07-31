@@ -75,10 +75,25 @@ export async function classifyPostsForSentiment(postIds: string[]): Promise<void
     include: { postComments: { select: { text: true } } },
   });
 
-  // 2. Comment scrape only for survivors lacking captured comments.
+  // 2. Comment scrape only for survivors lacking captured comments. Isolated in its own
+  // try/catch: a single post with a very large comment thread (COMMENTS_PER_POST_LIMIT is
+  // now uncapped) can make the whole batched Apify run time out — without this, that one
+  // slow post used to abort classification for the *entire* batch, including posts that
+  // already had comments or needed no scraping at all. Since the same CHUNK_SIZE selection
+  // is deterministic, that repeatedly re-picked the same poisoned batch and classification
+  // progress stalled completely rather than just slowing down. Affected posts fall back to
+  // caption-only text this pass (buildClassifyText already handles zero comments) and get a
+  // real comment-based re-classification whenever a later attempt succeeds.
   const needComments = posts.filter((p) => p.postComments.length === 0 && p.externalUrl);
   if (needComments.length > 0) {
-    await scrapeCommentsForPosts(needComments.map((p) => ({ id: p.id, externalUrl: p.externalUrl! })));
+    try {
+      await scrapeCommentsForPosts(needComments.map((p) => ({ id: p.id, externalUrl: p.externalUrl! })));
+    } catch (err) {
+      console.error(
+        `sentiment pipeline: comment scrape failed for ${needComments.length} post(s), continuing caption-only for this batch:`,
+        err,
+      );
+    }
   }
   // Re-fetch comments for the whole working set in one go — cheaper than tracking which
   // posts were freshly scraped vs already had comments, and always reflects reality.

@@ -20,14 +20,26 @@ export function OwnCampaignsList({ campaigns, kpis }: { campaigns: Campaign[]; k
     return campaigns.filter((c) => c.name.toLowerCase().includes(q) || c.meta.toLowerCase().includes(q));
   }, [campaigns, query]);
 
-  useTopbarExport({
-    filename: "own-campaigns.csv",
-    csv: () =>
-      toCsv(
-        ["Name", "Status", "Details", "Posts", "Engagement"],
-        filtered.map((c) => [c.name, c.status, c.meta, c.postCount, c.engagement]),
-      ),
-  });
+  // Memoized against `filtered` specifically — passing a fresh { filename, csv } object
+  // (with an inline, unmemoized csv closure) on every render used to defeat
+  // useTopbarExport's internal useCallback/useEffect entirely: csv's identity changed on
+  // every render regardless of whether `filtered` actually changed, so the effect fired
+  // every render, called setConfig in the shared TopbarExportProvider, which re-rendered
+  // this component, which created a new csv closure again — an infinite render loop
+  // (real symptom: React's "Maximum update depth exceeded", confirmed live in-browser,
+  // which froze the page and made every click on this screen appear to do nothing).
+  const exportConfig = useMemo(
+    () => ({
+      filename: "own-campaigns.csv",
+      csv: () =>
+        toCsv(
+          ["Name", "Status", "Details", "Posts", "Engagement"],
+          filtered.map((c) => [c.name, c.status, c.meta, c.postCount, c.engagement]),
+        ),
+    }),
+    [filtered],
+  );
+  useTopbarExport(exportConfig);
 
   return (
     <>

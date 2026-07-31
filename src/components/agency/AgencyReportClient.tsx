@@ -158,28 +158,36 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
     return sorted;
   }, [result, search, agencyFilter, sortKey]);
 
-  useTopbarExport(
-    result
-      ? {
-          filename: "agency-report-posts.csv",
-          csv: () =>
-            toCsv(
-              ["URL", "Agency", "Reach", "Likes", "Comments", "Saves", "Auth Score", "Total Score", "Flags"],
-              filteredPosts.map((p) => [
-                p.url,
-                p.agencyName,
-                p.reach ?? "",
-                p.likes ?? "",
-                p.comments ?? "",
-                p.saves ?? "",
-                p.authScore,
-                p.totalScore,
-                p.flags.map((f) => f.type).join("; "),
-              ]),
-            ),
-        }
-      : null,
+  // Memoized against `result`/`filteredPosts` specifically — see OwnCampaignsList.tsx for
+  // the full explanation: passing a fresh { filename, csv } object with an unmemoized csv
+  // closure on every render defeats useTopbarExport's internal effect entirely, causing an
+  // infinite render loop (real "Maximum update depth exceeded" error confirmed live in
+  // browser) that froze this page and made every click on it appear to do nothing.
+  const exportConfig = useMemo(
+    () =>
+      result
+        ? {
+            filename: "agency-report-posts.csv",
+            csv: () =>
+              toCsv(
+                ["URL", "Agency", "Reach", "Likes", "Comments", "Saves", "Auth Score", "Total Score", "Flags"],
+                filteredPosts.map((p) => [
+                  p.url,
+                  p.agencyName,
+                  p.reach ?? "",
+                  p.likes ?? "",
+                  p.comments ?? "",
+                  p.saves ?? "",
+                  p.authScore,
+                  p.totalScore,
+                  p.flags.map((f) => f.type).join("; "),
+                ]),
+              ),
+          }
+        : null,
+    [result, filteredPosts],
   );
+  useTopbarExport(exportConfig);
 
   if (view === "upload") {
     return (

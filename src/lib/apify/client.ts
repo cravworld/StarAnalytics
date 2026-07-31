@@ -52,11 +52,15 @@ export async function getDatasetItems<T = Record<string, unknown>>(datasetId: st
 
 const TERMINAL_STATUSES = new Set(["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]);
 
-// Polls a run to completion. Apify actor runs for this project's volumes finish in
-// seconds-to-low-minutes, so simple polling (no webhooks) is fine for Phase 1.
+// Polls a run to completion. Was 5 minutes, sized for the old 15-comment-cap era where
+// every comment scrape was small and fast. Raised now that COMMENTS_PER_POST_LIMIT is
+// uncapped (100,000) — a post with a genuinely large comment thread can take real actor
+// runtime well past 5 minutes, and the calling routes now run at up to 1800s maxDuration
+// specifically to have room for this. Still well under that ceiling, leaving time for
+// classification afterward.
 export async function waitForRun(
   runId: string,
-  { intervalMs = 3000, timeoutMs = 5 * 60 * 1000 } = {},
+  { intervalMs = 3000, timeoutMs = 20 * 60 * 1000 } = {},
 ): Promise<{ status: string; datasetId: string }> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {

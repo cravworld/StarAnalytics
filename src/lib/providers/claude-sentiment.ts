@@ -102,7 +102,14 @@ async function callClaude(batch: { id: string; text: string }[]): Promise<string
       max_tokens: 8192,
       thinking: { type: "adaptive" },
       output_config: { effort: "high" },
-      system: SYSTEM_PROMPT,
+      // Identical on every single call (both the post- and comment-level pipelines share
+      // this one call site), so it's the textbook prompt-caching case — without this, the
+      // full prompt was being re-billed as fresh input tokens on every batch, post-level
+      // and per-comment alike. Cache reads are ~0.1x the input price. If SYSTEM_PROMPT is
+      // ever shortened below the model's cacheable-prefix minimum (1024 tokens on
+      // claude-opus-4-8), this silently stops caching rather than erroring — verify via
+      // response.usage.cache_read_input_tokens, don't assume.
+      system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: JSON.stringify(batch) }],
     }),
   });

@@ -158,6 +158,10 @@ export async function getCampaignStream(campaignId: string): Promise<StreamItem[
     where: { campaignId },
     orderBy: { postedAt: "desc" },
     take: 30,
+    // Explicit select — was fetching every column including `raw` (the full Apify scrape
+    // blob, ~4KB/post average), never used by toStreamItem below. Pure waste on a poll
+    // target hit every ~8s by LiveStream.tsx.
+    select: { id: true, authorHandle: true, postedAt: true, scrapedAt: true, caption: true, likes: true, comments: true, externalUrl: true },
   });
   const fanPageHandles = new Set(
     (await prisma.fanPage.findMany({ where: { isActive: true }, select: { igHandle: true } })).map((f) =>
@@ -224,6 +228,22 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
   const posts = await prisma.post.findMany({
     where: { campaignId: id },
     orderBy: { postedAt: "desc" },
+    // Explicit select — was fetching every column including `raw` (the full Apify scrape
+    // blob, ~4KB/post average, never read here) for every post in the campaign, unbounded.
+    // For a 343-post campaign that's ~1.4MB of unused JSON parsed on every single page
+    // load. None of this function's logic (aggregates, hourly buckets, stream, sentiment
+    // join) ever touches `.raw` — confirmed by reading the whole function, not assumed.
+    select: {
+      id: true,
+      authorHandle: true,
+      postedAt: true,
+      scrapedAt: true,
+      caption: true,
+      likes: true,
+      comments: true,
+      externalUrl: true,
+      mediaType: true,
+    },
   });
 
   const now = new Date();

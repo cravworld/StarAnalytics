@@ -155,14 +155,18 @@ async function trackedRun<T>(kind: string, actorId: string, input: Record<string
   }
 }
 
-// Previously the DPR's suggested cap of 20 — raised because the product now wants every
-// available comment classified, cost accepted as a deliberate tradeoff. No hard ceiling
-// exists on the actor side to raise this against (confirmed against Apify's own docs,
-// 2026-07-31: pay-per-result, ~$1.90-2.30/1000 comments, no documented resultsLimit cap —
-// real output is bounded only by how many comments Instagram exposes to a logged-out
-// viewer, not by this number). Env-configurable so the ceiling is a policy knob, not a
-// redeploy, if it ever needs tuning back down.
-const COMMENTS_PER_POST_LIMIT = Number(process.env.COMMENTS_PER_POST_LIMIT) || 100_000;
+// Was uncapped (100,000) for one day (2026-07-31) — reverted to a bounded default the same
+// day after two real problems surfaced at that setting: (1) large comment threads pushed
+// individual Apify runs past the (then 5-, now 20-minute) wait timeout, and worse, backend
+// invocations processing them were observed dying silently mid-run with no error logged,
+// leaving stuck cron locks and orphaned scrape_run rows that blocked all further progress;
+// (2) real measured cost hit $2.30/1000 comments (confirmed via Apify run-level billing,
+// not the estimate), and a handful of large-thread scrapes burned through most of a
+// $29/month Starter budget in under a day. 200/post is a deliberate policy tradeoff, not a
+// technical ceiling — real per-run cost stays under $0.50/post and scrapes finish fast
+// enough to avoid the timeout/silent-death failure mode above. Env-configurable so this is
+// a policy knob, not a redeploy, if it needs tuning either direction.
+const COMMENTS_PER_POST_LIMIT = Number(process.env.COMMENTS_PER_POST_LIMIT) || 200;
 
 // Only ever called from the sentiment pipeline (src/lib/data/sentiment.ts) for posts about
 // to be classified — never wired to the hashtag cron or agency batch scrape directly (see
