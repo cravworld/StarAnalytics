@@ -1,5 +1,26 @@
 import { getCompareData } from "@/lib/data/compare";
+import { isInstagramInsightsLive } from "@/lib/providers";
 import { AddCompetitorForm, RemoveCompetitorButton } from "@/components/compare/AddCompetitorForm";
+import { Sparkline } from "@/components/ui/Sparkline";
+import { PendingMetaReviewBadge } from "@/components/ui/PendingMetaReview";
+
+// Nothing meaningful to show until an account has been scraped at least twice — a single
+// point isn't a trend. Self never has any (Phase 7 self-account pipeline has never gone
+// live, see compare.ts's selfColumn), so this silently renders nothing for that column.
+function FollowerTrendMini({ trend, deltaPct }: { trend: number[]; deltaPct: number | null }) {
+  if (trend.length < 2) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+      <Sparkline values={trend} width={60} height={16} />
+      {deltaPct !== null ? (
+        <span style={{ fontSize: 10, fontWeight: 700, color: deltaPct >= 0 ? "#1a7a4a" : "#c62828" }}>
+          {deltaPct >= 0 ? "+" : ""}
+          {deltaPct}%
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 // getCompareData() now only ever reads competitor_accounts/posts — the real Apify
 // scrape (slow, 10-20s+) happens from the add-competitor action or the polling cron,
@@ -17,6 +38,7 @@ function initialsFor(name: string): string {
 export default async function ComparePage() {
   const { columns, rows } = await getCompareData();
   const gridCols = `160px repeat(${columns.length}, 1fr)`;
+  const selfIsLive = isInstagramInsightsLive();
 
   return (
     <>
@@ -32,6 +54,11 @@ export default async function ComparePage() {
               style={{ position: "relative", background: i === 0 ? undefined : "#f0f4ff" }}
             >
               {i > 0 ? <RemoveCompetitorButton id={col.id} /> : null}
+              {i === 0 && !selfIsLive ? (
+                <div style={{ position: "absolute", top: 6, left: 6 }}>
+                  <PendingMetaReviewBadge />
+                </div>
+              ) : null}
               <div className="avatar" style={{ margin: "0 auto 6px", background: i === 0 ? undefined : "#e3f2fd", color: i === 0 ? undefined : "var(--blue)" }}>
                 {initialsFor(col.displayName)}
               </div>
@@ -101,6 +128,9 @@ export default async function ComparePage() {
                           }}
                         />
                       </div>
+                      {row.key === "followers" ? (
+                        <FollowerTrendMini trend={columns[ci].followerTrend} deltaPct={columns[ci].followerTrendDeltaPct} />
+                      ) : null}
                     </>
                   )}
                 </div>

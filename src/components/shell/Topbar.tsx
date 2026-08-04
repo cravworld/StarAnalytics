@@ -11,12 +11,14 @@ const BREADCRUMBS: Record<string, string[]> = {
   "/compare": ["Compare Pages"],
   "/campaigns": ["Campaigns", "Own Campaigns"],
   "/campaigns/hashtag": ["Campaigns", "Hashtag Search"],
+  "/campaigns/keywords": ["Campaigns", "Keyword Trends"],
+  "/campaigns/compare-own": ["Campaigns", "Compare Campaigns"],
   "/campaigns/agency": ["Campaigns", "Agency Report"],
   "/campaigns/new": ["Campaigns", "Own Campaigns", "New Campaign"],
   "/fan-pages": ["Fan Pages"],
 };
 
-const KNOWN_CAMPAIGN_SUBROUTES = ["/campaigns/hashtag", "/campaigns/agency", "/campaigns/new"];
+const KNOWN_CAMPAIGN_SUBROUTES = ["/campaigns/hashtag", "/campaigns/keywords", "/campaigns/compare-own", "/campaigns/agency", "/campaigns/new"];
 
 export function Topbar() {
   const pathname = usePathname();

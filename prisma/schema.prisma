@@ -219,6 +219,24 @@ model FanPage {
   @@map("fan_pages")
 }
 
+// One row per (platform, handle) every time a competitor/fan-page follower count is
+// refreshed — CompetitorAccount.followers and FanPage.followers stay single overwritten
+// snapshots (unchanged), this is the history neither of them keeps. Deliberately one shared
+// table keyed by (platform, igHandle) rather than a row on each model: both are refreshed by
+// the same cron (poll-hashtags -> refreshStaleCompetitors/refreshStaleFanPages), a handle can
+// in principle be both, and a single trend-query shape covers both call sites. No unique
+// constraint — the whole point is multiple rows per handle over time.
+model AccountSnapshot {
+  id         String   @id @default(uuid())
+  platform   Platform
+  igHandle   String   @map("ig_handle")
+  followers  Int
+  capturedAt DateTime @default(now()) @map("captured_at")
+
+  @@index([platform, igHandle, capturedAt])
+  @@map("account_snapshots")
+}
+
 model AgencyPostScore {
   id                     String   @id @default(uuid())
   runId                  String   @map("run_id")

@@ -120,6 +120,42 @@ describe("scorePost", () => {
     expect(result.flags[0].type).toBe("engagement_velocity_anomaly");
   });
 
+  it("does not fire generic_comment_pattern when no commentTexts are given", () => {
+    const result = scorePost(post({}), NEUTRAL_COHORT, config);
+    expect(result.flags.find((f) => f.type === "generic_comment_pattern")).toBeUndefined();
+  });
+
+  it("fires generic_comment_pattern (medium) for 3+ identical comments on the same post", () => {
+    const commentTexts = [
+      { text: "Congratulations on the massive opening weekend team", authorHandle: "a" },
+      { text: "Congratulations on the massive opening weekend team", authorHandle: "b" },
+      { text: "Congratulations on the massive opening weekend team", authorHandle: "c" },
+      { text: "So happy for you all", authorHandle: "d" },
+    ];
+    const result = scorePost(post({ commentTexts }), NEUTRAL_COHORT, config);
+    const flag = result.flags.find((f) => f.type === "generic_comment_pattern");
+    expect(flag?.severity).toBe("medium");
+    expect(flag?.evidence.withinPostDuplicateCount).toBe(3);
+    expect(result.authScore).toBe(80); // 100 - medium(20)
+  });
+
+  it("does not fire generic_comment_pattern on short repeated reactions (emoji, 'nice')", () => {
+    const commentTexts = Array.from({ length: 5 }, (_, i) => ({ text: "🔥🔥🔥", authorHandle: `fan-${i}` }));
+    const result = scorePost(post({ commentTexts }), NEUTRAL_COHORT, config);
+    expect(result.flags.find((f) => f.type === "generic_comment_pattern")).toBeUndefined();
+  });
+
+  it("fires generic_comment_pattern (high) when the same comment text appears on a different post in the same run", () => {
+    const scriptedText = "Bought my tickets already can't wait for this one to release";
+    const crossPostDuplicateCounts = new Map([[scriptedText.toLowerCase(), 2]]);
+    const commentTexts = [{ text: scriptedText, authorHandle: "bot1" }];
+    const result = scorePost(post({ commentTexts }), NEUTRAL_COHORT, config, crossPostDuplicateCounts);
+    const flag = result.flags.find((f) => f.type === "generic_comment_pattern");
+    expect(flag?.severity).toBe("high");
+    expect(flag?.evidence.crossPostDuplicatePostCount).toBe(2);
+    expect(result.authScore).toBe(65); // 100 - high(35)
+  });
+
   it("ranks flagged agencies' posts below clean agencies', at seed-realistic contamination (3 of 10 agencies, ~50 posts each)", () => {
     // Mirrors src/lib/providers/seed.ts's AGENCIES/POSTS: 7 clean agencies
     // clustered around a ~20:1 like:comment ratio, 3 flagged agencies (Buzz-

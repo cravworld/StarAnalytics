@@ -34,11 +34,10 @@ export const FLAG_REGISTRY: FlagTypeInfo[] = [
     status: "not_evaluated",
     reason: "saves unavailable for third-party posts",
   },
-  {
-    type: "generic_comment_pattern",
-    status: "not_evaluated",
-    reason: "requires commenter-profile data outside current scrape scope",
-  },
+  // Implemented 2026-08-04 on top of the per-comment scrape/sentiment pipeline that shipped
+  // since this was first scoped — the "requires commenter-profile data outside current scrape
+  // scope" reason no longer applies; comment text is captured for every scraped post now.
+  { type: "generic_comment_pattern", status: "implemented" },
 ];
 
 export interface PostForScoring {
@@ -46,6 +45,11 @@ export interface PostForScoring {
   likes: number | null;
   comments: number | null;
   postedAt: string | null; // ISO, UTC, as stored in posts.posted_at
+  // Optional: only present when the caller has already scraped comments for this post (see
+  // agency.ts, which awaits queueSentimentClassification — and therefore the comment scrape —
+  // before scoring). Omitted or empty just means generic_comment_pattern finds no evidence for
+  // this post, same as any other "checked, found nothing" flag — never a coverage gap.
+  commentTexts?: { text: string | null; authorHandle: string | null }[];
 }
 
 export interface CohortStats {
@@ -99,6 +103,9 @@ export interface ThresholdConfigParams {
   offHoursStartIst: number; // inclusive hour, 0-23
   offHoursEndIst: number; // exclusive hour, 0-23
   offHoursSeverity: "low" | "medium" | "high";
+  // Minimum identical (normalized) comments on the SAME post before generic_comment_pattern
+  // fires on within-post clustering — see scorePost.ts's detectGenericCommentPattern.
+  genericCommentMinDuplicates: number;
 }
 
 export interface ScoreResult {

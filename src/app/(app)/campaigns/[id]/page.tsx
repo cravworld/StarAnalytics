@@ -8,6 +8,44 @@ import { LiveStream } from "@/components/campaigns/LiveStream";
 import { SentimentBar } from "@/components/campaigns/SentimentBar";
 import { SentimentTrendLine } from "@/components/charts/SentimentTrendLine";
 
+// Green/yellow/red bands so the number reads at a glance without needing the tooltip.
+function bandColor(score: number): string {
+  if (score >= 70) return "#1a7a4a";
+  if (score >= 40) return "#e6a700";
+  return "#c62828";
+}
+
+function BuzzScoreBadge({
+  score,
+  components,
+}: {
+  score: number;
+  components: { size: number; sentiment: number | null; momentum: number };
+}) {
+  const color = bandColor(score);
+  const title = `Buzz score components — Size ${components.size} · Sentiment ${components.sentiment ?? "not classified yet"} · Momentum ${components.momentum}`;
+  return (
+    <div
+      title={title}
+      style={{
+        width: 64,
+        height: 64,
+        borderRadius: "50%",
+        border: `3px solid ${color}`,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        cursor: "default",
+      }}
+    >
+      <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>{score}</div>
+      <div style={{ fontSize: 8, color: "var(--muted)", marginTop: 2 }}>BUZZ</div>
+    </div>
+  );
+}
+
 export default async function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const v = await getCampaignDetail(id);
@@ -22,13 +60,16 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
       </Link>
 
       <div className="vhero">
-        <div>
-          <div className="vhero-tag">{v.tag || "(no hashtags set)"}</div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>{v.startedLabel}</div>
-          <div style={{ marginTop: 8 }}>
-            <Pill kind="live">
-              <LiveDot /> Live tracking
-            </Pill>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+          <BuzzScoreBadge score={v.buzzScore.score} components={v.buzzScore.components} />
+          <div>
+            <div className="vhero-tag">{v.tag || "(no hashtags set)"}</div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>{v.startedLabel}</div>
+            <div style={{ marginTop: 8 }}>
+              <Pill kind="live">
+                <LiveDot /> Live tracking
+              </Pill>
+            </div>
           </div>
         </div>
         <div className="vhero-stats">
@@ -115,6 +156,28 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
           </div>
         )}
       </Card>
+
+      {v.hashtagBreakdown.length > 0 ? (
+        <Card title="Hashtag Performance">
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+            Ranked by total engagement — a post can carry more than one tracked tag, so totals can overlap.
+          </div>
+          {(() => {
+            const maxEng = Math.max(1, ...v.hashtagBreakdown.map((h) => h.totalEngagement));
+            return v.hashtagBreakdown.map((h) => (
+              <div className="bar-row" key={h.hashtag}>
+                <div className="bar-label">#{h.hashtag}</div>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: `${(h.totalEngagement / maxEng) * 100}%` }} />
+                </div>
+                <div className="bar-val">
+                  {h.postCount} post{h.postCount === 1 ? "" : "s"} · {h.totalEngagement.toLocaleString()} eng
+                </div>
+              </div>
+            ));
+          })()}
+        </Card>
+      ) : null}
 
       <Card title="Live Post Stream">
         <LiveStream campaignId={v.id} initial={v.stream} />

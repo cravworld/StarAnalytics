@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { fetchProfileSnapshot, backfillFanPageLink } from "@/lib/providers/apify-public-content";
 import { PLATFORM_HANDLE_VALIDATORS, contentProviderFor } from "@/lib/providers/platform-utils";
 import type { PlatformId, RawPost } from "@/lib/providers/types";
+import { getFollowerTrends, lookupTrend, recordAccountSnapshot } from "@/lib/data/accountSnapshots";
 
 function fmtCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -37,14 +38,17 @@ const SPARK_DAYS = 7;
 // post linked to a live campaign — recency isn't required, this is a coverage signal.
 const RECENT_POSTS_FOR_ENG_SAMPLE = 20;
 
-async function fanPageRow(page: {
-  id: string;
-  platform: PlatformId;
-  igHandle: string;
-  displayName: string | null;
-  followers: number | null;
-  isVerifiedFan: boolean;
-}) {
+async function fanPageRow(
+  page: {
+    id: string;
+    platform: PlatformId;
+    igHandle: string;
+    displayName: string | null;
+    followers: number | null;
+    isVerifiedFan: boolean;
+  },
+  trend: { values: number[]; deltaPct: number | null },
+) {
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const sparkStart = new Date(startOfToday.getTime() - (SPARK_DAYS - 1) * 24 * 60 * 60 * 1000);
@@ -101,6 +105,12 @@ async function fanPageRow(page: {
     spark,
     vijayam: Boolean(trackedTagPost),
     isVerifiedFan: page.isVerifiedFan,
+    // Real follower-count history (see AccountSnapshot) — distinct from `spark` above, which
+    // is posting frequency, not follower growth. Instagram fan pages have no periodic refresh
+    // (see recordAccountSnapshot's call site comments), so this stays a single point for them
+    // today; YouTube fan pages get a real trend from their TTL refresh.
+    followerTrend: trend.values,
+    followerTrendDeltaPct: trend.deltaPct,
   };
 }
 
@@ -129,7 +139,10 @@ export async function getFanPagesData() {
     }),
   ]);
 
-  const fanPages = await Promise.all(activePages.map(fanPageRow));
+  const trends = await getFollowerTrends(activePages.map((p) => ({ platform: p.platform, igHandle: p.igHandle })));
+  const fanPages = await Promise.all(
+    activePages.map((p) => fanPageRow(p, lookupTrend(trends, p.platform, p.igHandle))),
+  );
 
   // fanPageAlerts.ts builds message as "<igHandle> posted ..." (no @ prefix) —
   // split it back into a bold handle + plain-text remainder for the UI, rather than
@@ -243,6 +256,9 @@ async function scrapeYouTubeFanChannel(handle: string): Promise<void> {
     update: { displayName: snapshot.displayName, followers: snapshot.followers, lastCheckedAt: new Date() },
   });
   await storeFanPagePosts(fanPage.id, snapshot.posts);
+  // Same follower count already fetched above — no new Apify call. Every scrape (first add +
+  // every TTL refresh, see refreshStaleFanPages) adds one history point.
+  await recordAccountSnapshot("youtube", snapshot.handle, snapshot.followers);
 }
 
 // Manual add, or promoting a suggestion — same code path either way for Instagram.
@@ -274,6 +290,11 @@ export async function addFanPage(handleInput: string, platform: PlatformId = "in
     data: { igHandle: handle, displayName: snapshot.displayName, followers: snapshot.followers, lastCheckedAt: new Date() },
   });
   await backfillFanPageLink(handle, fanPage.id);
+  // Instagram fan pages have no periodic refresh (see refreshStaleFanPages's own comment on
+  // why — they update passively via the hashtag pipeline instead), so this add-time snapshot
+  // is the only point they'll ever get today. Recorded anyway: harmless, costs nothing, and
+  // gives a real starting point if a refresh path is ever added for them.
+  await recordAccountSnapshot("instagram", handle, snapshot.followers);
 }
 
 // Called only from the polling cron — refreshes any tracked YouTube fan channel whose

@@ -5,6 +5,22 @@ import type { CohortStats, Flag, PostForScoring, ScoreResult, ThresholdConfigPar
 // computed from its z-score instead — see ThresholdConfigParams.velocityPenaltyPerZ.
 const OFF_HOURS_PENALTY: Record<Flag["severity"], number> = { low: 5, medium: 15, high: 30 };
 
+// generic_comment_pattern's own flat per-severity penalty — higher ceiling than off-hours
+// because a cross-post exact-text duplicate is close to unfakeable-by-coincidence evidence
+// (see detectGenericCommentPattern's "high" case), stronger than a timing coincidence.
+const GENERIC_COMMENT_PENALTY: Record<Flag["severity"], number> = { low: 10, medium: 20, high: 35 };
+
+// Comments shorter than this (after normalization) are excluded from duplicate-detection
+// entirely — short organic reactions ("🔥🔥🔥", "Nice one", "❤️") are genuinely common across
+// unrelated fans and unrelated posts; flagging those would be false positives the Authenticity
+// Audit's whole "must survive a dispute" bar can't tolerate. Longer text repeated verbatim is a
+// much cleaner signal: real people don't independently type the same 12+ character sentence.
+const MIN_COMMENT_LENGTH_FOR_DUP_CHECK = 12;
+
+function normalizeCommentText(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
@@ -25,13 +41,98 @@ function istHourOf(postedAt: string | null): number | null {
   return Math.floor(istMinutes / 60);
 }
 
+function truncate(s: string, max = 80): string {
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+// crossPostDuplicateCounts: normalized comment text -> number of DISTINCT posts (in this same
+// scoring run) it appeared on. Built once by the caller across the whole run (see agency.ts) —
+// scorePost stays a pure function of its explicit inputs, no DB access inside this file.
+function detectGenericCommentPattern(
+  comments: { text: string | null; authorHandle: string | null }[],
+  crossPostDuplicateCounts: Map<string, number>,
+  config: ThresholdConfigParams,
+): Flag | null {
+  const normalized = comments
+    .filter((c) => !!c.text && c.text.trim().length > 0)
+    .map((c) => ({ authorHandle: c.authorHandle, norm: normalizeCommentText(c.text as string) }))
+    .filter((c) => c.norm.length >= MIN_COMMENT_LENGTH_FOR_DUP_CHECK);
+  if (normalized.length === 0) return null;
+
+  const withinPostGroups = new Map<string, typeof normalized>();
+  for (const c of normalized) {
+    const group = withinPostGroups.get(c.norm) ?? [];
+    group.push(c);
+    withinPostGroups.set(c.norm, group);
+  }
+
+  // Within-post: the largest exact-duplicate cluster on THIS post.
+  let withinPostMax = 0;
+  let withinPostText = "";
+  let withinPostHandles: string[] = [];
+  for (const [norm, group] of withinPostGroups) {
+    if (group.length > withinPostMax) {
+      withinPostMax = group.length;
+      withinPostText = norm;
+      withinPostHandles = group.map((c) => c.authorHandle).filter((h): h is string => !!h);
+    }
+  }
+
+  // Cross-post: same exact text also seen on other posts scored in this run.
+  let crossPostCount = 0;
+  let crossPostText = "";
+  let crossPostHandles: string[] = [];
+  for (const [norm, group] of withinPostGroups) {
+    const runCount = crossPostDuplicateCounts.get(norm) ?? 0;
+    if (runCount > crossPostCount) {
+      crossPostCount = runCount;
+      crossPostText = norm;
+      crossPostHandles = group.map((c) => c.authorHandle).filter((h): h is string => !!h);
+    }
+  }
+
+  const withinFires = withinPostMax >= config.genericCommentMinDuplicates;
+  const crossFires = crossPostCount >= 2; // same exact text also lands on ≥1 other post
+  if (!withinFires && !crossFires) return null;
+
+  // Cross-post exact-text duplication across unrelated posts is close to unfakeable-by-
+  // coincidence — real people don't independently type the same 12+ character sentence on two
+  // different posts. It outranks a same-post cluster unless that cluster is itself very large.
+  const severity: Flag["severity"] =
+    crossFires || withinPostMax >= config.genericCommentMinDuplicates * 2 ? "high" : "medium";
+
+  return {
+    type: "generic_comment_pattern",
+    severity,
+    evidence: {
+      note: 'Comments under 12 characters are excluded — short reactions ("nice", "❤️", "🔥🔥🔥") are common on their own and not evidence.',
+      ...(withinFires
+        ? {
+            withinPostDuplicateCount: withinPostMax,
+            withinPostDuplicateText: truncate(withinPostText),
+            withinPostHandles: withinPostHandles.slice(0, 10),
+          }
+        : {}),
+      ...(crossFires
+        ? {
+            crossPostDuplicatePostCount: crossPostCount,
+            crossPostDuplicateText: truncate(crossPostText),
+            crossPostHandles: crossPostHandles.slice(0, 10),
+          }
+        : {}),
+    },
+  };
+}
+
 /**
  * Pure, deterministic scoring — no DB calls, no side effects, no randomness.
- * Given the same (post, cohort, config) it always returns the same result, so
- * historical runs can be replayed exactly when auditing a dispute.
+ * Given the same (post, cohort, config, crossPostDuplicateCounts) it always
+ * returns the same result, so historical runs can be replayed exactly when
+ * auditing a dispute.
  *
- * Two of the DPR's four flag types are implemented here (see FLAG_REGISTRY for
- * the other two, which are coverage gaps, not signals that came back clean):
+ * Three of the DPR's four flag types are implemented here (see FLAG_REGISTRY
+ * for the remaining one, which is a coverage gap, not a signal that came back
+ * clean):
  *
  * - engagement_velocity_anomaly: the DPR's literal metric ("10K likes in 2
  *   min") needs a re-scrape time series agency posts don't have (scraped
@@ -40,12 +141,21 @@ function istHourOf(postedAt: string | null): number | null {
  *   comments. Evidence is stored so this substitution is visible, not hidden.
  * - off_hours_engagement_spike: posted_at's IST hour falls in the configured
  *   overnight window. posted_at was already verified reliable in Phase 1.
+ * - generic_comment_pattern: exact-duplicate comment text, either clustered on
+ *   one post or repeated verbatim across different posts in the same run —
+ *   see detectGenericCommentPattern above. Needs post.commentTexts, which the
+ *   caller only has once comments are actually scraped (see agency.ts).
  *
  * Cohort is cross-agency (all posts in the run), not per-agency: scoring an
  * agency against its own mean would let an agency that buys engagement on
  * most of its posts corrupt its own baseline and never flag itself.
  */
-export function scorePost(post: PostForScoring, cohort: CohortStats, config: ThresholdConfigParams): ScoreResult {
+export function scorePost(
+  post: PostForScoring,
+  cohort: CohortStats,
+  config: ThresholdConfigParams,
+  crossPostDuplicateCounts: Map<string, number> = new Map(),
+): ScoreResult {
   const likes = post.likes ?? 0;
   const comments = post.comments ?? 0;
   const engagement = likes + comments;
@@ -73,6 +183,12 @@ export function scorePost(post: PostForScoring, cohort: CohortStats, config: Thr
         authPenaltyApplied: Math.round(penalty * 100) / 100,
       },
     });
+  }
+
+  const commentFlag = detectGenericCommentPattern(post.commentTexts ?? [], crossPostDuplicateCounts, config);
+  if (commentFlag) {
+    authPenalty += GENERIC_COMMENT_PENALTY[commentFlag.severity];
+    flags.push(commentFlag);
   }
 
   const istHour = istHourOf(post.postedAt);

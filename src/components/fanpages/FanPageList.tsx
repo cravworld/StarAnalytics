@@ -21,6 +21,8 @@ export interface FanPageRow {
   spark: number[];
   vijayam: boolean;
   isVerifiedFan: boolean;
+  followerTrend: number[];
+  followerTrendDeltaPct: number | null;
 }
 
 type Tab = "all" | "active" | "tagged" | "reach";
@@ -82,6 +84,18 @@ export function FanPageList({ fanPages }: { fanPages: FanPageRow[] }) {
                   <div className="fan-stats">
                     <span className="fan-stat">
                       <strong>{f.followers}</strong> followers
+                      {f.followerTrendDeltaPct !== null ? (
+                        <span
+                          style={{
+                            marginLeft: 4,
+                            fontWeight: 700,
+                            color: f.followerTrendDeltaPct >= 0 ? "#1a7a4a" : "#c62828",
+                          }}
+                        >
+                          {f.followerTrendDeltaPct >= 0 ? "+" : ""}
+                          {f.followerTrendDeltaPct}%
+                        </span>
+                      ) : null}
                     </span>
                     <span className="fan-stat">
                       <strong>{f.eng}</strong> eng

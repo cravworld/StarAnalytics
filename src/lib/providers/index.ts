@@ -25,6 +25,14 @@ export function getInstagramInsightsProvider() {
   return new MockInstagramInsightsProvider();
 }
 
+// Single source of truth for "is the self-account Instagram pipeline actually live" — Phase 7
+// (Meta App Review + Business/Creator account conversion) has never been completed, so this is
+// false in every real deployment today. Pages showing InstagramInsightsProvider data use this
+// to render a "Pending Meta App Review" badge instead of presenting mock numbers as real.
+export function isInstagramInsightsLive(): boolean {
+  return modeFor("DATA_MODE_INSTAGRAM") === "live";
+}
+
 export function getPublicContentProvider() {
   const mode = modeFor("DATA_MODE_APIFY");
   if (mode === "live") {

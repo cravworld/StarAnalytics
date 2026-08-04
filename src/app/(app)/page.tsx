@@ -1,7 +1,9 @@
 import { getDashboardData } from "@/lib/data/dashboard";
 import { formatCompactNumber } from "@/lib/format";
+import { isInstagramInsightsLive } from "@/lib/providers";
 import { KpiGrid, Kpi } from "@/components/ui/Kpi";
 import { Card } from "@/components/ui/Card";
+import { PendingMetaReviewBanner } from "@/components/ui/PendingMetaReview";
 import { GrowthChart } from "@/components/charts/GrowthChart";
 import { EngagementDoughnut } from "@/components/charts/EngagementDoughnut";
 
@@ -10,6 +12,7 @@ export default async function DashboardPage() {
 
   return (
     <>
+      {!isInstagramInsightsLive() && <PendingMetaReviewBanner />}
       <KpiGrid cols={4}>
         <Kpi
           label="Followers"

@@ -1,7 +1,9 @@
 import { getContentData } from "@/lib/data/content";
 import { formatCompactNumber } from "@/lib/format";
+import { isInstagramInsightsLive } from "@/lib/providers";
 import { KpiGrid, Kpi } from "@/components/ui/Kpi";
 import { Card } from "@/components/ui/Card";
+import { PendingMetaReviewBanner } from "@/components/ui/PendingMetaReview";
 import { PostTypeBar } from "@/components/charts/PostTypeBar";
 import { ReachLine } from "@/components/charts/ReachLine";
 
@@ -10,6 +12,7 @@ export default async function ContentPage() {
 
   return (
     <>
+      {!isInstagramInsightsLive() && <PendingMetaReviewBanner />}
       <KpiGrid cols={4}>
         <Kpi label="Best Format" value={insights.bestFormat} delta={`${insights.bestFormatEngagement}% avg eng`} deltaDirection="up" />
         <Kpi label="Best Time" value={insights.bestPostTime} delta="Peak engagement" />

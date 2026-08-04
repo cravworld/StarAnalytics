@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { Campaign } from "@prisma/client";
+import { computeBuzzScore, type BuzzScoreResult } from "@/lib/scoring/buzzScore";
 
 function fmtCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -203,10 +204,24 @@ export interface SentimentTrendPoint {
   classified: number;
 }
 
+export interface CampaignHashtagRow {
+  hashtag: string;
+  postCount: number;
+  totalEngagement: number;
+  avgEngagementPerPost: number;
+}
+
 export interface CampaignDetail {
   id: string;
+  name: string;
   tag: string;
   startedLabel: string;
+  buzzScore: BuzzScoreResult;
+  // Raw numbers alongside the formatted hero fields below — needed for cross-campaign
+  // comparison (see getCampaignCompareData), which can't do math on "146.7K"-style strings.
+  postCount: number;
+  engagementRaw: number;
+  peakVolume: number;
   hero: { postsToday: string; lastHour: string; engagement: string; uniqueAccounts: string };
   kpis: { label: string; value: string; delta?: string; pending?: boolean }[];
   hourlyVolume: number[];
@@ -217,6 +232,40 @@ export interface CampaignDetail {
   geoSpreadPending: { reason: string };
   keywordPills: string[];
   stream: StreamItem[];
+  // Per-tracked-hashtag engagement, ranked — see getCampaignHashtagBreakdown. Not a strict
+  // partition of postCount: a post can carry more than one tracked tag (e.g. a fan post
+  // mentioning both the movie tag and a cast member's tag), so totals across rows can exceed
+  // the campaign's own post count. That's correct for "who's driving buzz," not a bug.
+  hashtagBreakdown: CampaignHashtagRow[];
+}
+
+// Reuses the exact raw->hashtags containment pattern trackHashtag() already uses for global
+// hashtag matching (see below), scoped to one campaign and run per-tag instead of per-tag
+// globally. Deliberately a set of small raw queries (one per hashtag) rather than fetching
+// `posts.raw` into JS and filtering client-side — getCampaignDetail's own posts query already
+// explicitly excludes `raw` (a ~4KB/post JSON blob) for exactly this performance reason; this
+// keeps the containment check inside Postgres instead of reversing that fix.
+async function getCampaignHashtagBreakdown(campaignId: string, hashtags: string[]): Promise<CampaignHashtagRow[]> {
+  if (hashtags.length === 0) return [];
+
+  const rows = await Promise.all(
+    hashtags.map(async (tag) => {
+      const matched = await prisma.$queryRaw<{ likes: number | null; comments: number | null }[]>`
+        SELECT likes, comments FROM posts
+        WHERE campaign_id = ${campaignId} AND raw -> 'hashtags' @> to_jsonb(ARRAY[${tag}]::text[])
+      `;
+      const postCount = matched.length;
+      const totalEngagement = matched.reduce((s, p) => s + (p.likes ?? 0) + (p.comments ?? 0), 0);
+      return {
+        hashtag: tag,
+        postCount,
+        totalEngagement,
+        avgEngagementPerPost: postCount ? Math.round(totalEngagement / postCount) : 0,
+      };
+    }),
+  );
+
+  return rows.sort((a, b) => b.totalEngagement - a.totalEngagement);
 }
 
 const HOURLY_BUCKETS = 12;
@@ -359,12 +408,25 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     .slice(0, 8)
     .map(([term]) => term);
 
+  const buzzScore = computeBuzzScore({
+    postCount: posts.length,
+    hourlyVolume,
+    sentiment: sentiment ? { positivePct: sentiment.positivePct, negativePct: sentiment.negativePct } : null,
+  });
+
+  const hashtagBreakdown = await getCampaignHashtagBreakdown(id, campaign.hashtags);
+
   return {
     id: campaign.id,
+    name: campaign.name,
     tag: campaign.hashtags.map((h) => `#${h}`).join(" "),
     startedLabel: campaign.startDate
       ? `${campaign.type ?? "Campaign"} · Started ${campaign.startDate.toLocaleDateString()}`
       : (campaign.type ?? "Campaign"),
+    buzzScore,
+    postCount: posts.length,
+    engagementRaw: engagement,
+    peakVolume: hourlyVolume[peakIdx],
     hero: {
       postsToday: String(postsToday),
       lastHour: `+${lastHour}`,
@@ -393,7 +455,116 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     },
     keywordPills,
     stream,
+    hashtagBreakdown,
   };
+}
+
+export interface CampaignCompareOption {
+  id: string;
+  name: string;
+  status: string;
+}
+
+// Own-campaign-to-campaign comparison (not to be confused with /compare, which benchmarks
+// against competitor accounts). No "ended" CampaignStatus exists yet (only live/planned), so
+// this compares currently-active campaigns side by side rather than genuine past-vs-present
+// history — a real historical view would need that status added separately.
+export async function getCampaignCompareOptions(): Promise<CampaignCompareOption[]> {
+  return prisma.campaign.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, status: true } });
+}
+
+export interface CampaignCompareColumn {
+  id: string;
+  name: string;
+  tag: string;
+  buzzScore: number;
+  positivePct: number | null;
+  postCount: number;
+  engagement: number;
+  peakVolume: number;
+  topHashtag: string | null;
+}
+
+export interface CampaignCompareMetricRow {
+  key: "buzzScore" | "positivePct" | "postCount" | "engagement" | "peakVolume";
+  label: string;
+  format: (v: number) => string;
+}
+
+export const CAMPAIGN_COMPARE_METRIC_ROWS: CampaignCompareMetricRow[] = [
+  { key: "buzzScore", label: "Buzz Score", format: (v) => String(v) },
+  { key: "positivePct", label: "Positive Sentiment", format: (v) => `${v}%` },
+  { key: "engagement", label: "Total Engagement", format: fmtCompact },
+  { key: "postCount", label: "Posts Tracked", format: (v) => String(v) },
+  { key: "peakVolume", label: "Peak Volume (posts/hr)", format: (v) => String(v) },
+];
+
+function campaignMetricValue(col: CampaignCompareColumn, key: CampaignCompareMetricRow["key"]): number | null {
+  switch (key) {
+    case "buzzScore": return col.buzzScore;
+    case "positivePct": return col.positivePct;
+    case "postCount": return col.postCount;
+    case "engagement": return col.engagement;
+    case "peakVolume": return col.peakVolume;
+  }
+}
+
+export interface CampaignCompareResult {
+  columns: CampaignCompareColumn[];
+  // key/label only, deliberately not the full CampaignCompareMetricRow — that type carries a
+  // `format` function, which isn't serializable across the server/client boundary once this
+  // crosses into a "use client" component's props (confirmed live: Next.js throws "Functions
+  // cannot be passed directly to Client Components" if `...row` is spread in below).
+  rows: {
+    key: CampaignCompareMetricRow["key"];
+    label: string;
+    cells: { columnId: string; value: number | null; display: string; pct: number; isWin: boolean }[];
+  }[];
+}
+
+// Reuses getCampaignDetail entirely rather than a second aggregate query — with only a
+// handful of campaigns ever compared at once, re-deriving buzz score/sentiment/hashtag data
+// separately would just be duplicated logic for no real performance win. Row/cell/pct/isWin
+// shape mirrors getCompareData()'s exact pattern in this same file, computed here (not in the
+// page component) for the same reason that one is: the page should stay a thin renderer.
+export async function getCampaignCompareData(campaignIds: string[]): Promise<CampaignCompareResult> {
+  const details = await Promise.all(campaignIds.map((id) => getCampaignDetail(id)));
+  const columns: CampaignCompareColumn[] = details
+    .filter((d): d is CampaignDetail => d !== null)
+    .map((d) => ({
+      id: d.id,
+      name: d.name,
+      tag: d.tag,
+      buzzScore: d.buzzScore.score,
+      positivePct: d.sentiment?.positivePct ?? null,
+      postCount: d.postCount,
+      engagement: d.engagementRaw,
+      peakVolume: d.peakVolume,
+      topHashtag: d.hashtagBreakdown[0]?.hashtag ?? null,
+    }));
+
+  const rows = CAMPAIGN_COMPARE_METRIC_ROWS.map((row) => {
+    const cells = columns.map((col) => {
+      const value = campaignMetricValue(col, row.key);
+      return { columnId: col.id, value, display: value === null ? "—" : row.format(value) };
+    });
+    const numericValues = cells.map((c) => c.value).filter((v): v is number => v !== null);
+    const max = numericValues.length ? Math.max(...numericValues) : 0;
+    const hasComparison = numericValues.length >= 2;
+    // key/label only (not `...row`) — row.format is a function and must never reach a "use
+    // client" component's props, see CampaignCompareResult's comment.
+    return {
+      key: row.key,
+      label: row.label,
+      cells: cells.map((c) => ({
+        ...c,
+        pct: max > 0 && c.value !== null ? Math.round((c.value / max) * 100) : 0,
+        isWin: hasComparison && max > 0 && c.value !== null && c.value === max,
+      })),
+    };
+  });
+
+  return { columns, rows };
 }
 
 // Status pills for the tracked-hashtag table. Thresholds are deliberately named

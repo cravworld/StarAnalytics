@@ -1,6 +1,8 @@
 import { getAudienceData } from "@/lib/data/audience";
+import { isInstagramInsightsLive } from "@/lib/providers";
 import { KpiGrid, Kpi } from "@/components/ui/Kpi";
 import { Card } from "@/components/ui/Card";
+import { PendingMetaReviewBanner } from "@/components/ui/PendingMetaReview";
 import { AgeBar } from "@/components/charts/AgeBar";
 
 const TIME_LABELS = ["6a", "9a", "12p", "3p", "6p", "9p"];
@@ -11,6 +13,7 @@ export default async function AudiencePage() {
 
   return (
     <>
+      {!isInstagramInsightsLive() && <PendingMetaReviewBanner />}
       <KpiGrid cols={3}>
         <Kpi label="Top City" value={demo.topCity} delta={`${demo.topCityPct}% of audience`} />
         <Kpi label="Dominant Age" value={demo.dominantAge} delta={`${demo.dominantAgePct}% of followers`} />

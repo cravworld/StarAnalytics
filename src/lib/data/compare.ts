@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getInstagramInsightsProvider } from "@/lib/providers";
 import { PLATFORM_HANDLE_VALIDATORS as HANDLE_VALIDATORS, contentProviderFor } from "@/lib/providers/platform-utils";
 import type { PlatformId, RawPost } from "@/lib/providers/types";
+import { getFollowerTrends, lookupTrend, recordAccountSnapshot } from "@/lib/data/accountSnapshots";
 
 // Comparison numbers aren't real-time — a follower count or engagement estimate a few
 // hours stale doesn't change a strategic read. Named constant, not a magic number
@@ -78,6 +79,9 @@ async function scrapeCompetitor(handle: string, platform: PlatformId): Promise<v
     update: { displayName: snapshot.displayName, followers: snapshot.followers, lastScrapedAt: new Date() },
   });
   await storeCompetitorPosts(competitor.id, snapshot.posts);
+  // Same follower count already fetched above — this just also keeps a history row, no new
+  // Apify call. Every scrapeCompetitor call (first add + every 12h TTL refresh) adds one point.
+  await recordAccountSnapshot(platform, snapshot.handle, snapshot.followers);
 }
 
 export async function addCompetitor(handleInput: string, platform: PlatformId = "instagram"): Promise<void> {
@@ -144,9 +148,16 @@ export interface CompareColumn {
   isEngagementEstimate: boolean;
   storyResponseRate: number | null;
   lastUpdatedLabel: string | null;
+  // Chronological follower counts from AccountSnapshot, most recent up to 20 points. Empty
+  // until this account has been scraped at least twice (a single point isn't a trend).
+  followerTrend: number[];
+  followerTrendDeltaPct: number | null;
 }
 
-async function competitorColumn(c: { id: string; platform: PlatformId; igHandle: string; displayName: string | null; followers: number | null; lastScrapedAt: Date | null }): Promise<CompareColumn> {
+async function competitorColumn(
+  c: { id: string; platform: PlatformId; igHandle: string; displayName: string | null; followers: number | null; lastScrapedAt: Date | null },
+  trend: { values: number[]; deltaPct: number | null },
+): Promise<CompareColumn> {
   const recentPosts = await prisma.post.findMany({
     where: { competitorId: c.id },
     orderBy: { postedAt: "desc" },
@@ -194,6 +205,8 @@ async function competitorColumn(c: { id: string; platform: PlatformId; igHandle:
     // account, ever, no matter how fresh the scrape is.
     storyResponseRate: null,
     lastUpdatedLabel: c.lastScrapedAt ? relativeTime(c.lastScrapedAt) : null,
+    followerTrend: trend.values,
+    followerTrendDeltaPct: trend.deltaPct,
   };
 }
 
@@ -228,6 +241,10 @@ async function selfColumn(): Promise<CompareColumn> {
     // placeholder mock value too, not a derived one.
     storyResponseRate: 1.8,
     lastUpdatedLabel: null,
+    // Self has no AccountSnapshot history — that pipeline (Phase 7, Graph API) has never
+    // gone live, so there's no real follower count to have snapshotted in the first place.
+    followerTrend: [],
+    followerTrendDeltaPct: null,
   };
 }
 
@@ -261,7 +278,10 @@ function metricValue(col: CompareColumn, key: CompareMetricRow["key"]): number |
 export async function getCompareData() {
   const self = await selfColumn();
   const competitorRows = await prisma.competitorAccount.findMany({ orderBy: { igHandle: "asc" } });
-  const competitors = await Promise.all(competitorRows.map(competitorColumn));
+  const trends = await getFollowerTrends(competitorRows.map((c) => ({ platform: c.platform, igHandle: c.igHandle })));
+  const competitors = await Promise.all(
+    competitorRows.map((c) => competitorColumn(c, lookupTrend(trends, c.platform, c.igHandle))),
+  );
   const columns = [self, ...competitors];
 
   const rows = COMPARE_METRIC_ROWS.map((row) => {

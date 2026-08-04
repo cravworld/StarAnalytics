@@ -17,6 +17,7 @@ export const DEFAULT_THRESHOLD_PARAMS: ThresholdConfigParams = {
   offHoursStartIst: 2,
   offHoursEndIst: 4,
   offHoursSeverity: "medium",
+  genericCommentMinDuplicates: 3,
 };
 
 // Every agency_post_scores row stamps the version returned here. Re-tuning

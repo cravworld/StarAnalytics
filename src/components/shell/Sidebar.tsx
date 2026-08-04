@@ -58,6 +58,8 @@ const MY_PAGE = [
 const CAMPAIGN_SUBS = [
   { href: "/campaigns", label: "Own Campaigns" },
   { href: "/campaigns/hashtag", label: "Hashtag Search" },
+  { href: "/campaigns/keywords", label: "Keyword Trends" },
+  { href: "/campaigns/compare-own", label: "Compare Campaigns" },
   { href: "/campaigns/agency", label: "Agency Report", badge: "New" },
 ];
 

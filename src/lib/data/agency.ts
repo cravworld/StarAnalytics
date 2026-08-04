@@ -128,14 +128,45 @@ export async function runAgencyBatchJob(runId: string, rows: AgencyUrlRow[]): Pr
     // already running inside this job's own after() callback (see analyseAgencyPostsAction),
     // so a plain inline call is simplest rather than nesting another after(). Uses the
     // fire-and-forget wrapper so a sentiment failure can't fail the agency run itself —
-    // scoring is the job this run is tracked for.
+    // scoring is the job this run is tracked for. This IS awaited (unlike poll-hashtags'
+    // fire-and-forget after() call), so by the time scoring below runs, comments for this
+    // batch are already scraped and stored — which is what makes generic_comment_pattern
+    // detection possible here without a separate re-scoring pass.
     await queueSentimentClassification(scoredPosts.map((p) => p.id));
+
+    const commentRows = await prisma.postComment.findMany({
+      where: { postId: { in: scoredPosts.map((p) => p.id) } },
+      select: { postId: true, text: true, authorHandle: true },
+    });
+    const commentsByPost = new Map<string, { text: string | null; authorHandle: string | null }[]>();
+    for (const c of commentRows) {
+      const list = commentsByPost.get(c.postId) ?? [];
+      list.push({ text: c.text, authorHandle: c.authorHandle });
+      commentsByPost.set(c.postId, list);
+    }
+    // normalized comment text -> number of DISTINCT posts (in this run) it appears on — the
+    // same normalization detectGenericCommentPattern uses, duplicated here rather than
+    // imported so scorePost.ts stays free of any caller-specific plumbing. Real people don't
+    // independently post the same 12+ character comment on two unrelated posts; a bot/paid-
+    // comment operation reusing scripted text does.
+    const crossPostDuplicateCounts = new Map<string, number>();
+    const seenPerText = new Map<string, Set<string>>();
+    for (const c of commentRows) {
+      if (!c.text) continue;
+      const norm = c.text.trim().toLowerCase().replace(/\s+/g, " ");
+      if (norm.length < 12) continue;
+      const posts = seenPerText.get(norm) ?? new Set<string>();
+      posts.add(c.postId);
+      seenPerText.set(norm, posts);
+      crossPostDuplicateCounts.set(norm, posts.size);
+    }
 
     const forScoring: PostForScoring[] = scoredPosts.map((p) => ({
       id: p.id,
       likes: p.likes,
       comments: p.comments,
       postedAt: p.postedAt ? p.postedAt.toISOString() : null,
+      commentTexts: commentsByPost.get(p.id) ?? [],
     }));
     const cohort = computeCohortStats(forScoring);
     const { version, params } = await getActiveThresholdConfig();
@@ -144,9 +175,16 @@ export async function runAgencyBatchJob(runId: string, rows: AgencyUrlRow[]): Pr
       .filter((p) => p.agencyId) // a post whose URL didn't yield a shortcode never got linked — skip rather than score with a null agency
       .map((p) => {
         const result = scorePost(
-          { id: p.id, likes: p.likes, comments: p.comments, postedAt: p.postedAt ? p.postedAt.toISOString() : null },
+          {
+            id: p.id,
+            likes: p.likes,
+            comments: p.comments,
+            postedAt: p.postedAt ? p.postedAt.toISOString() : null,
+            commentTexts: commentsByPost.get(p.id) ?? [],
+          },
           cohort,
           params,
+          crossPostDuplicateCounts,
         );
         return {
           runId,
