@@ -97,6 +97,13 @@ export interface SentimentResult {
   label: "pos" | "neu" | "neg";
   score: number;
   keywords: string[];
+  // Which model actually produced this specific result. Added when a cross-provider
+  // fallback chain (Claude -> OpenAI -> Gemini) was introduced: different results in the
+  // same batch/call can now genuinely come from different providers if an earlier one
+  // failed (rate limit, exhausted credits, etc.), so a single call-level model string is no
+  // longer accurate — this must be stamped per result, not assumed from which provider was
+  // requested.
+  model: string;
 }
 
 export interface SentimentProvider {
