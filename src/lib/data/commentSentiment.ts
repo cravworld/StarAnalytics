@@ -9,7 +9,7 @@
 // once scraped, so "already classified" is a permanent, not time-boxed, state — a comment
 // either has a CommentSentiment row or it doesn't.
 import { prisma } from "@/lib/prisma";
-import { getSentimentModelId, getSentimentProvider } from "@/lib/providers";
+import { getSentimentProvider } from "@/lib/providers";
 import { runWithConcurrency } from "@/lib/concurrency";
 
 // Larger than classifyPostsForSentiment's BATCH_SIZE (20): each input here is one short
@@ -49,7 +49,6 @@ export async function classifyCommentsForSentiment(
   const inputs = comments.map((c) => ({ id: c.id, text: c.text! }));
 
   const provider = getSentimentProvider();
-  const modelId = getSentimentModelId();
   const batches = chunk(inputs, BATCH_SIZE);
   console.log(
     `comment sentiment pipeline: classifying ${inputs.length} comments across ${batches.length} batch(es), concurrency ${BATCH_CONCURRENCY}`,
@@ -87,7 +86,10 @@ export async function classifyCommentsForSentiment(
         authorHandle: handleById.get(r.id) ?? null,
         label: r.label,
         score: r.score,
-        model: modelId,
+        // Per-result, not a single shared modelId — with the Claude -> OpenAI -> Gemini
+        // fallback chain, different comments in the same batch/call can genuinely have
+        // been classified by different providers. See SentimentResult.model's comment.
+        model: r.model,
       })),
       skipDuplicates: true,
     });

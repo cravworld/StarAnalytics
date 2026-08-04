@@ -3,7 +3,7 @@
 // independent always-on job. Order matters here: staleness filter first is what makes
 // re-running this make zero new Apify/Claude calls on already-classified posts.
 import { prisma } from "@/lib/prisma";
-import { getSentimentModelId, getSentimentProvider } from "@/lib/providers";
+import { getSentimentProvider } from "@/lib/providers";
 import { scrapeCommentsForPosts } from "@/lib/providers/apify-public-content";
 import { runWithConcurrency } from "@/lib/concurrency";
 
@@ -113,7 +113,6 @@ export async function classifyPostsForSentiment(postIds: string[]): Promise<void
 
   // 4-5. Batch + classify.
   const provider = getSentimentProvider();
-  const modelId = getSentimentModelId();
   const batches = chunk(inputs, BATCH_SIZE);
   console.log(`sentiment pipeline: classifying ${inputs.length} posts across ${batches.length} batch(es)`);
 
@@ -152,13 +151,16 @@ export async function classifyPostsForSentiment(postIds: string[]): Promise<void
           label: r.label,
           score: r.score,
           keywords: r.keywords,
-          model: modelId,
+          // Per-result, not a single shared modelId — see SentimentResult.model's comment
+          // in claude-sentiment.ts for why (the Claude -> OpenAI -> Gemini fallback chain
+          // means different posts in the same run can be classified by different providers).
+          model: r.model,
         },
         update: {
           label: r.label,
           score: r.score,
           keywords: r.keywords,
-          model: modelId,
+          model: r.model,
           analyzedAt: new Date(),
         },
       });
