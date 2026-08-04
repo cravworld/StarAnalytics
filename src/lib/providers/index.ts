@@ -1,5 +1,5 @@
 import { ApifyPublicContentProvider } from "./apify-public-content";
-import { ClaudeSentimentProvider, sentimentModelId } from "./claude-sentiment";
+import { ClaudeSentimentProvider } from "./claude-sentiment";
 import { EmailNotifierProvider } from "./email-notifier";
 import { GraphInstagramInsightsProvider } from "./graph-instagram-insights";
 import { MockInstagramInsightsProvider } from "./mock-instagram-insights";
@@ -53,12 +53,6 @@ export function getSentimentProvider() {
   return new MockSentimentProvider();
 }
 
-// The exact model string sentiment rows should be stamped with — mirrors getSentimentProvider's
-// own mode switch so the two never disagree about which provider actually ran.
-export function getSentimentModelId(): string {
-  return modeFor("DATA_MODE_SENTIMENT") === "live" ? sentimentModelId() : "mock-sentiment";
-}
-
 // DPR §8 Q13 (alert delivery channel) is decided: email, via Resend, once
 // RESEND_API_KEY/ALERT_EMAIL_FROM/ALERT_EMAIL_TO are set and DATA_MODE_NOTIFIER flips
 // to "live" — same "flip the mode once the credential lands" pattern as sentiment.
@@ -70,8 +64,8 @@ export function getNotifierProvider() {
   return new MockNotifierProvider();
 }
 
-// Mirrors getSentimentModelId()'s pattern — lets callers stamp Alert.channel with the
-// exact channel a send was attempted on, without duplicating the mode lookup.
+// Lets callers stamp Alert.channel with the exact channel a send was attempted on,
+// without duplicating the mode lookup.
 export function getNotifierChannel(): string {
   return modeFor("DATA_MODE_NOTIFIER") === "live" ? "email" : "console";
 }

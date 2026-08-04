@@ -47,7 +47,12 @@ See `.env.example` for the full annotated list. Highlights:
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_SENTIMENT_MODEL` (defaults to `claude-opus-4-8`,
   bumped from Sonnet 2026-07-24 — better on code-mixed Malayalam/English/slang text and
   batch sizes here are small enough that cost isn't a concern) — Claude sentiment
-  classification (direct `fetch` call, no SDK).
+  classification (direct `fetch` call, no SDK). `OPENAI_API_KEY`/`OPENAI_SENTIMENT_MODEL`
+  and `GEMINI_API_KEY`/`GEMINI_SENTIMENT_MODEL` back a same-shape fallback chain (Claude ->
+  OpenAI -> Gemini) that a batch moves down whenever the current provider's call fails for
+  any reason — added after a real Anthropic credit exhaustion stalled classification. All
+  three keys are required for the fallback to actually cover a Claude outage; an unset key
+  just makes that leg throw immediately and the next provider gets tried.
 - `RESEND_API_KEY`, `ALERT_EMAIL_FROM`, `ALERT_EMAIL_TO` — fan-page velocity alert
   emails (direct `fetch` call, no SDK). `ALERT_EMAIL_FROM` can be Resend's sandbox
   address (`onboarding@resend.dev`, delivers only to the email your Resend account was

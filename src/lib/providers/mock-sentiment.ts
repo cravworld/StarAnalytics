@@ -10,6 +10,7 @@ export class MockSentimentProvider implements SentimentProvider {
       label: "pos",
       score: 0.78,
       keywords: ["excited", "fire", "blockbuster"],
+      model: "mock-sentiment",
     }));
   }
 }
