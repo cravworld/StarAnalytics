@@ -25,8 +25,9 @@ const LOCK_NAME = "poll-hashtags";
 // practice. Raised to Pro's generally-available ceiling (800s, not the 1800s extended/beta
 // tier used by the backfill routes) — this one fires automatically every 15 minutes, so a
 // long-running invocation matters more here than on a manually-triggered backfill;
-// COMMENTS_PER_POST_LIMIT is now 100,000, so a newly-touched viral post could plausibly
-// trigger a genuinely slow Apify comment-scrape as a side effect of queueSentimentClassification.
+// a newly-touched viral post's comment thread can still make a genuinely slow Apify
+// comment-scrape as a side effect of queueSentimentClassification, even under the
+// bounded COMMENTS_PER_POST_LIMIT (see apify-public-content.ts).
 export const maxDuration = 800;
 
 export async function GET(request: Request) {
@@ -51,7 +52,22 @@ export async function GET(request: Request) {
   }
 
   try {
-    const tracked = await prisma.hashtagSnapshot.groupBy({ by: ["hashtag"] });
+    // hashtagSnapshot.groupBy returns every hashtag ever tracked, with no expiry — a campaign
+    // that's stayed "planned" (never went live) or a one-off manual/E2E-test hashtag stays in
+    // this set and gets a full paid Apify hashtag scrape every single poll, forever, with
+    // nothing to show for it. Confirmed in prod (2026-08-04 audit): an E2E test hashtag
+    // (created by e2e/phase2-campaigns.spec.ts running against this same DATABASE_URL — see
+    // AGENTS.md note to fix that test's isolation separately) had been polled repeatedly for
+    // 0 posts every time. Scoped to hashtags belonging to at least one *live* campaign — same
+    // campaign/agency-only philosophy as the comment-scrape scoping above.
+    const liveCampaigns = await prisma.campaign.findMany({
+      where: { status: "live" },
+      select: { hashtags: true },
+    });
+    const liveHashtags = new Set(liveCampaigns.flatMap((c) => c.hashtags));
+
+    const allTracked = await prisma.hashtagSnapshot.groupBy({ by: ["hashtag"] });
+    const tracked = allTracked.filter((t) => liveHashtags.has(t.hashtag));
     const results: { hashtag: string; ok: boolean; error?: string }[] = [];
     const touchedPostIds: string[] = [];
 
@@ -71,8 +87,24 @@ export async function GET(request: Request) {
     // before this fires (see finally below), same reasoning as the module doc comment:
     // queueSentimentClassification has its own internal dedup, so it's safe to let it run
     // unguarded by this lock.
+    //
+    // Scoped to campaign-linked posts only, not every touched post. Comment-scraping is the
+    // expensive leg of this pipeline (pay-per-result Apify actor), and trackHashtag's return
+    // value includes every post matching a tracked hashtag — including hashtags being watched
+    // but never promoted to a live Campaign. Classifying every one of those at full comment
+    // depth was spending the same budget on exploratory tags as on real campaigns. Posts
+    // outside a campaign still get their aggregate/count stats from trackHashtag itself; they
+    // just don't get comment-scraped + per-comment classified until/unless a campaign picks
+    // them up (a later poll will catch them once backfillCampaignLink sets campaignId).
     if (touchedPostIds.length > 0) {
-      after(() => queueSentimentClassification(touchedPostIds));
+      const campaignPosts = await prisma.post.findMany({
+        where: { id: { in: touchedPostIds }, campaignId: { not: null } },
+        select: { id: true },
+      });
+      const campaignPostIds = campaignPosts.map((p) => p.id);
+      if (campaignPostIds.length > 0) {
+        after(() => queueSentimentClassification(campaignPostIds));
+      }
     }
 
     // Same heartbeat also refreshes any tracked /compare competitor whose data has aged

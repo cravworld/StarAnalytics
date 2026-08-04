@@ -1,5 +1,6 @@
-// Re-runnable backfill for posts lacking sentiment classification — originally scoped to
-// campaign/agency posts only (AGENTS.md Phase 4 §B3), widened to every post source below.
+// Re-runnable backfill for posts lacking sentiment classification — scoped to campaign/agency
+// posts only (AGENTS.md Phase 4 §B3; briefly widened to every source on 2026-07-31, reverted
+// 2026-08-04 to control Apify spend — see the scope comment below for why).
 // Modeled on poll-hashtags (CRON_SECRET-auth, fail-closed), not on the NODE_ENV-gated
 // /api/dev/* pattern: this must reach real posts in production, which a dev-only route
 // never can. Safely re-runnable — classifyPostsForSentiment's own staleness filter means
@@ -22,7 +23,7 @@ const STALENESS_HOURS = 24;
 // Extended Pro/Enterprise tier (1800s, beta as of 2026-07-31 — see
 // backfill-comment-sentiment/route.ts for the same reasoning). Needed here specifically
 // because a candidate post lacking comments triggers a live Apify comment-scrape
-// (scrapeCommentsForPosts) as a side effect, and COMMENTS_PER_POST_LIMIT is now 100,000 —
+// (scrapeCommentsForPosts) as a side effect, and COMMENTS_PER_POST_LIMIT is env-configurable —
 // that scrape's own runtime is a real, external variable this route has no control over.
 export const maxDuration = 1800;
 
@@ -47,14 +48,18 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Previously scoped to source: {in: ["campaign", "agency"]} — widened to every post
-    // source (competitor/fanpage/self included) because the product now wants comment
-    // scraping + classification to reach every tracked post, not just campaign/agency ones.
-    // This is also what triggers scrapeCommentsForPosts (see classifyPostsForSentiment) for
-    // sources that never had comments scraped at all before this change.
+    // Was widened to every post source (competitor/fanpage/self included) on 2026-07-31 to
+    // chase 100% comment coverage regardless of source. Reverted back to campaign/agency only
+    // (2026-08-04): this route's own comment-scrape side effect (scrapeCommentsForPosts, via
+    // classifyPostsForSentiment) is metered pay-per-result Apify spend, and with the account
+    // low on Apify credits the full-table hourly sweep was the largest driver of that spend.
+    // campaign/agency posts are still other accounts' public content (hashtag-tracked posts,
+    // agency-ingested client URLs) — this isn't a self-only restriction, it drops the
+    // competitor/fanpage/self sweep specifically to protect budget until credits are restored.
     const staleCutoff = new Date(Date.now() - STALENESS_HOURS * 60 * 60 * 1000);
     const candidates = await prisma.post.findMany({
       where: {
+        source: { in: ["campaign", "agency"] },
         OR: [{ sentiment: null }, { sentiment: { analyzedAt: { lt: staleCutoff } } }],
       },
       select: { id: true },

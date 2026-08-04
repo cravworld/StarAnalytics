@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { getSentimentModelId, getSentimentProvider } from "@/lib/providers";
 import { scrapeCommentsForPosts } from "@/lib/providers/apify-public-content";
 import { runWithConcurrency } from "@/lib/concurrency";
+import { tryAcquireCronLock, releaseCronLock } from "@/lib/cronLock";
 
 const STALENESS_HOURS = 24;
 const BATCH_SIZE = 20;
@@ -19,6 +20,17 @@ const BATCH_SIZE = 20;
 const COMMENTS_PER_POST_LIMIT = 20;
 // Same reasoning as commentSentiment.ts's BATCH_CONCURRENCY — see that file.
 const BATCH_CONCURRENCY = Number(process.env.SENTIMENT_BATCH_CONCURRENCY) || 5;
+
+// poll-hashtags (via its after()-deferred queueSentimentClassification) and backfill-sentiment
+// are both scheduled 0 * * * * in vercel.json — same hour, same minute. Confirmed in prod
+// (2026-08-04 DB audit): both processes independently read "this post has 0 comments" before
+// either had written any, and both paid Apify to scrape the same post's comments — 61 exact
+// duplicate (post, comment) rows and one post with 225 stored comments (over the 200/run cap)
+// were the receipts. This lock serializes the scrape-then-store step across whichever process
+// gets there first; the loser just skips its own comment scrape for this pass (posts fall back
+// to caption-only, same as any other transient comment-scrape failure) rather than racing.
+const COMMENT_SCRAPE_LOCK = "comment-scrape-pipeline";
+const COMMENT_SCRAPE_LOCK_TTL_SECONDS = 20 * 60 + 60; // matches waitForRun's 20-minute ceiling
 
 function chunk<T>(xs: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -84,14 +96,32 @@ export async function classifyPostsForSentiment(postIds: string[]): Promise<void
   // progress stalled completely rather than just slowing down. Affected posts fall back to
   // caption-only text this pass (buildClassifyText already handles zero comments) and get a
   // real comment-based re-classification whenever a later attempt succeeds.
-  const needComments = posts.filter((p) => p.postComments.length === 0 && p.externalUrl);
+  //
+  // p.comments !== 0 excludes posts the original hashtag/post scrape already reported as
+  // having zero comments (commentsCount from the same Apify item, see apify-normalize.ts) —
+  // confirmed in prod (2026-08-04 audit) that 322 posts sit at 0 stored comments forever
+  // because they genuinely have none, yet kept re-entering this filter and paying for a fresh
+  // Apify comment-scrape every time their Sentiment row went stale (~daily). null (comments
+  // count unknown, e.g. agency-ingested posts) still passes through and gets a real attempt.
+  const needComments = posts.filter((p) => p.postComments.length === 0 && p.externalUrl && p.comments !== 0);
   if (needComments.length > 0) {
-    try {
-      await scrapeCommentsForPosts(needComments.map((p) => ({ id: p.id, externalUrl: p.externalUrl! })));
-    } catch (err) {
-      console.error(
-        `sentiment pipeline: comment scrape failed for ${needComments.length} post(s), continuing caption-only for this batch:`,
-        err,
+    // See COMMENT_SCRAPE_LOCK above — this is what stops poll-hashtags and backfill-sentiment
+    // from both paying Apify to scrape the same post at once. Losing the lock isn't an error:
+    // this pass just falls back to caption-only for these posts, same as a scrape failure.
+    if (await tryAcquireCronLock(COMMENT_SCRAPE_LOCK, COMMENT_SCRAPE_LOCK_TTL_SECONDS)) {
+      try {
+        await scrapeCommentsForPosts(needComments.map((p) => ({ id: p.id, externalUrl: p.externalUrl! })));
+      } catch (err) {
+        console.error(
+          `sentiment pipeline: comment scrape failed for ${needComments.length} post(s), continuing caption-only for this batch:`,
+          err,
+        );
+      } finally {
+        await releaseCronLock(COMMENT_SCRAPE_LOCK);
+      }
+    } else {
+      console.log(
+        `sentiment pipeline: comment-scrape lock held by another invocation, skipping comment scrape for ${needComments.length} post(s) this pass (caption-only)`,
       );
     }
   }
