@@ -23,7 +23,7 @@ function ItemList({ items }: { items: CampaignSentimentItem[] }) {
       {items.map((item) => (
         <div
           key={item.id}
-          style={{ padding: "8px 10px", background: "var(--faint)", borderRadius: 6, fontSize: 12 }}
+          style={{ padding: "8px 10px", background: "var(--track)", borderRadius: 6, fontSize: 12 }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
             {item.externalUrl ? (
@@ -41,7 +41,7 @@ function ItemList({ items }: { items: CampaignSentimentItem[] }) {
             </div>
           )}
           {item.keywords.length > 0 && (
-            <div style={{ marginTop: 4, color: "var(--faint)" }}>{item.keywords.join(" · ")}</div>
+            <div style={{ marginTop: 4, color: "var(--muted)" }}>{item.keywords.join(" · ")}</div>
           )}
         </div>
       ))}
@@ -71,7 +71,7 @@ export function SentimentBar({
 
   return (
     <div style={{ padding: "8px 0" }}>
-      <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", background: "var(--faint)" }}>
+      <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", background: "var(--track)" }}>
         {(Object.keys(LABEL_META) as Label[]).map((label) => (
           <button
             key={label}
@@ -111,7 +111,7 @@ export function SentimentBar({
         ))}
       </div>
       {classifiedCount < totalCount && (
-        <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 6 }}>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>
           {classifiedCount} of {totalCount} posts classified
         </div>
       )}

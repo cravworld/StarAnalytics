@@ -56,7 +56,7 @@ export function LiveStream({ campaignId, initial }: { campaignId: string; initia
 
   return (
     <>
-      <div style={{ fontSize: 11, color: live ? "var(--green)" : "var(--faint)", marginBottom: 8 }}>
+      <div style={{ fontSize: 11, color: live ? "var(--green)" : "var(--muted)", marginBottom: 8 }}>
         {live ? "● Live — updates automatically" : "○ Live updates paused — refresh to retry"}
       </div>
       {items.length === 0 ? (

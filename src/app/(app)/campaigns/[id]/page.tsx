@@ -112,9 +112,9 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
             })}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
-            <span style={{ fontSize: 10, color: "var(--faint)" }}>Tracking start</span>
+            <span style={{ fontSize: 10, color: "var(--muted)" }}>Tracking start</span>
             <span style={{ fontSize: 10, color: "var(--accent)", fontWeight: 700 }}>{v.peakLabel}</span>
-            <span style={{ fontSize: 10, color: "var(--faint)" }}>Now</span>
+            <span style={{ fontSize: 10, color: "var(--muted)" }}>Now</span>
           </div>
           <div style={{ marginTop: 14 }}>
             <div className="card-title">Sentiment</div>

@@ -11,7 +11,7 @@ const SENTIMENT_COLOR = { pos: "#1a7a4a", neu: "#bdbdbd", neg: "#c62828" } as co
 
 function SentimentMixBar({ positivePct, neutralPct, negativePct }: { positivePct: number; neutralPct: number; negativePct: number }) {
   return (
-    <div style={{ display: "flex", width: 90, height: 6, borderRadius: 3, overflow: "hidden", background: "var(--faint)" }}>
+    <div style={{ display: "flex", width: 90, height: 6, borderRadius: 3, overflow: "hidden", background: "var(--track)" }}>
       <div style={{ width: `${positivePct}%`, background: SENTIMENT_COLOR.pos }} />
       <div style={{ width: `${neutralPct}%`, background: SENTIMENT_COLOR.neu }} />
       <div style={{ width: `${negativePct}%`, background: SENTIMENT_COLOR.neg }} />
@@ -73,7 +73,7 @@ export function KeywordTrendsList({ data }: { data: KeywordTrendsResult }) {
                 alignItems: "center",
                 gap: 16,
                 fontSize: 11,
-                color: "var(--faint)",
+                color: "var(--muted)",
                 padding: "6px 0",
                 borderBottom: "1px solid var(--border)",
               }}

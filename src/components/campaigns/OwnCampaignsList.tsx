@@ -93,7 +93,7 @@ export function OwnCampaignsList({ campaigns, kpis }: { campaigns: Campaign[]; k
                 </div>
               ) : null}
             </div>
-            <span style={{ color: "var(--faint)", fontSize: 18, marginTop: 2 }}>›</span>
+            <span style={{ color: "var(--muted)", fontSize: 18, marginTop: 2 }}>›</span>
           </Link>
         ))
       )}

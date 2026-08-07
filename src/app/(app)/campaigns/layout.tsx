@@ -26,16 +26,21 @@ export default function CampaignsLayout({ children }: { children: ReactNode }) {
 
   return (
     <>
-      <div className="inner-tabs">
+      <nav className="inner-tabs" aria-label="Campaign views">
         {TABS.map((t) => {
           const active = t.href === "/campaigns" ? pathname === t.href || isDetailRoute : pathname === t.href;
           return (
-            <Link key={t.href} href={t.href} className={`itab${active ? " active" : ""}`}>
+            <Link
+              key={t.href}
+              href={t.href}
+              aria-current={active ? "page" : undefined}
+              className={`itab${active ? " active" : ""}`}
+            >
               {t.label}
             </Link>
           );
         })}
-      </div>
+      </nav>
       {children}
     </>
   );

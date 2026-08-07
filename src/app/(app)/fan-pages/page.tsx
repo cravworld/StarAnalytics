@@ -53,7 +53,7 @@ export default async function FanPagesPage() {
               <span style={{ fontWeight: 700 }}>{a.bold}</span>
               <span style={{ color: "var(--muted)" }}>{a.text}</span>
             </div>
-            <span style={{ fontSize: 11, color: "var(--faint)" }}>{a.time}</span>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>{a.time}</span>
           </div>
         ))
       )}

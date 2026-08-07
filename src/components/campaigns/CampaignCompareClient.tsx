@@ -41,7 +41,7 @@ export function CampaignCompareClient({
               border: "1px solid var(--border)",
               borderRadius: 6,
               cursor: "pointer",
-              background: selectedIds.includes(o.id) ? "var(--faint)" : "transparent",
+              background: selectedIds.includes(o.id) ? "var(--accent-tint)" : "transparent",
             }}
           >
             <input type="checkbox" checked={selectedIds.includes(o.id)} onChange={() => toggle(o.id)} />
@@ -64,7 +64,7 @@ export function CampaignCompareClient({
                 <div style={{ fontSize: 13, fontWeight: 700 }}>{col.name}</div>
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>{col.tag || "(no hashtags set)"}</div>
                 {col.topHashtag ? (
-                  <div style={{ fontSize: 10, color: "var(--faint)", marginTop: 4 }}>Top tag: #{col.topHashtag}</div>
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>Top tag: #{col.topHashtag}</div>
                 ) : null}
               </div>
             ))}

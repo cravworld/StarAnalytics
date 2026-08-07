@@ -47,3 +47,6 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# claude code — local settings and throwaway worktrees (full repo copies)
+/.claude/

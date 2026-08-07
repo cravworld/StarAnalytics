@@ -77,7 +77,7 @@ export default async function ComparePage() {
                 {col.handle} · {col.followersDisplay}
               </div>
               {col.lastUpdatedLabel ? (
-                <div style={{ fontSize: 10, color: "var(--faint)", marginTop: 4 }}>Last updated {col.lastUpdatedLabel}</div>
+                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>Last updated {col.lastUpdatedLabel}</div>
               ) : null}
             </div>
           ))}

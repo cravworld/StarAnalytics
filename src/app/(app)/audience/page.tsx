@@ -41,14 +41,14 @@ export default async function AudiencePage() {
         <div style={{ marginTop: 8, overflowX: "auto" }}>
           <div style={{ display: "flex", gap: 3, paddingLeft: 38, marginBottom: 4 }}>
             {TIME_LABELS.map((t) => (
-              <span key={t} style={{ fontSize: 10, color: "var(--faint)", width: 20, textAlign: "center" }}>
+              <span key={t} style={{ fontSize: 10, color: "var(--muted)", width: 20, textAlign: "center" }}>
                 {t}
               </span>
             ))}
           </div>
           {Object.entries(demo.heatmap).map(([day, values]) => (
             <div key={day} style={{ display: "flex", gap: 3, marginBottom: 3, alignItems: "center" }}>
-              <span style={{ fontSize: 10, color: "var(--faint)", width: 34, textAlign: "right" }}>{day}</span>
+              <span style={{ fontSize: 10, color: "var(--muted)", width: 34, textAlign: "right" }}>{day}</span>
               {values.map((v, i) => (
                 <div className={`heat-cell h${v}`} key={i} />
               ))}
@@ -56,13 +56,13 @@ export default async function AudiencePage() {
           ))}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
-          <span style={{ fontSize: 10, color: "var(--faint)" }}>Low</span>
+          <span style={{ fontSize: 10, color: "var(--muted)" }}>Low</span>
           <div style={{ display: "flex", gap: 2 }}>
             {[0, 1, 2, 3, 4].map((v) => (
               <div className={`heat-cell h${v}`} key={v} />
             ))}
           </div>
-          <span style={{ fontSize: 10, color: "var(--faint)" }}>High</span>
+          <span style={{ fontSize: 10, color: "var(--muted)" }}>High</span>
         </div>
       </Card>
     </>

@@ -27,10 +27,22 @@ export function GrowthChart({ data }: { data: number[] }) {
           maintainAspectRatio: false,
           plugins: { legend: { display: false } },
           scales: {
-            x: { grid: { display: false }, ticks: { color: "#b0b0c8", font: { size: 10 } } },
+            // Tick colour/size now come from the shared Chart.js defaults in
+            // ./register — the old #b0b0c8 was ~2.1:1 on white and unreadable.
+            x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 16 } },
             y: {
-              grid: { color: "rgba(0,0,0,.05)" },
-              ticks: { color: "#b0b0c8", font: { size: 10 }, callback: (v) => `${v}K` },
+              grid: { color: "rgba(15,15,20,.05)" },
+              border: { display: false },
+              ticks: {
+                maxTicksLimit: 5,
+                // Values arrive in thousands. Past 1000 the old `${v}K` callback
+                // rendered follower counts as "7450K"; nobody reads a dashboard in
+                // thousands-of-thousands.
+                callback: (v) => {
+                  const k = Number(v);
+                  return k >= 1000 ? `${(k / 1000).toFixed(2)}M` : `${k}K`;
+                },
+              },
             },
           },
         }}

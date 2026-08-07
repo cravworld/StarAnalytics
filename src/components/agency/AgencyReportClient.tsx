@@ -240,7 +240,7 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
                 Browse file
               </button>
             </label>
-            <div style={{ textAlign: "center", fontSize: 11, color: "var(--faint)", margin: "10px 0" }}>
+            <div style={{ textAlign: "center", fontSize: 11, color: "var(--muted)", margin: "10px 0" }}>
               — or paste links directly —
             </div>
             <textarea
@@ -369,7 +369,7 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
                     <div className="lb-meta">
                       <span>Engagement <strong>{a.engagementTotal}</strong></span>
                       <span>Auth <strong style={{ color: scoreColor(a.auth) }}>{a.auth}</strong></span>
-                      <span title="Not evaluated — no reach/spend data this phase">Eff <strong style={{ color: "var(--faint)" }}>—</strong></span>
+                      <span title="Not evaluated — no reach/spend data this phase">Eff <strong style={{ color: "var(--muted)" }}>—</strong></span>
                     </div>
                   </div>
                   <div className="lb-score" style={{ color: scoreColor(a.score) }}>{a.score}</div>
@@ -389,9 +389,9 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span>Efficiency (0% of score)</span>
-                    <span style={{ color: "var(--faint)", fontWeight: 600 }}>Not evaluated</span>
+                    <span style={{ color: "var(--muted)", fontWeight: 600 }}>Not evaluated</span>
                   </div>
-                  <div style={{ fontSize: 11, marginTop: 8, color: "var(--faint)" }}>
+                  <div style={{ fontSize: 11, marginTop: 8, color: "var(--muted)" }}>
                     Efficiency&apos;s nominal DPR weight is 20%, but no reach, follower, or spend data exists
                     for scraped third-party posts, so there is no efficiency signal independent of
                     performance this phase. Rather than blend in a placeholder number, it is excluded from
@@ -417,7 +417,7 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
                 ))}
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }} title="Not evaluated — no reach/spend data this phase">
                   <span style={{ color: "var(--muted)" }}>Avg efficiency</span>
-                  <span style={{ fontWeight: 700, color: "var(--faint)" }}>Not evaluated</span>
+                  <span style={{ fontWeight: 700, color: "var(--muted)" }}>Not evaluated</span>
                 </div>
               </Card>
             </div>
@@ -518,7 +518,7 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
               <tbody>
                 {filteredPosts.map((p, i) => (
                   <tr key={p.id}>
-                    <td style={{ color: "var(--faint)" }}>{i + 1}</td>
+                    <td style={{ color: "var(--muted)" }}>{i + 1}</td>
                     <td>
                       <a href={p.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "none", fontSize: 11 }}>
                         {p.url.replace(/^https?:\/\//, "")}
@@ -547,7 +547,7 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
                         <span
                           key={f.type}
                           className="flag-chip"
-                          style={{ background: "#eee", color: "var(--faint)" }}
+                          style={{ background: "#eee", color: "var(--muted)" }}
                           title={f.reason}
                         >
                           {FLAG_META[f.type].shortLabel}: N/A
@@ -559,7 +559,7 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
               </tbody>
             </table>
           </div>
-          <div style={{ textAlign: "center", fontSize: 11, color: "var(--faint)", marginTop: 10, padding: 8 }}>
+          <div style={{ textAlign: "center", fontSize: 11, color: "var(--muted)", marginTop: 10, padding: 8 }}>
             Showing {filteredPosts.length} of {result.posts.length} posts
           </div>
         </div>

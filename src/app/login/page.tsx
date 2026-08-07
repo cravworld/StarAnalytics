@@ -29,7 +29,7 @@ export default function LoginPage() {
             Sign in with Google
           </button>
         </form>
-        <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 14 }}>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 14 }}>
           Access is restricted to the Nivin Pauly team.
         </div>
       </div>

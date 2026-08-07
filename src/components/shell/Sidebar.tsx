@@ -68,7 +68,12 @@ export function Sidebar({ fanPageCount }: { fanPageCount: number }) {
   const inCampaigns = pathname.startsWith("/campaigns");
 
   return (
-    <div className="sidebar">
+    <nav className="sidebar" aria-label="Primary">
+      {/* Keyboard users otherwise tab through 11 nav links to reach the page they
+          just navigated to. Visually hidden until focused. */}
+      <a href="#main-content" className="skip-link">
+        Skip to content
+      </a>
       <div className="logo-wrap">
         <div className="logo-name">StarAnalytics</div>
         <div className="logo-sub">Nivin Pauly · Actor</div>
@@ -79,6 +84,9 @@ export function Sidebar({ fanPageCount }: { fanPageCount: number }) {
         <Link
           key={item.href}
           href={item.href}
+          // aria-current is what tells a screen reader which page it is on. The
+          // `.active` class alone conveys that to sighted users only.
+          aria-current={pathname === item.href ? "page" : undefined}
           className={`nav-item${pathname === item.href ? " active" : ""}`}
         >
           {NAV_ICONS[item.key]}
@@ -87,18 +95,26 @@ export function Sidebar({ fanPageCount }: { fanPageCount: number }) {
       ))}
 
       <div className="nav-sec">Campaigns</div>
-      <Link href="/campaigns" className={`nav-item${inCampaigns ? " active" : ""}`}>
+      <Link
+        href="/campaigns"
+        aria-current={inCampaigns ? "page" : undefined}
+        className={`nav-item${inCampaigns ? " active" : ""}`}
+      >
         {NAV_ICONS.campaigns}
         Campaigns
       </Link>
-      <div>
+      {/* Grouping wrapper only. Below 900px the sidebar becomes a horizontal rail
+          and this div is flattened with `display:contents` so the sub-items join
+          that row instead of stacking into a column inside it. */}
+      <div className="nav-sub-group">
         {CAMPAIGN_SUBS.map((sub) => (
           <Link
             key={sub.href}
             href={sub.href}
+            aria-current={pathname === sub.href ? "page" : undefined}
             className={`nav-sub${pathname === sub.href ? " active" : ""}`}
           >
-            <div className="nav-sub-dot" />
+            <div className="nav-sub-dot" aria-hidden="true" />
             {sub.label}
             {sub.badge ? <span className="nav-badge" style={{ marginLeft: "auto" }}>{sub.badge}</span> : null}
           </Link>
@@ -106,9 +122,20 @@ export function Sidebar({ fanPageCount }: { fanPageCount: number }) {
       </div>
 
       <div className="nav-sec">Community</div>
-      <Link href="/fan-pages" className={`nav-item${pathname === "/fan-pages" ? " active" : ""}`}>
+      <Link
+        href="/fan-pages"
+        aria-current={pathname === "/fan-pages" ? "page" : undefined}
+        className={`nav-item${pathname === "/fan-pages" ? " active" : ""}`}
+      >
         {NAV_ICONS.fanpages}
-        Fan Pages {fanPageCount > 0 ? <span className="nav-badge">{fanPageCount}</span> : null}
+        Fan Pages
+        {fanPageCount > 0 ? (
+          // Bare "24" next to "Fan Pages" reads as "Fan Pages 24" to a screen
+          // reader, which sounds like a page number.
+          <span className="nav-badge" aria-label={`${fanPageCount} tracked fan pages`}>
+            {fanPageCount}
+          </span>
+        ) : null}
       </Link>
 
       <div className="sidebar-footer">
@@ -118,6 +145,6 @@ export function Sidebar({ fanPageCount }: { fanPageCount: number }) {
           <div style={{ fontSize: 11, color: "var(--muted)" }}>@nivinpauly</div>
         </div>
       </div>
-    </div>
+    </nav>
   );
 }

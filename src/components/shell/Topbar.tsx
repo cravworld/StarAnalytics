@@ -34,15 +34,15 @@ export function Topbar() {
     : (BREADCRUMBS[pathname] ?? [pathname]);
 
   return (
-    <div className="topbar">
-      <div className="breadcrumb">
+    <header className="topbar">
+      <nav className="breadcrumb" aria-label="Breadcrumb">
         {crumbs.map((c, i) => (
           <span key={c}>
             {i > 0 ? " › " : ""}
             {i === crumbs.length - 1 ? <strong>{c}</strong> : c}
           </span>
         ))}
-      </div>
+      </nav>
       <div className="topbar-actions">
         {/* Dashboard/Content/Audience run on mock InstagramInsights until Phase 7 (real
             Graph API, since/until-based) — a date range here would either do nothing or
@@ -60,6 +60,6 @@ export function Topbar() {
           Export
         </button>
       </div>
-    </div>
+    </header>
   );
 }
