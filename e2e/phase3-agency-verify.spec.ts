@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { PrismaClient } from "@prisma/client";
 import { mintSessionCookie } from "./auth/mintSession";
 
 /**
@@ -13,16 +14,54 @@ import { mintSessionCookie } from "./auth/mintSession";
  * real, metered Apify actor.
  */
 
+// Anchored to the exact shape generated below, so a real agency whose name merely
+// contains "E2E" can never be caught by the cleanup.
+const E2E_AGENCY_NAME_RE = /^E2E Agency \d+$/;
+
 test.describe("Phase 3 — agency report upload, scoring, and evidence drill-down", () => {
+  // Shortcodes this run planted, so cleanup deletes only its own rows and never a
+  // concurrent run's.
+  let stamp = 0;
+
   test.beforeEach(async ({ context }) => {
     await context.addCookies([await mintSessionCookie()]);
+  });
+
+  // playwright.config.ts loads the real production DATABASE_URL — only DATA_MODE_* is
+  // mocked, never the database. Without this, every local `npm run test:e2e` left three
+  // more agency rows in prod, and they surfaced in the app's own Agency Report as if they
+  // were real clients. Three of them were still sitting there on 2026-08-07. Same unclean-
+  // test pattern already fixed in phase2-campaigns.spec.ts; scripts/purge-e2e-agencies.mjs
+  // clears rows created before this fix.
+  test.afterAll(async () => {
+    const prisma = new PrismaClient();
+    try {
+      const agencies = await prisma.agency.findMany({ select: { id: true, name: true } });
+      const ids = agencies.filter((a) => E2E_AGENCY_NAME_RE.test(a.name)).map((a) => a.id);
+      if (ids.length === 0) return;
+      // Children first — Agency's FKs are not ON DELETE CASCADE, so the delete below
+      // would otherwise fail rather than orphan anything. AgencyPostScore also points at
+      // Post, so scores have to clear before posts.
+      await prisma.agencyPostScore.deleteMany({ where: { agencyId: { in: ids } } });
+      await prisma.post.deleteMany({ where: { agencyId: { in: ids } } });
+      // Belt-and-braces for posts this run created that never got linked to an agency
+      // (a URL whose shortcode didn't resolve). Guarded on stamp: if the test failed
+      // before assigning it, `e2e0` would be a prefix broad enough to match rows this
+      // run never created.
+      if (stamp > 0) {
+        await prisma.post.deleteMany({ where: { igShortcode: { startsWith: `e2e${stamp}` } } });
+      }
+      await prisma.agency.deleteMany({ where: { id: { in: ids } } });
+    } finally {
+      await prisma.$disconnect();
+    }
   });
 
   test("upload links, run analysis, and see real scored results with evidence", async ({ page }) => {
     await page.goto("/campaigns/agency");
     await expect(page.getByText("Upload Agency Post Links")).toBeVisible();
 
-    const stamp = Date.now();
+    stamp = Date.now();
     // A mix of clean-shaped and flagged-shaped URLs — the mock provider cycles
     // seed.ts's POSTS engagement pattern by index, so different shortcodes get
     // different clean-vs-flagged like:comment ratios.
