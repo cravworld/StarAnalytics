@@ -1,4 +1,5 @@
 import { getDatasetItems, runActor, waitForRun } from "@/lib/apify/client";
+import { assertQuotaCircuitClosed } from "@/lib/apify/quotaBreaker";
 import { prisma } from "@/lib/prisma";
 import {
   normalizeCommentItem,
@@ -123,6 +124,11 @@ async function backfillCampaignLink(tag: string, campaignId: string | null): Pro
 // done/error, with apify_run_id/started_at/finished_at/item_count populated. This is
 // the audit trail Phase 2's polling cron depends on — not a nice-to-have.
 async function trackedRun<T>(kind: string, actorId: string, input: Record<string, unknown>): Promise<T[]> {
+  // Before the scrape_runs row, not after: a skipped call never reached Apify, so
+  // recording it would both falsify the audit trail and — because the circuit derives
+  // its state from that same trail — keep pushing its own cooldown forward.
+  await assertQuotaCircuitClosed(actorId);
+
   const run = await prisma.scrapeRun.create({ data: { kind, status: "queued" } });
   try {
     const { runId, datasetId: initialDatasetId } = await runActor(actorId, input);

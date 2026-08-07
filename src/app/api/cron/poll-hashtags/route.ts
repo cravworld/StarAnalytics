@@ -16,6 +16,7 @@ import { queueSentimentClassification } from "@/lib/data/sentiment";
 import { refreshStaleCompetitors } from "@/lib/data/compare";
 import { refreshStaleFanPages } from "@/lib/data/fanpages";
 import { tryAcquireCronLock, releaseCronLock } from "@/lib/cronLock";
+import { ApifyQuotaExhaustedError, isApifyQuotaError } from "@/lib/apify/quotaBreaker";
 
 const LOCK_NAME = "poll-hashtags";
 
@@ -68,14 +69,28 @@ export async function GET(request: Request) {
 
     const allTracked = await prisma.hashtagSnapshot.groupBy({ by: ["hashtag"] });
     const tracked = allTracked.filter((t) => liveHashtags.has(t.hashtag));
-    const results: { hashtag: string; ok: boolean; error?: string }[] = [];
+    const results: { hashtag: string; ok: boolean; skipped?: boolean; error?: string }[] = [];
     const touchedPostIds: string[] = [];
+    let quotaExhausted = false;
 
     for (const { hashtag } of tracked) {
+      // Once Apify has rejected on the monthly spend cap, the remaining hashtags in this
+      // tick cannot succeed either — the cap is account-wide, not per-actor. Abandoning
+      // the rest of the loop is where most of the saving is: before this, every tick paid
+      // for one rejected call per tracked hashtag, which measured 1,098 failed runs over
+      // the week the cap was hit. The breaker in trackedRun would refuse each of these
+      // anyway; breaking here also skips its lookup.
+      if (quotaExhausted) {
+        results.push({ hashtag, ok: false, skipped: true, error: "Apify quota exhausted — not attempted" });
+        continue;
+      }
       try {
         touchedPostIds.push(...(await trackHashtag(hashtag)));
         results.push({ hashtag, ok: true });
       } catch (err) {
+        if (err instanceof ApifyQuotaExhaustedError || isApifyQuotaError(err instanceof Error ? err.message : null)) {
+          quotaExhausted = true;
+        }
         // One hashtag failing (rate limit, actor error) shouldn't block the rest of
         // the poll cycle — log and move on rather than aborting the whole run.
         results.push({ hashtag, ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -119,6 +134,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       polled: results.length,
+      quotaExhausted,
       results,
       competitorsRefreshed: competitorResults,
       fanPagesRefreshed: fanPageResults,
