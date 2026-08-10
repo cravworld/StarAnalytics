@@ -167,8 +167,26 @@ model Campaign {
 
   posts    Post[]
   agencies Agency[]
+  events   CampaignEvent[]
 
   @@map("campaigns")
+}
+
+// Milestones a campaign owner logs by hand (trailer drop, premiere, theatrical release,
+// press event, ...) — deliberately free-text `label`, not an enum, same "don't model a
+// controlled vocabulary you don't need yet" choice keyword trends already made. Read by
+// the campaign detail page's timeline card and cross-referenced against
+// getCampaignDetail's sentimentTrend to answer "did this event move sentiment/buzz."
+model CampaignEvent {
+  id         String   @id @default(uuid())
+  campaignId String   @map("campaign_id")
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  label      String
+  eventDate  DateTime @map("event_date")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([campaignId])
+  @@map("campaign_events")
 }
 
 model Agency {

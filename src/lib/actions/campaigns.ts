@@ -3,6 +3,7 @@
 import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createCampaign, getCampaignStream, trackHashtag } from "@/lib/data/campaigns";
+import { addCampaignEvent, deleteCampaignEvent } from "@/lib/data/campaignEvents";
 import { queueSentimentClassification } from "@/lib/data/sentiment";
 import { requireSession } from "@/lib/require-session";
 
@@ -56,4 +57,18 @@ export async function trackHashtagAction(tag: string) {
 export async function getCampaignStreamAction(campaignId: string) {
   await requireSession();
   return getCampaignStream(campaignId);
+}
+
+export async function addCampaignEventAction(campaignId: string, label: string, eventDate: string) {
+  await requireSession();
+  await addCampaignEvent(campaignId, label, eventDate);
+  revalidatePath(`/campaigns/${campaignId}`);
+  revalidatePath(`/campaigns/${campaignId}/media-kit`);
+}
+
+export async function deleteCampaignEventAction(campaignId: string, eventId: string) {
+  await requireSession();
+  await deleteCampaignEvent(eventId);
+  revalidatePath(`/campaigns/${campaignId}`);
+  revalidatePath(`/campaigns/${campaignId}/media-kit`);
 }

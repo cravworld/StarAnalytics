@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pill } from "@/components/ui/Pill";
 import type { PlatformId } from "@/lib/providers/types";
+import { useTopbarExport } from "@/components/shell/TopbarExportContext";
+import { toCsv } from "@/lib/csv";
 
 export interface FanPageRow {
   name: string;
@@ -40,6 +42,30 @@ export function FanPageList({ fanPages }: { fanPages: FanPageRow[] }) {
   } else if (tab === "reach") {
     rows = [...fanPages].sort((a, b) => b.followersRaw - a.followersRaw);
   }
+
+  // Exports whatever the current tab shows, not always the full list — same "export what's
+  // on screen" semantics as OwnCampaignsList's search-scoped export.
+  const exportConfig = useMemo(
+    () => ({
+      filename: "fan-pages.csv",
+      csv: () =>
+        toCsv(
+          ["Name", "Platform", "Handle", "Followers", "Engagement", "Posts Today", "Active", "Tracked Tag"],
+          rows.map((f) => [
+            f.name,
+            f.platform,
+            f.handle,
+            f.followersRaw,
+            f.engRaw,
+            f.postsTodayRaw,
+            f.status ? "yes" : "no",
+            f.vijayam ? "yes" : "no",
+          ]),
+        ),
+    }),
+    [rows],
+  );
+  useTopbarExport(exportConfig);
 
   return (
     <>

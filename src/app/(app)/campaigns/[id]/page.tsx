@@ -7,6 +7,8 @@ import { Pill, LiveDot } from "@/components/ui/Pill";
 import { LiveStream } from "@/components/campaigns/LiveStream";
 import { SentimentBar } from "@/components/campaigns/SentimentBar";
 import { SentimentTrendLine } from "@/components/charts/SentimentTrendLine";
+import { CampaignTimeline } from "@/components/campaigns/CampaignTimeline";
+import { CsvExportRegistrar } from "@/components/shell/CsvExportRegistrar";
 
 // Green/yellow/red bands so the number reads at a glance without needing the tooltip.
 function bandColor(score: number): string {
@@ -55,9 +57,14 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
 
   return (
     <>
-      <Link href="/campaigns" className="back-link">
-        ← Back to Campaigns
-      </Link>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <Link href="/campaigns" className="back-link">
+          ← Back to Campaigns
+        </Link>
+        <Link href={`/campaigns/${v.id}/media-kit`} className="tb-btn">
+          Media Kit ↗
+        </Link>
+      </div>
 
       <div className="vhero">
         <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
@@ -145,9 +152,16 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
         </div>
       </div>
 
+      <Card title="Campaign Timeline">
+        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+          Log trailer drops, premieres, and release dates to see them against sentiment below.
+        </div>
+        <CampaignTimeline campaignId={v.id} events={v.events} />
+      </Card>
+
       <Card title="Sentiment Over Time">
         {v.sentimentTrend.length >= 2 ? (
-          <SentimentTrendLine data={v.sentimentTrend} />
+          <SentimentTrendLine data={v.sentimentTrend} events={v.events} />
         ) : (
           <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0" }}>
             {v.sentimentTrend.length === 0
@@ -159,6 +173,11 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
 
       {v.hashtagBreakdown.length > 0 ? (
         <Card title="Hashtag Performance">
+          <CsvExportRegistrar
+            filename={`${v.name}-hashtag-performance.csv`}
+            headers={["Hashtag", "Posts", "Total Engagement", "Avg Engagement/Post"]}
+            rows={v.hashtagBreakdown.map((h) => [`#${h.hashtag}`, h.postCount, h.totalEngagement, h.avgEngagementPerPost])}
+          />
           <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
             Ranked by total engagement — a post can carry more than one tracked tag, so totals can overlap.
           </div>
@@ -172,6 +191,28 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                 </div>
                 <div className="bar-val">
                   {h.postCount} post{h.postCount === 1 ? "" : "s"} · {h.totalEngagement.toLocaleString()} eng
+                </div>
+              </div>
+            ));
+          })()}
+        </Card>
+      ) : null}
+
+      {v.contentTypeBreakdown.length > 0 ? (
+        <Card title="Content Type Performance">
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+            Ranked by average engagement per post — which format is actually working, not just which was posted most.
+          </div>
+          {(() => {
+            const maxAvg = Math.max(1, ...v.contentTypeBreakdown.map((c) => c.avgEngagementPerPost));
+            return v.contentTypeBreakdown.map((c) => (
+              <div className="bar-row" key={c.mediaType}>
+                <div className="bar-label">{c.mediaType}</div>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: `${(c.avgEngagementPerPost / maxAvg) * 100}%` }} />
+                </div>
+                <div className="bar-val">
+                  {c.postCount} post{c.postCount === 1 ? "" : "s"} · {c.avgEngagementPerPost.toLocaleString()} avg eng
                 </div>
               </div>
             ));

@@ -1,7 +1,10 @@
 "use client";
 
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import type { getCampaignCompareOptions, getCampaignCompareData } from "@/lib/data/campaigns";
+import { useTopbarExport } from "@/components/shell/TopbarExportContext";
+import { toCsv } from "@/lib/csv";
 
 type Options = Awaited<ReturnType<typeof getCampaignCompareOptions>>;
 type CompareResult = Awaited<ReturnType<typeof getCampaignCompareData>>;
@@ -25,6 +28,22 @@ export function CampaignCompareClient({
   }
 
   const gridCols = `160px repeat(${Math.max(columns.length, 1)}, 1fr)`;
+
+  const exportConfig = useMemo(
+    () =>
+      columns.length > 0
+        ? {
+            filename: "campaign-compare.csv",
+            csv: () =>
+              toCsv(
+                ["Metric", ...columns.map((c) => c.name)],
+                rows.map((row) => [row.label, ...row.cells.map((c) => c.display)]),
+              ),
+          }
+        : null,
+    [columns, rows],
+  );
+  useTopbarExport(exportConfig);
 
   return (
     <>

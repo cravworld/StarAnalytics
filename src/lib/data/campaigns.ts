@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Campaign } from "@prisma/client";
 import { computeBuzzScore, type BuzzScoreResult } from "@/lib/scoring/buzzScore";
+import { getCampaignEvents, type CampaignEventRow } from "@/lib/data/campaignEvents";
 
 function fmtCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -211,6 +212,35 @@ export interface CampaignHashtagRow {
   avgEngagementPerPost: number;
 }
 
+// Media-kit top-posts list (see getCampaignDetail below). No thumbnail/image field exists
+// on Post — the Apify scrape never stores a display_url column, and even `raw` (which might
+// carry one) gets nulled by prune-raw-payloads after COMMENT_RETENTION_DAYS, so this is a
+// text/stat card that links out to the real post, not an image gallery.
+export interface CampaignTopPost {
+  id: string;
+  handle: string;
+  caption: string;
+  likes: number;
+  comments: number;
+  engagement: number;
+  externalUrl: string | null;
+  postedAtLabel: string | null;
+  mediaType: string | null;
+}
+
+const TOP_POSTS_LIMIT = 10;
+
+// Which content format actually performs for this campaign — image/carousel/reel/etc.
+// Bucketed under "(unknown)" rather than dropped when mediaType is null, so the totals
+// stay honest (same "don't silently drop partial data" discipline sentiment/hashtag
+// breakdown already use) even though no post in the live dataset has hit this case yet.
+export interface CampaignContentTypeRow {
+  mediaType: string;
+  postCount: number;
+  totalEngagement: number;
+  avgEngagementPerPost: number;
+}
+
 export interface CampaignDetail {
   id: string;
   name: string;
@@ -237,6 +267,16 @@ export interface CampaignDetail {
   // mentioning both the movie tag and a cast member's tag), so totals across rows can exceed
   // the campaign's own post count. That's correct for "who's driving buzz," not a bug.
   hashtagBreakdown: CampaignHashtagRow[];
+  // Top TOP_POSTS_LIMIT posts by engagement (likes+comments) — built for the media-kit
+  // export but computed here unconditionally since it's a free sort/slice over posts this
+  // function already fetched (no new query), same discipline as buzzScore/hashtagBreakdown.
+  topPosts: CampaignTopPost[];
+  // Hand-logged milestones (trailer drop, premiere, ...) — see campaignEvents.ts. Read by
+  // the campaign detail page's timeline card and cross-referenced against sentimentTrend.
+  events: CampaignEventRow[];
+  // Ranked by average engagement/post, not total — total just rewards whichever type has
+  // more posts, average is the actual "which format performs" signal.
+  contentTypeBreakdown: CampaignContentTypeRow[];
 }
 
 // Reuses the exact raw->hashtags containment pattern trackHashtag() already uses for global
@@ -416,6 +456,43 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
 
   const hashtagBreakdown = await getCampaignHashtagBreakdown(id, campaign.hashtags);
 
+  const topPosts: CampaignTopPost[] = [...posts]
+    .map((p) => {
+      const handle = (p.authorHandle ?? "").replace(/^@/, "");
+      return {
+        id: p.id,
+        handle: handle ? `@${handle}` : "@unknown",
+        caption: p.caption ?? "",
+        likes: p.likes ?? 0,
+        comments: p.comments ?? 0,
+        engagement: (p.likes ?? 0) + (p.comments ?? 0),
+        externalUrl: p.externalUrl ?? null,
+        postedAtLabel: (p.postedAt ?? p.scrapedAt)?.toLocaleDateString() ?? null,
+        mediaType: p.mediaType ?? null,
+      };
+    })
+    .sort((a, b) => b.engagement - a.engagement)
+    .slice(0, TOP_POSTS_LIMIT);
+
+  const events = await getCampaignEvents(id);
+
+  const contentTypeAgg = new Map<string, { postCount: number; totalEngagement: number }>();
+  for (const p of posts) {
+    const key = p.mediaType ?? "(unknown)";
+    const bucket = contentTypeAgg.get(key) ?? { postCount: 0, totalEngagement: 0 };
+    bucket.postCount++;
+    bucket.totalEngagement += (p.likes ?? 0) + (p.comments ?? 0);
+    contentTypeAgg.set(key, bucket);
+  }
+  const contentTypeBreakdown: CampaignContentTypeRow[] = Array.from(contentTypeAgg.entries())
+    .map(([mediaType, agg]) => ({
+      mediaType,
+      postCount: agg.postCount,
+      totalEngagement: agg.totalEngagement,
+      avgEngagementPerPost: Math.round(agg.totalEngagement / agg.postCount),
+    }))
+    .sort((a, b) => b.avgEngagementPerPost - a.avgEngagementPerPost);
+
   return {
     id: campaign.id,
     name: campaign.name,
@@ -456,6 +533,9 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     keywordPills,
     stream,
     hashtagBreakdown,
+    topPosts,
+    events,
+    contentTypeBreakdown,
   };
 }
 

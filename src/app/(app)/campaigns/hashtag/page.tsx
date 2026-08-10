@@ -2,6 +2,7 @@ import { getTrackedHashtags } from "@/lib/data/campaigns";
 import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
 import { TrackHashtagForm } from "@/components/campaigns/TrackHashtagForm";
+import { CsvExportRegistrar } from "@/components/shell/CsvExportRegistrar";
 
 // trackHashtagAction's after()-queued comment-scrape + sentiment classification can
 // take well past the default serverless timeout for a hashtag with many posts — same
@@ -19,6 +20,11 @@ export default async function HashtagSearchPage() {
 
   return (
     <>
+      <CsvExportRegistrar
+        filename="tracked-hashtags.csv"
+        headers={["Hashtag", "Posts", "Avg Engagement", "Status"]}
+        rows={hashtags.map((h) => [h.name, h.posts, h.eng, h.tag])}
+      />
       <TrackHashtagForm />
       <Card title="Tracked Hashtags">
         {hashtags.length === 0 ? (
