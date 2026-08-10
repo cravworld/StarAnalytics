@@ -7,10 +7,16 @@
 // that already fetch a fresh follower count for another reason — this just also keeps the row.
 import { prisma } from "@/lib/prisma";
 import type { PlatformId } from "@/lib/providers/types";
+import { checkFollowerLossAlert } from "@/lib/data/followerLossAlerts";
 
 export async function recordAccountSnapshot(platform: PlatformId, igHandle: string, followers: number | null): Promise<void> {
   if (followers === null) return; // nothing real to record
   await prisma.accountSnapshot.create({ data: { platform, igHandle, followers } });
+  // Cheap (DB reads/writes + one notifier send, no external scrape calls) — a direct
+  // awaited call is fine here, same reasoning trackHashtag() already uses for
+  // checkFanPageVelocityAlerts. Checks the two most recent snapshots for this handle;
+  // a no-op until this is at least the second snapshot ever recorded for it.
+  await checkFollowerLossAlert(platform, igHandle);
 }
 
 export interface FollowerTrend {
