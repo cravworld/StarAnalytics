@@ -226,6 +226,18 @@ export interface CampaignMentionRow {
 
 const MENTION_BREAKDOWN_LIMIT = 15;
 
+// Untracked hashtags that frequently co-occur with this campaign's own tracked tags in
+// posts already scraped — "you're probably missing posts under this too" discovery. NOT a
+// one-click "start tracking" action: there is no campaign-hashtag-editing mechanism in this
+// app to wire that into (createCampaign sets hashtags once at creation, nothing updates
+// them after), so this stays read-only. See getCampaignHashtagSuggestions.
+export interface CampaignHashtagSuggestionRow {
+  hashtag: string;
+  coOccurrenceCount: number;
+}
+
+const HASHTAG_SUGGESTIONS_LIMIT = 10;
+
 // Media-kit top-posts list (see getCampaignDetail below). No thumbnail/image field exists
 // on Post — the Apify scrape never stores a display_url column, and even `raw` (which might
 // carry one) gets nulled by prune-raw-payloads after COMMENT_RETENTION_DAYS, so this is a
@@ -300,6 +312,9 @@ export interface CampaignDetail {
   // Co-star/collaborator mention leaderboard — see getCampaignMentionBreakdown for why
   // this is a lens over already-scraped posts, not a new discovery source.
   mentionBreakdown: CampaignMentionRow[];
+  // Untracked hashtags worth considering — read-only, see getCampaignHashtagSuggestions
+  // for why there's no one-click "start tracking" action here.
+  hashtagSuggestions: CampaignHashtagSuggestionRow[];
 }
 
 // Reuses the exact raw->hashtags containment pattern trackHashtag() already uses for global
@@ -358,6 +373,35 @@ async function getCampaignMentionBreakdown(campaignId: string): Promise<Campaign
     .map(([handle, agg]) => ({ handle, ...agg }))
     .sort((a, b) => b.postCount - a.postCount)
     .slice(0, MENTION_BREAKDOWN_LIMIT);
+}
+
+// One query, not one per hashtag (same reasoning as getCampaignMentionBreakdown — the
+// candidates are open-ended, discovered from the data itself, not looped from a fixed
+// list). jsonb_array_elements_text expands one row per (post, hashtag) pair; already-
+// tracked tags are filtered out in JS rather than in SQL since `hashtags` is a small,
+// already-in-memory array — not worth a second round trip or a more complex NOT IN clause.
+async function getCampaignHashtagSuggestions(
+  campaignId: string,
+  trackedHashtags: string[],
+): Promise<CampaignHashtagSuggestionRow[]> {
+  const tracked = new Set(trackedHashtags.map((h) => h.toLowerCase()));
+  const rows = await prisma.$queryRaw<{ tag: string }[]>`
+    SELECT jsonb_array_elements_text(raw -> 'hashtags') AS tag
+    FROM posts
+    WHERE campaign_id = ${campaignId} AND raw ? 'hashtags'
+  `;
+
+  const freq = new Map<string, number>();
+  for (const r of rows) {
+    const tag = r.tag.toLowerCase();
+    if (tracked.has(tag)) continue;
+    freq.set(tag, (freq.get(tag) ?? 0) + 1);
+  }
+
+  return Array.from(freq.entries())
+    .map(([hashtag, coOccurrenceCount]) => ({ hashtag, coOccurrenceCount }))
+    .sort((a, b) => b.coOccurrenceCount - a.coOccurrenceCount)
+    .slice(0, HASHTAG_SUGGESTIONS_LIMIT);
 }
 
 const HOURLY_BUCKETS = 12;
@@ -545,10 +589,11 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     }))
     .sort((a, b) => b.avgEngagementPerPost - a.avgEngagementPerPost);
 
-  const [buzzTrend, buzzWeekAgoDelta, mentionBreakdown] = await Promise.all([
+  const [buzzTrend, buzzWeekAgoDelta, mentionBreakdown, hashtagSuggestions] = await Promise.all([
     getBuzzTrend(id),
     getBuzzWeekAgoDelta(id, buzzScore.score),
     getCampaignMentionBreakdown(id),
+    getCampaignHashtagSuggestions(id, campaign.hashtags),
   ]);
 
   return {
@@ -597,6 +642,7 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     buzzTrend,
     buzzWeekAgoDelta,
     mentionBreakdown,
+    hashtagSuggestions,
   };
 }
 

@@ -268,6 +268,30 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
         </Card>
       ) : null}
 
+      {v.hashtagSuggestions.length > 0 ? (
+        <Card title="Suggested Hashtags">
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+            Untracked hashtags that frequently appear alongside this campaign's own tags in posts already
+            scraped — worth considering for a future campaign or a wider hashtag search. Not automatically
+            tracked.
+          </div>
+          {(() => {
+            const maxCount = Math.max(1, ...v.hashtagSuggestions.map((s) => s.coOccurrenceCount));
+            return v.hashtagSuggestions.map((s) => (
+              <div className="bar-row" key={s.hashtag}>
+                <div className="bar-label">#{s.hashtag}</div>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: `${(s.coOccurrenceCount / maxCount) * 100}%` }} />
+                </div>
+                <div className="bar-val">
+                  {s.coOccurrenceCount} co-occurrence{s.coOccurrenceCount === 1 ? "" : "s"}
+                </div>
+              </div>
+            ));
+          })()}
+        </Card>
+      ) : null}
+
       <Card title="Live Post Stream">
         <LiveStream campaignId={v.id} initial={v.stream} />
       </Card>
