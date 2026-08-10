@@ -4,6 +4,7 @@ import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createCampaign, getCampaignStream, trackHashtag } from "@/lib/data/campaigns";
 import { addCampaignEvent, deleteCampaignEvent } from "@/lib/data/campaignEvents";
+import { sendWeeklyDigest } from "@/lib/data/weeklyDigest";
 import { queueSentimentClassification } from "@/lib/data/sentiment";
 import { requireSession } from "@/lib/require-session";
 
@@ -71,4 +72,11 @@ export async function deleteCampaignEventAction(campaignId: string, eventId: str
   await deleteCampaignEvent(eventId);
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath(`/campaigns/${campaignId}/media-kit`);
+}
+
+// On-demand send — same sendWeeklyDigest() the Monday cron calls, no separate code path to
+// keep in sync. A producer prepping for a meeting shouldn't have to wait for Monday morning.
+export async function sendWeeklyDigestNowAction() {
+  await requireSession();
+  return sendWeeklyDigest();
 }

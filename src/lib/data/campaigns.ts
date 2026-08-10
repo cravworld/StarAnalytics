@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { Campaign } from "@prisma/client";
 import { computeBuzzScore, type BuzzScoreResult } from "@/lib/scoring/buzzScore";
 import { getCampaignEvents, type CampaignEventRow } from "@/lib/data/campaignEvents";
+import { getBuzzTrend, getBuzzWeekAgoDelta, type BuzzTrend } from "@/lib/data/campaignBuzzSnapshots";
 
 function fmtCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -212,6 +213,31 @@ export interface CampaignHashtagRow {
   avgEngagementPerPost: number;
 }
 
+// Who actually gets tagged across this campaign's tracked posts — a co-star/collaborator
+// leaderboard, not a discovery mechanism. Instagram has no public mention-search surface
+// the way it does hashtags, and PublicContentProvider only supports scrape-by-hashtag/
+// handle/url — this can never expand which posts get scraped, only surface a signal
+// already present in raw already-scraped data. See getCampaignMentionBreakdown.
+export interface CampaignMentionRow {
+  handle: string;
+  postCount: number;
+  totalEngagement: number;
+}
+
+const MENTION_BREAKDOWN_LIMIT = 15;
+
+// Untracked hashtags that frequently co-occur with this campaign's own tracked tags in
+// posts already scraped — "you're probably missing posts under this too" discovery. NOT a
+// one-click "start tracking" action: there is no campaign-hashtag-editing mechanism in this
+// app to wire that into (createCampaign sets hashtags once at creation, nothing updates
+// them after), so this stays read-only. See getCampaignHashtagSuggestions.
+export interface CampaignHashtagSuggestionRow {
+  hashtag: string;
+  coOccurrenceCount: number;
+}
+
+const HASHTAG_SUGGESTIONS_LIMIT = 10;
+
 // Media-kit top-posts list (see getCampaignDetail below). No thumbnail/image field exists
 // on Post — the Apify scrape never stores a display_url column, and even `raw` (which might
 // carry one) gets nulled by prune-raw-payloads after COMMENT_RETENTION_DAYS, so this is a
@@ -277,6 +303,18 @@ export interface CampaignDetail {
   // Ranked by average engagement/post, not total — total just rewards whichever type has
   // more posts, average is the actual "which format performs" signal.
   contentTypeBreakdown: CampaignContentTypeRow[];
+  // Buzz score has no history anywhere else — computeBuzzScore() is stateless and this
+  // number is recomputed live on every call. See campaignBuzzSnapshots.ts.
+  buzzTrend: BuzzTrend;
+  // Null until a snapshot at least 5 days old exists — an honest "no history yet," not a
+  // fabricated 0. See getBuzzWeekAgoDelta's own comment for why 5, not exactly 7.
+  buzzWeekAgoDelta: number | null;
+  // Co-star/collaborator mention leaderboard — see getCampaignMentionBreakdown for why
+  // this is a lens over already-scraped posts, not a new discovery source.
+  mentionBreakdown: CampaignMentionRow[];
+  // Untracked hashtags worth considering — read-only, see getCampaignHashtagSuggestions
+  // for why there's no one-click "start tracking" action here.
+  hashtagSuggestions: CampaignHashtagSuggestionRow[];
 }
 
 // Reuses the exact raw->hashtags containment pattern trackHashtag() already uses for global
@@ -306,6 +344,64 @@ async function getCampaignHashtagBreakdown(campaignId: string, hashtags: string[
   );
 
   return rows.sort((a, b) => b.totalEngagement - a.totalEngagement);
+}
+
+// One raw query, not one per handle (there's no fixed handle list to loop over the way
+// getCampaignHashtagBreakdown loops over the campaign's own tracked hashtags — mentions are
+// open-ended, discovered from the data itself). jsonb_array_elements_text expands to one row
+// per (post, mention) pair, so grouping by mention counts distinct posts correctly as long
+// as a post never mentions the same handle twice (Instagram mention arrays don't have
+// duplicates in practice). Ranked by post count, not engagement — "who gets tagged most
+// often" is the actual co-star-visibility question, not "whose tagged posts happened to be
+// popular."
+async function getCampaignMentionBreakdown(campaignId: string): Promise<CampaignMentionRow[]> {
+  const rows = await prisma.$queryRaw<{ mention: string; likes: number | null; comments: number | null }[]>`
+    SELECT jsonb_array_elements_text(raw -> 'mentions') AS mention, likes, comments
+    FROM posts
+    WHERE campaign_id = ${campaignId} AND raw ? 'mentions'
+  `;
+
+  const agg = new Map<string, { postCount: number; totalEngagement: number }>();
+  for (const r of rows) {
+    const bucket = agg.get(r.mention) ?? { postCount: 0, totalEngagement: 0 };
+    bucket.postCount++;
+    bucket.totalEngagement += (r.likes ?? 0) + (r.comments ?? 0);
+    agg.set(r.mention, bucket);
+  }
+
+  return Array.from(agg.entries())
+    .map(([handle, agg]) => ({ handle, ...agg }))
+    .sort((a, b) => b.postCount - a.postCount)
+    .slice(0, MENTION_BREAKDOWN_LIMIT);
+}
+
+// One query, not one per hashtag (same reasoning as getCampaignMentionBreakdown — the
+// candidates are open-ended, discovered from the data itself, not looped from a fixed
+// list). jsonb_array_elements_text expands one row per (post, hashtag) pair; already-
+// tracked tags are filtered out in JS rather than in SQL since `hashtags` is a small,
+// already-in-memory array — not worth a second round trip or a more complex NOT IN clause.
+async function getCampaignHashtagSuggestions(
+  campaignId: string,
+  trackedHashtags: string[],
+): Promise<CampaignHashtagSuggestionRow[]> {
+  const tracked = new Set(trackedHashtags.map((h) => h.toLowerCase()));
+  const rows = await prisma.$queryRaw<{ tag: string }[]>`
+    SELECT jsonb_array_elements_text(raw -> 'hashtags') AS tag
+    FROM posts
+    WHERE campaign_id = ${campaignId} AND raw ? 'hashtags'
+  `;
+
+  const freq = new Map<string, number>();
+  for (const r of rows) {
+    const tag = r.tag.toLowerCase();
+    if (tracked.has(tag)) continue;
+    freq.set(tag, (freq.get(tag) ?? 0) + 1);
+  }
+
+  return Array.from(freq.entries())
+    .map(([hashtag, coOccurrenceCount]) => ({ hashtag, coOccurrenceCount }))
+    .sort((a, b) => b.coOccurrenceCount - a.coOccurrenceCount)
+    .slice(0, HASHTAG_SUGGESTIONS_LIMIT);
 }
 
 const HOURLY_BUCKETS = 12;
@@ -493,6 +589,13 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     }))
     .sort((a, b) => b.avgEngagementPerPost - a.avgEngagementPerPost);
 
+  const [buzzTrend, buzzWeekAgoDelta, mentionBreakdown, hashtagSuggestions] = await Promise.all([
+    getBuzzTrend(id),
+    getBuzzWeekAgoDelta(id, buzzScore.score),
+    getCampaignMentionBreakdown(id),
+    getCampaignHashtagSuggestions(id, campaign.hashtags),
+  ]);
+
   return {
     id: campaign.id,
     name: campaign.name,
@@ -536,6 +639,10 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     topPosts,
     events,
     contentTypeBreakdown,
+    buzzTrend,
+    buzzWeekAgoDelta,
+    mentionBreakdown,
+    hashtagSuggestions,
   };
 }
 
@@ -645,6 +752,118 @@ export async function getCampaignCompareData(campaignIds: string[]): Promise<Cam
   });
 
   return { columns, rows };
+}
+
+export interface CampaignCompareAtDayColumn {
+  id: string;
+  name: string;
+  // false when the campaign has no startDate set — day-N alignment is impossible without
+  // a start to count from. A missing start date and "zero activity by day N" are different
+  // facts and must render as different messages, not both collapse to the same "—".
+  hasStartDate: boolean;
+  postCount: number;
+  engagement: number;
+  avgEngagementPerPost: number;
+  // Null when no post in the day-N cohort has been sentiment-classified yet — genuinely
+  // different from hasStartDate:false, and different again from "0% positive."
+  positivePct: number | null;
+}
+
+export interface CampaignDayNMetricRow {
+  key: "postCount" | "engagement" | "avgEngagementPerPost" | "positivePct";
+  label: string;
+  format: (v: number) => string;
+}
+
+// Buzz score and peak volume are deliberately absent here (present in
+// CAMPAIGN_COMPARE_METRIC_ROWS above) — both are inherently rolling/current-window
+// concepts (buzz score needs a 12-hour hourlyVolume window, peak volume *is* that window)
+// that don't have a meaningful historical-cutoff equivalent to reconstruct.
+export const CAMPAIGN_DAY_N_METRIC_ROWS: CampaignDayNMetricRow[] = [
+  { key: "postCount", label: "Posts Tracked", format: (v) => String(v) },
+  { key: "engagement", label: "Total Engagement", format: fmtCompact },
+  { key: "avgEngagementPerPost", label: "Avg Engagement/Post", format: fmtCompact },
+  { key: "positivePct", label: "Positive Sentiment", format: (v) => `${v}%` },
+];
+
+function dayNMetricValue(col: CampaignCompareAtDayColumn, key: CampaignDayNMetricRow["key"]): number | null {
+  if (!col.hasStartDate) return null;
+  switch (key) {
+    case "postCount": return col.postCount;
+    case "engagement": return col.engagement;
+    case "avgEngagementPerPost": return col.avgEngagementPerPost;
+    case "positivePct": return col.positivePct;
+  }
+}
+
+export interface CampaignCompareAtDayResult {
+  dayN: number;
+  columns: CampaignCompareAtDayColumn[];
+  rows: {
+    key: CampaignDayNMetricRow["key"];
+    label: string;
+    cells: { columnId: string; value: number | null; display: string; pct: number; isWin: boolean }[];
+  }[];
+}
+
+// "Day-N cohort" comparison, not a true historical replay — see the honest caveat this
+// shipped with: storePosts() upserts on every re-scrape, overwriting likes/comments with
+// the latest observed count, so there is no frozen historical engagement snapshot to read
+// back. What IS durable is Post.postedAt (never touched by re-scraping), so this can say
+// precisely which posts existed within a campaign's first dayN days — it compares those
+// posts' *current* engagement, not their engagement as it stood exactly on day N. This
+// still fixes the real problem (a 21-day campaign naturally outscores a 3-day one on raw
+// totals) but doesn't fully cancel a smaller secondary bias: an older campaign's day-N
+// cohort has had more real-world time to accumulate likes than a newer campaign's has.
+export async function getCampaignCompareDataAtDay(campaignIds: string[], dayN: number): Promise<CampaignCompareAtDayResult> {
+  const campaigns = await prisma.campaign.findMany({ where: { id: { in: campaignIds } } });
+
+  const columns: CampaignCompareAtDayColumn[] = await Promise.all(
+    campaigns.map(async (c): Promise<CampaignCompareAtDayColumn> => {
+      if (!c.startDate) {
+        return { id: c.id, name: c.name, hasStartDate: false, postCount: 0, engagement: 0, avgEngagementPerPost: 0, positivePct: null };
+      }
+      const cutoff = new Date(c.startDate.getTime() + dayN * 24 * 60 * 60 * 1000);
+      const posts = await prisma.post.findMany({
+        where: { campaignId: c.id, postedAt: { lte: cutoff } },
+        select: { id: true, likes: true, comments: true },
+      });
+      const postCount = posts.length;
+      const engagement = posts.reduce((s, p) => s + (p.likes ?? 0) + (p.comments ?? 0), 0);
+      const avgEngagementPerPost = postCount ? Math.round(engagement / postCount) : 0;
+
+      const sentiments = postCount
+        ? await prisma.sentiment.findMany({ where: { postId: { in: posts.map((p) => p.id) } } })
+        : [];
+      const positivePct = sentiments.length
+        ? Math.round((sentiments.filter((s) => s.label === "pos").length / sentiments.length) * 100)
+        : null;
+
+      return { id: c.id, name: c.name, hasStartDate: true, postCount, engagement, avgEngagementPerPost, positivePct };
+    }),
+  );
+
+  const rows = CAMPAIGN_DAY_N_METRIC_ROWS.map((row) => {
+    const cells = columns.map((col) => {
+      const value = dayNMetricValue(col, row.key);
+      const display = value !== null ? row.format(value) : col.hasStartDate ? "—" : "No start date";
+      return { columnId: col.id, value, display };
+    });
+    const numericValues = cells.map((c) => c.value).filter((v): v is number => v !== null);
+    const max = numericValues.length ? Math.max(...numericValues) : 0;
+    const hasComparison = numericValues.length >= 2;
+    return {
+      key: row.key,
+      label: row.label,
+      cells: cells.map((c) => ({
+        ...c,
+        pct: max > 0 && c.value !== null ? Math.round((c.value / max) * 100) : 0,
+        isWin: hasComparison && max > 0 && c.value !== null && c.value === max,
+      })),
+    };
+  });
+
+  return { dayN, columns, rows };
 }
 
 // Status pills for the tracked-hashtag table. Thresholds are deliberately named

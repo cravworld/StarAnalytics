@@ -9,6 +9,7 @@ import { SentimentBar } from "@/components/campaigns/SentimentBar";
 import { SentimentTrendLine } from "@/components/charts/SentimentTrendLine";
 import { CampaignTimeline } from "@/components/campaigns/CampaignTimeline";
 import { CsvExportRegistrar } from "@/components/shell/CsvExportRegistrar";
+import { Sparkline } from "@/components/ui/Sparkline";
 
 // Green/yellow/red bands so the number reads at a glance without needing the tooltip.
 function bandColor(score: number): string {
@@ -48,6 +49,25 @@ function BuzzScoreBadge({
   );
 }
 
+// Nothing to trend on fewer than 2 snapshots — first day after this feature ships (or any
+// campaign younger than the daily cron's history) renders nothing here rather than a
+// single meaningless dot. weekAgoDelta is separately null until a snapshot >=5 days old
+// exists — see getBuzzWeekAgoDelta's own comment.
+function BuzzTrendMini({ values, weekAgoDelta }: { values: number[]; weekAgoDelta: number | null }) {
+  if (values.length < 2) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4, marginTop: 4 }}>
+      <Sparkline values={values} width={64} height={14} />
+      {weekAgoDelta !== null ? (
+        <span style={{ fontSize: 10, fontWeight: 700, color: weekAgoDelta >= 0 ? "#1a7a4a" : "#c62828" }}>
+          {weekAgoDelta >= 0 ? "+" : ""}
+          {weekAgoDelta}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export default async function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const v = await getCampaignDetail(id);
@@ -68,7 +88,10 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
 
       <div className="vhero">
         <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
-          <BuzzScoreBadge score={v.buzzScore.score} components={v.buzzScore.components} />
+          <div>
+            <BuzzScoreBadge score={v.buzzScore.score} components={v.buzzScore.components} />
+            <BuzzTrendMini values={v.buzzTrend.values} weekAgoDelta={v.buzzWeekAgoDelta} />
+          </div>
           <div>
             <div className="vhero-tag">{v.tag || "(no hashtags set)"}</div>
             <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>{v.startedLabel}</div>
@@ -213,6 +236,55 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                 </div>
                 <div className="bar-val">
                   {c.postCount} post{c.postCount === 1 ? "" : "s"} · {c.avgEngagementPerPost.toLocaleString()} avg eng
+                </div>
+              </div>
+            ));
+          })()}
+        </Card>
+      ) : null}
+
+      {v.mentionBreakdown.length > 0 ? (
+        <Card title="Mentions">
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+            Who gets tagged most often across tracked posts — a co-star/collaborator leaderboard, not new posts
+            beyond what's already tracked here.
+          </div>
+          {(() => {
+            const maxCount = Math.max(1, ...v.mentionBreakdown.map((m) => m.postCount));
+            return v.mentionBreakdown.map((m) => (
+              <div className="bar-row" key={m.handle}>
+                <a href={`https://www.instagram.com/${m.handle}`} target="_blank" rel="noopener noreferrer" className="bar-label">
+                  @{m.handle}
+                </a>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: `${(m.postCount / maxCount) * 100}%` }} />
+                </div>
+                <div className="bar-val">
+                  {m.postCount} post{m.postCount === 1 ? "" : "s"} · {m.totalEngagement.toLocaleString()} eng
+                </div>
+              </div>
+            ));
+          })()}
+        </Card>
+      ) : null}
+
+      {v.hashtagSuggestions.length > 0 ? (
+        <Card title="Suggested Hashtags">
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+            Untracked hashtags that frequently appear alongside this campaign's own tags in posts already
+            scraped — worth considering for a future campaign or a wider hashtag search. Not automatically
+            tracked.
+          </div>
+          {(() => {
+            const maxCount = Math.max(1, ...v.hashtagSuggestions.map((s) => s.coOccurrenceCount));
+            return v.hashtagSuggestions.map((s) => (
+              <div className="bar-row" key={s.hashtag}>
+                <div className="bar-label">#{s.hashtag}</div>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: `${(s.coOccurrenceCount / maxCount) * 100}%` }} />
+                </div>
+                <div className="bar-val">
+                  {s.coOccurrenceCount} co-occurrence{s.coOccurrenceCount === 1 ? "" : "s"}
                 </div>
               </div>
             ));

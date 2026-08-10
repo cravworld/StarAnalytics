@@ -16,6 +16,11 @@ const SENTIMENT_COLOR = { pos: "#1a7a4a", neu: "#bdbdbd", neg: "#c62828" } as co
 export interface WeeklyDigestCampaignSummary {
   name: string;
   buzzScore: number;
+  // Null until a real snapshot >=5 days old exists — see campaignBuzzSnapshots.ts's
+  // getBuzzWeekAgoDelta. The first digest after this feature ships has genuinely no
+  // history to compare against; that must render as "no comparison yet," not a fabricated
+  // delta.
+  buzzWeekAgoDelta: number | null;
   postCount: number;
   engagementDisplay: string;
   sentiment: { positivePct: number; neutralPct: number; negativePct: number; classifiedCount: number; totalCount: number } | null;
@@ -45,7 +50,9 @@ export function formatWeeklyDigest(campaigns: WeeklyDigestCampaignSummary[], gen
   ];
   for (const c of campaigns) {
     lines.push(c.name);
-    lines.push(`  Buzz score: ${c.buzzScore}`);
+    lines.push(
+      `  Buzz score: ${c.buzzScore}${c.buzzWeekAgoDelta === null ? "" : ` (${c.buzzWeekAgoDelta >= 0 ? "+" : ""}${c.buzzWeekAgoDelta} vs last week)`}`,
+    );
     lines.push(`  Posts tracked: ${c.postCount} (${c.engagementDisplay} engagement)`);
     lines.push(
       c.sentiment
@@ -137,6 +144,11 @@ export function formatWeeklyDigestHtml(campaigns: WeeklyDigestCampaignSummary[],
         </td>
         <td style="text-align:right;white-space:nowrap;">
           <span style="display:inline-block;background:${buzzColor};color:#ffffff;padding:4px 12px;border-radius:14px;font-size:13px;font-weight:800;">${c.buzzScore}</span>
+          ${
+            c.buzzWeekAgoDelta === null
+              ? ""
+              : `<div style="font-size:10px;font-weight:700;margin-top:3px;color:${c.buzzWeekAgoDelta >= 0 ? SENTIMENT_COLOR.pos : SENTIMENT_COLOR.neg};">${c.buzzWeekAgoDelta >= 0 ? "+" : ""}${c.buzzWeekAgoDelta} vs last week</div>`
+          }
         </td>
       </tr></table>
     </td>
@@ -177,6 +189,7 @@ function toSummary(detail: CampaignDetail): WeeklyDigestCampaignSummary {
   return {
     name: detail.name,
     buzzScore: detail.buzzScore.score,
+    buzzWeekAgoDelta: detail.buzzWeekAgoDelta,
     postCount: detail.postCount,
     engagementDisplay: detail.hero.engagement,
     sentiment: detail.sentiment,
