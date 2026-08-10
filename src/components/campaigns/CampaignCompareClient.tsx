@@ -1,47 +1,79 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { getCampaignCompareOptions, getCampaignCompareData } from "@/lib/data/campaigns";
+import type {
+  getCampaignCompareOptions,
+  getCampaignCompareData,
+  getCampaignCompareDataAtDay,
+} from "@/lib/data/campaigns";
 import { useTopbarExport } from "@/components/shell/TopbarExportContext";
 import { toCsv } from "@/lib/csv";
 
 type Options = Awaited<ReturnType<typeof getCampaignCompareOptions>>;
 type CompareResult = Awaited<ReturnType<typeof getCampaignCompareData>>;
+type CompareAtDayResult = Awaited<ReturnType<typeof getCampaignCompareDataAtDay>>;
 
+const DEFAULT_DAY_N = 7;
+
+// Two modes, one component: normal (current totals) and "day-N cohort" (see
+// getCampaignCompareDataAtDay's own comment for the honest caveat on what that second mode
+// actually compares). dayNResult present is the discriminant — page.tsx passes exactly one
+// of {columns,rows} or {dayNResult}, never both, driven by the ?dayN= URL param.
 export function CampaignCompareClient({
   options,
   selectedIds,
   columns,
   rows,
+  dayNResult,
 }: {
   options: Options;
   selectedIds: string[];
-  columns: CompareResult["columns"];
-  rows: CompareResult["rows"];
+  columns?: CompareResult["columns"];
+  rows?: CompareResult["rows"];
+  dayNResult?: CompareAtDayResult;
 }) {
   const router = useRouter();
+  const [dayNInput, setDayNInput] = useState(String(dayNResult?.dayN ?? DEFAULT_DAY_N));
+
+  function buildUrl(ids: string[], dayN: number | null) {
+    const params = new URLSearchParams();
+    if (ids.length > 0) params.set("ids", ids.join(","));
+    if (dayN !== null) params.set("dayN", String(dayN));
+    return `/campaigns/compare-own?${params.toString()}`;
+  }
 
   function toggle(id: string) {
     const next = selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id];
-    router.push(next.length > 0 ? `/campaigns/compare-own?ids=${next.join(",")}` : "/campaigns/compare-own?ids=");
+    router.push(buildUrl(next, dayNResult?.dayN ?? null));
   }
 
-  const gridCols = `160px repeat(${Math.max(columns.length, 1)}, 1fr)`;
+  function applyDayN() {
+    const n = Number(dayNInput);
+    if (Number.isInteger(n) && n > 0) router.push(buildUrl(selectedIds, n));
+  }
+
+  function backToCurrentTotals() {
+    router.push(buildUrl(selectedIds, null));
+  }
+
+  const effectiveColumns = dayNResult ? dayNResult.columns : (columns ?? []);
+  const effectiveRows = dayNResult ? dayNResult.rows : (rows ?? []);
+  const gridCols = `160px repeat(${Math.max(effectiveColumns.length, 1)}, 1fr)`;
 
   const exportConfig = useMemo(
     () =>
-      columns.length > 0
+      effectiveColumns.length > 0
         ? {
-            filename: "campaign-compare.csv",
+            filename: dayNResult ? `campaign-compare-day${dayNResult.dayN}.csv` : "campaign-compare.csv",
             csv: () =>
               toCsv(
-                ["Metric", ...columns.map((c) => c.name)],
-                rows.map((row) => [row.label, ...row.cells.map((c) => c.display)]),
+                ["Metric", ...effectiveColumns.map((c) => c.name)],
+                effectiveRows.map((row) => [row.label, ...row.cells.map((c) => c.display)]),
               ),
           }
         : null,
-    [columns, rows],
+    [effectiveColumns, effectiveRows, dayNResult],
   );
   useTopbarExport(exportConfig);
 
@@ -70,30 +102,70 @@ export function CampaignCompareClient({
         ))}
       </div>
 
-      {columns.length === 0 ? (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        {dayNResult ? (
+          <>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>
+              Comparing each campaign's first{" "}
+              <strong>
+                {dayNResult.dayN} day{dayNResult.dayN === 1 ? "" : "s"}
+              </strong>{" "}
+              since launch — current engagement of that cohort, not a historical replay.
+            </span>
+            <button className="tb-btn" onClick={backToCurrentTotals}>
+              ← Back to current totals
+            </button>
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>Compare at day</span>
+            <input
+              type="number"
+              min={1}
+              value={dayNInput}
+              onChange={(e) => setDayNInput(e.target.value)}
+              style={{ width: 64 }}
+            />
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>since each campaign's launch</span>
+            <button className="tb-btn" onClick={applyDayN}>
+              Apply
+            </button>
+          </>
+        )}
+      </div>
+
+      {effectiveColumns.length === 0 ? (
         <div className="card" style={{ textAlign: "center", color: "var(--muted)" }}>
           Select at least one campaign to compare.
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
-          <div className="cmp-grid" style={{ gridTemplateColumns: gridCols, minWidth: 160 + columns.length * 140 }}>
+          <div className="cmp-grid" style={{ gridTemplateColumns: gridCols, minWidth: 160 + effectiveColumns.length * 140 }}>
             <div />
-            {columns.map((col) => (
+            {effectiveColumns.map((col) => (
               <div key={col.id} className="cmp-header">
                 <div style={{ fontSize: 13, fontWeight: 700 }}>{col.name}</div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>{col.tag || "(no hashtags set)"}</div>
-                {col.topHashtag ? (
-                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>Top tag: #{col.topHashtag}</div>
+                {dayNResult ? (
+                  "hasStartDate" in col && !col.hasStartDate ? (
+                    <div style={{ fontSize: 10, color: "var(--red)", marginTop: 4 }}>No start date set</div>
+                  ) : null
+                ) : "tag" in col ? (
+                  <>
+                    <div style={{ fontSize: 11, color: "var(--muted)" }}>{col.tag || "(no hashtags set)"}</div>
+                    {col.topHashtag ? (
+                      <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>Top tag: #{col.topHashtag}</div>
+                    ) : null}
+                  </>
                 ) : null}
               </div>
             ))}
           </div>
 
-          <div className="card" style={{ padding: 0, minWidth: 160 + columns.length * 140 }}>
-            {rows.map((row, i) => (
+          <div className="card" style={{ padding: 0, minWidth: 160 + effectiveColumns.length * 140 }}>
+            {effectiveRows.map((row, i) => (
               <div
                 className="cmp-row"
-                style={{ gridTemplateColumns: gridCols, padding: "9px 14px", borderBottom: i === rows.length - 1 ? "none" : undefined }}
+                style={{ gridTemplateColumns: gridCols, padding: "9px 14px", borderBottom: i === effectiveRows.length - 1 ? "none" : undefined }}
                 key={row.key}
               >
                 <div className="cmp-label">{row.label}</div>

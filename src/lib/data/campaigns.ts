@@ -708,6 +708,118 @@ export async function getCampaignCompareData(campaignIds: string[]): Promise<Cam
   return { columns, rows };
 }
 
+export interface CampaignCompareAtDayColumn {
+  id: string;
+  name: string;
+  // false when the campaign has no startDate set — day-N alignment is impossible without
+  // a start to count from. A missing start date and "zero activity by day N" are different
+  // facts and must render as different messages, not both collapse to the same "—".
+  hasStartDate: boolean;
+  postCount: number;
+  engagement: number;
+  avgEngagementPerPost: number;
+  // Null when no post in the day-N cohort has been sentiment-classified yet — genuinely
+  // different from hasStartDate:false, and different again from "0% positive."
+  positivePct: number | null;
+}
+
+export interface CampaignDayNMetricRow {
+  key: "postCount" | "engagement" | "avgEngagementPerPost" | "positivePct";
+  label: string;
+  format: (v: number) => string;
+}
+
+// Buzz score and peak volume are deliberately absent here (present in
+// CAMPAIGN_COMPARE_METRIC_ROWS above) — both are inherently rolling/current-window
+// concepts (buzz score needs a 12-hour hourlyVolume window, peak volume *is* that window)
+// that don't have a meaningful historical-cutoff equivalent to reconstruct.
+export const CAMPAIGN_DAY_N_METRIC_ROWS: CampaignDayNMetricRow[] = [
+  { key: "postCount", label: "Posts Tracked", format: (v) => String(v) },
+  { key: "engagement", label: "Total Engagement", format: fmtCompact },
+  { key: "avgEngagementPerPost", label: "Avg Engagement/Post", format: fmtCompact },
+  { key: "positivePct", label: "Positive Sentiment", format: (v) => `${v}%` },
+];
+
+function dayNMetricValue(col: CampaignCompareAtDayColumn, key: CampaignDayNMetricRow["key"]): number | null {
+  if (!col.hasStartDate) return null;
+  switch (key) {
+    case "postCount": return col.postCount;
+    case "engagement": return col.engagement;
+    case "avgEngagementPerPost": return col.avgEngagementPerPost;
+    case "positivePct": return col.positivePct;
+  }
+}
+
+export interface CampaignCompareAtDayResult {
+  dayN: number;
+  columns: CampaignCompareAtDayColumn[];
+  rows: {
+    key: CampaignDayNMetricRow["key"];
+    label: string;
+    cells: { columnId: string; value: number | null; display: string; pct: number; isWin: boolean }[];
+  }[];
+}
+
+// "Day-N cohort" comparison, not a true historical replay — see the honest caveat this
+// shipped with: storePosts() upserts on every re-scrape, overwriting likes/comments with
+// the latest observed count, so there is no frozen historical engagement snapshot to read
+// back. What IS durable is Post.postedAt (never touched by re-scraping), so this can say
+// precisely which posts existed within a campaign's first dayN days — it compares those
+// posts' *current* engagement, not their engagement as it stood exactly on day N. This
+// still fixes the real problem (a 21-day campaign naturally outscores a 3-day one on raw
+// totals) but doesn't fully cancel a smaller secondary bias: an older campaign's day-N
+// cohort has had more real-world time to accumulate likes than a newer campaign's has.
+export async function getCampaignCompareDataAtDay(campaignIds: string[], dayN: number): Promise<CampaignCompareAtDayResult> {
+  const campaigns = await prisma.campaign.findMany({ where: { id: { in: campaignIds } } });
+
+  const columns: CampaignCompareAtDayColumn[] = await Promise.all(
+    campaigns.map(async (c): Promise<CampaignCompareAtDayColumn> => {
+      if (!c.startDate) {
+        return { id: c.id, name: c.name, hasStartDate: false, postCount: 0, engagement: 0, avgEngagementPerPost: 0, positivePct: null };
+      }
+      const cutoff = new Date(c.startDate.getTime() + dayN * 24 * 60 * 60 * 1000);
+      const posts = await prisma.post.findMany({
+        where: { campaignId: c.id, postedAt: { lte: cutoff } },
+        select: { id: true, likes: true, comments: true },
+      });
+      const postCount = posts.length;
+      const engagement = posts.reduce((s, p) => s + (p.likes ?? 0) + (p.comments ?? 0), 0);
+      const avgEngagementPerPost = postCount ? Math.round(engagement / postCount) : 0;
+
+      const sentiments = postCount
+        ? await prisma.sentiment.findMany({ where: { postId: { in: posts.map((p) => p.id) } } })
+        : [];
+      const positivePct = sentiments.length
+        ? Math.round((sentiments.filter((s) => s.label === "pos").length / sentiments.length) * 100)
+        : null;
+
+      return { id: c.id, name: c.name, hasStartDate: true, postCount, engagement, avgEngagementPerPost, positivePct };
+    }),
+  );
+
+  const rows = CAMPAIGN_DAY_N_METRIC_ROWS.map((row) => {
+    const cells = columns.map((col) => {
+      const value = dayNMetricValue(col, row.key);
+      const display = value !== null ? row.format(value) : col.hasStartDate ? "—" : "No start date";
+      return { columnId: col.id, value, display };
+    });
+    const numericValues = cells.map((c) => c.value).filter((v): v is number => v !== null);
+    const max = numericValues.length ? Math.max(...numericValues) : 0;
+    const hasComparison = numericValues.length >= 2;
+    return {
+      key: row.key,
+      label: row.label,
+      cells: cells.map((c) => ({
+        ...c,
+        pct: max > 0 && c.value !== null ? Math.round((c.value / max) * 100) : 0,
+        isWin: hasComparison && max > 0 && c.value !== null && c.value === max,
+      })),
+    };
+  });
+
+  return { dayN, columns, rows };
+}
+
 // Status pills for the tracked-hashtag table. Thresholds are deliberately named
 // constants, not magic numbers, so they're easy to retune later.
 const TRENDING_WINDOW_HOURS = 6;
