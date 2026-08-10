@@ -8,6 +8,7 @@ import { LiveStream } from "@/components/campaigns/LiveStream";
 import { SentimentBar } from "@/components/campaigns/SentimentBar";
 import { SentimentTrendLine } from "@/components/charts/SentimentTrendLine";
 import { CampaignTimeline } from "@/components/campaigns/CampaignTimeline";
+import { CsvExportRegistrar } from "@/components/shell/CsvExportRegistrar";
 
 // Green/yellow/red bands so the number reads at a glance without needing the tooltip.
 function bandColor(score: number): string {
@@ -172,6 +173,11 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
 
       {v.hashtagBreakdown.length > 0 ? (
         <Card title="Hashtag Performance">
+          <CsvExportRegistrar
+            filename={`${v.name}-hashtag-performance.csv`}
+            headers={["Hashtag", "Posts", "Total Engagement", "Avg Engagement/Post"]}
+            rows={v.hashtagBreakdown.map((h) => [`#${h.hashtag}`, h.postCount, h.totalEngagement, h.avgEngagementPerPost])}
+          />
           <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
             Ranked by total engagement — a post can carry more than one tracked tag, so totals can overlap.
           </div>

@@ -6,6 +6,8 @@ import { KpiGrid, Kpi } from "@/components/ui/Kpi";
 import { Card } from "@/components/ui/Card";
 import { Sparkline } from "@/components/ui/Sparkline";
 import type { KeywordTrendsResult } from "@/lib/data/keywords";
+import { useTopbarExport } from "@/components/shell/TopbarExportContext";
+import { toCsv } from "@/lib/csv";
 
 const SENTIMENT_COLOR = { pos: "#1a7a4a", neu: "#bdbdbd", neg: "#c62828" } as const;
 
@@ -28,6 +30,19 @@ export function KeywordTrendsList({ data }: { data: KeywordTrendsResult }) {
     if (!q) return data.keywords;
     return data.keywords.filter((k) => k.keyword.includes(q));
   }, [data.keywords, query]);
+
+  const exportConfig = useMemo(
+    () => ({
+      filename: "keyword-trends.csv",
+      csv: () =>
+        toCsv(
+          ["Keyword", "Posts", "Positive %", "Neutral %", "Negative %"],
+          filtered.map((k) => [k.keyword, k.count, k.positivePct, k.neutralPct, k.negativePct]),
+        ),
+    }),
+    [filtered],
+  );
+  useTopbarExport(exportConfig);
 
   function onCampaignChange(id: string) {
     router.push(id ? `/campaigns/keywords?campaign=${id}` : "/campaigns/keywords");

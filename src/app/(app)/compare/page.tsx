@@ -3,6 +3,7 @@ import { isInstagramInsightsLive } from "@/lib/providers";
 import { AddCompetitorForm, RemoveCompetitorButton } from "@/components/compare/AddCompetitorForm";
 import { Sparkline } from "@/components/ui/Sparkline";
 import { PendingMetaReviewBadge } from "@/components/ui/PendingMetaReview";
+import { CsvExportRegistrar } from "@/components/shell/CsvExportRegistrar";
 
 // Nothing meaningful to show until an account has been scraped at least twice — a single
 // point isn't a trend. Self never has any (Phase 7 self-account pipeline has never gone
@@ -42,6 +43,11 @@ export default async function ComparePage() {
 
   return (
     <>
+      <CsvExportRegistrar
+        filename="compare.csv"
+        headers={["Metric", ...columns.map((c) => c.displayName)]}
+        rows={rows.map((row) => [row.label, ...row.cells.map((c) => c.display)])}
+      />
       <AddCompetitorForm />
 
       <div style={{ overflowX: "auto" }}>
