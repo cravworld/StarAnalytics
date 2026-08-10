@@ -243,6 +243,31 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
         </Card>
       ) : null}
 
+      {v.mentionBreakdown.length > 0 ? (
+        <Card title="Mentions">
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+            Who gets tagged most often across tracked posts — a co-star/collaborator leaderboard, not new posts
+            beyond what's already tracked here.
+          </div>
+          {(() => {
+            const maxCount = Math.max(1, ...v.mentionBreakdown.map((m) => m.postCount));
+            return v.mentionBreakdown.map((m) => (
+              <div className="bar-row" key={m.handle}>
+                <a href={`https://www.instagram.com/${m.handle}`} target="_blank" rel="noopener noreferrer" className="bar-label">
+                  @{m.handle}
+                </a>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: `${(m.postCount / maxCount) * 100}%` }} />
+                </div>
+                <div className="bar-val">
+                  {m.postCount} post{m.postCount === 1 ? "" : "s"} · {m.totalEngagement.toLocaleString()} eng
+                </div>
+              </div>
+            ));
+          })()}
+        </Card>
+      ) : null}
+
       <Card title="Live Post Stream">
         <LiveStream campaignId={v.id} initial={v.stream} />
       </Card>

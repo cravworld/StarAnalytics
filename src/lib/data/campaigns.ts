@@ -213,6 +213,19 @@ export interface CampaignHashtagRow {
   avgEngagementPerPost: number;
 }
 
+// Who actually gets tagged across this campaign's tracked posts — a co-star/collaborator
+// leaderboard, not a discovery mechanism. Instagram has no public mention-search surface
+// the way it does hashtags, and PublicContentProvider only supports scrape-by-hashtag/
+// handle/url — this can never expand which posts get scraped, only surface a signal
+// already present in raw already-scraped data. See getCampaignMentionBreakdown.
+export interface CampaignMentionRow {
+  handle: string;
+  postCount: number;
+  totalEngagement: number;
+}
+
+const MENTION_BREAKDOWN_LIMIT = 15;
+
 // Media-kit top-posts list (see getCampaignDetail below). No thumbnail/image field exists
 // on Post — the Apify scrape never stores a display_url column, and even `raw` (which might
 // carry one) gets nulled by prune-raw-payloads after COMMENT_RETENTION_DAYS, so this is a
@@ -284,6 +297,9 @@ export interface CampaignDetail {
   // Null until a snapshot at least 5 days old exists — an honest "no history yet," not a
   // fabricated 0. See getBuzzWeekAgoDelta's own comment for why 5, not exactly 7.
   buzzWeekAgoDelta: number | null;
+  // Co-star/collaborator mention leaderboard — see getCampaignMentionBreakdown for why
+  // this is a lens over already-scraped posts, not a new discovery source.
+  mentionBreakdown: CampaignMentionRow[];
 }
 
 // Reuses the exact raw->hashtags containment pattern trackHashtag() already uses for global
@@ -313,6 +329,35 @@ async function getCampaignHashtagBreakdown(campaignId: string, hashtags: string[
   );
 
   return rows.sort((a, b) => b.totalEngagement - a.totalEngagement);
+}
+
+// One raw query, not one per handle (there's no fixed handle list to loop over the way
+// getCampaignHashtagBreakdown loops over the campaign's own tracked hashtags — mentions are
+// open-ended, discovered from the data itself). jsonb_array_elements_text expands to one row
+// per (post, mention) pair, so grouping by mention counts distinct posts correctly as long
+// as a post never mentions the same handle twice (Instagram mention arrays don't have
+// duplicates in practice). Ranked by post count, not engagement — "who gets tagged most
+// often" is the actual co-star-visibility question, not "whose tagged posts happened to be
+// popular."
+async function getCampaignMentionBreakdown(campaignId: string): Promise<CampaignMentionRow[]> {
+  const rows = await prisma.$queryRaw<{ mention: string; likes: number | null; comments: number | null }[]>`
+    SELECT jsonb_array_elements_text(raw -> 'mentions') AS mention, likes, comments
+    FROM posts
+    WHERE campaign_id = ${campaignId} AND raw ? 'mentions'
+  `;
+
+  const agg = new Map<string, { postCount: number; totalEngagement: number }>();
+  for (const r of rows) {
+    const bucket = agg.get(r.mention) ?? { postCount: 0, totalEngagement: 0 };
+    bucket.postCount++;
+    bucket.totalEngagement += (r.likes ?? 0) + (r.comments ?? 0);
+    agg.set(r.mention, bucket);
+  }
+
+  return Array.from(agg.entries())
+    .map(([handle, agg]) => ({ handle, ...agg }))
+    .sort((a, b) => b.postCount - a.postCount)
+    .slice(0, MENTION_BREAKDOWN_LIMIT);
 }
 
 const HOURLY_BUCKETS = 12;
@@ -500,9 +545,10 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     }))
     .sort((a, b) => b.avgEngagementPerPost - a.avgEngagementPerPost);
 
-  const [buzzTrend, buzzWeekAgoDelta] = await Promise.all([
+  const [buzzTrend, buzzWeekAgoDelta, mentionBreakdown] = await Promise.all([
     getBuzzTrend(id),
     getBuzzWeekAgoDelta(id, buzzScore.score),
+    getCampaignMentionBreakdown(id),
   ]);
 
   return {
@@ -550,6 +596,7 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     contentTypeBreakdown,
     buzzTrend,
     buzzWeekAgoDelta,
+    mentionBreakdown,
   };
 }
 
