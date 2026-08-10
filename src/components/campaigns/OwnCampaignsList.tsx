@@ -6,6 +6,7 @@ import { KpiGrid, Kpi } from "@/components/ui/Kpi";
 import { Pill, LiveDot } from "@/components/ui/Pill";
 import { toCsv } from "@/lib/csv";
 import { useTopbarExport } from "@/components/shell/TopbarExportContext";
+import { SendDigestNowButton } from "@/components/campaigns/SendDigestNowButton";
 import type { getOwnCampaigns } from "@/lib/data/campaigns";
 
 type Campaign = Awaited<ReturnType<typeof getOwnCampaigns>>["campaigns"][number];
@@ -50,6 +51,7 @@ export function OwnCampaignsList({ campaigns, kpis }: { campaigns: Campaign[]; k
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        <SendDigestNowButton />
         <Link href="/campaigns/new" className="btn btn-primary">
           ＋ New Campaign
         </Link>
