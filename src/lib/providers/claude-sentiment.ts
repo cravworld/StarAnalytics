@@ -17,7 +17,11 @@ const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/interac
 // Model strings are env-configurable (not hardcoded) precisely because model names/
 // versions change — confirm the current one against each provider's docs before trusting
 // these defaults forever.
-const DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-8";
+// Sonnet 5, not Opus — this is high-volume batch classification (thousands of comments),
+// not the kind of task that needs Opus-tier reasoning depth, and Sonnet 5 is ~5x cheaper
+// on the same request shape (adaptive thinking, full effort ladder, 1024-token cache
+// minimum — no other code changes required). Switched 2026-08-10.
+const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5";
 // OpenAI/Gemini model IDs below were confirmed via real live test calls on 2026-07-31 (both
 // correctly classified code-mixed Malayalam/English test cases) — not guessed from training
 // data, which is stale for both providers as of this date (both have moved to newer unified
@@ -139,7 +143,7 @@ async function callClaude(batch: { id: string; text: string }[]): Promise<string
       // Identical on every single call (both the post- and comment-level pipelines share
       // this one call site), so it's the textbook prompt-caching case. Cache reads are
       // ~0.1x the input price. If SYSTEM_PROMPT is ever shortened below the model's
-      // cacheable-prefix minimum (1024 tokens on claude-opus-4-8), this silently stops
+      // cacheable-prefix minimum (1024 tokens on claude-sonnet-5), this silently stops
       // caching rather than erroring — verify via response.usage.cache_read_input_tokens.
       system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: JSON.stringify(batch) }],

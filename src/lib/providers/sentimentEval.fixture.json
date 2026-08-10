@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "description": "Hard-case eval set for the Claude sentiment classifier (src/lib/providers/claude-sentiment.ts). Not a substitute for a large labeled dataset — a small, deliberately curated set of known trap patterns (sarcasm, negation, wistful-but-not-critical romance/tragedy content, emoji-only, mixed reactions) to check that a model swap or fine-tune doesn't regress on failure modes that have already bitten this pipeline once. Run against it with scripts/eval-sentiment-model.mjs before trusting a different model in production. Cases are deliberately NOT copied verbatim from the SYSTEM_PROMPT's own illustrative examples in claude-sentiment.ts — the model has already seen those exact strings in its instructions, so scoring them right could be pattern-matching against the prompt rather than generalizing the underlying principle.",
+  "labels": ["pos", "neu", "neg"],
+  "sources": {
+    "documented-regression": "Traces to README.md's documented 2026-07-24 finding: Sonnet (pre-Sonnet-5) scored wistful/sad-but-not-critical heartbreak comments as negative, which is why the pipeline moved to Opus. Paraphrased, not verbatim.",
+    "prompt-principle": "Paraphrases a reasoning principle from SYSTEM_PROMPT (sarcasm/negation on fan slang, emoji-only signal, mixed reactions) without reusing its literal example text.",
+    "control": "Plain, unambiguous case with no trap — sanity check that a model isn't failing at the easy majority, not just the hard tail."
+  },
+  "cases": [
+    {
+      "id": "wistful-1",
+      "text": "she left the story but never left my heart, that's the kind of ache this film gives you 🖤",
+      "expected": "pos",
+      "trap": "wistful/sad romance content, not criticism of the film",
+      "source": "documented-regression"
+    },
+    {
+      "id": "wistful-2",
+      "text": "everyone in the theatre was crying at the end, some heartbreaks stay with you forever",
+      "expected": "pos",
+      "trap": "sad theme described appreciatively, not a quality complaint",
+      "source": "documented-regression"
+    },
+    {
+      "id": "sarcasm-1",
+      "text": "mass ayirുന്നു എന്ന് ആരാ പറഞ്ഞേ 😂",
+      "expected": "neg",
+      "trap": "hype word (\"mass\") used sarcastically/mockingly, not literally",
+      "source": "prompt-principle"
+    },
+    {
+      "id": "sarcasm-2",
+      "text": "fire 🙄",
+      "expected": "neg",
+      "trap": "hype word undercut by an eye-roll emoji",
+      "source": "prompt-principle"
+    },
+    {
+      "id": "negation-1",
+      "text": "not exactly what I'd call a blockbuster",
+      "expected": "neg",
+      "trap": "negated hype word",
+      "source": "prompt-principle"
+    },
+    {
+      "id": "emoji-sad-1",
+      "text": "🥲🥲🥲",
+      "expected": "pos",
+      "trap": "bittersweet emoji reacting to a sad-but-good moment, not a complaint — also tests emoji-only signal",
+      "source": "prompt-principle"
+    },
+    {
+      "id": "mixed-1",
+      "text": "acting was solid but this trailer edit is all over the place, still hyped though",
+      "expected": "pos",
+      "trap": "mixed reaction — praise for actor + criticism of trailer, but hype is dominant",
+      "source": "prompt-principle"
+    },
+    {
+      "id": "control-neg",
+      "text": "total waste of money, terrible script and worse acting",
+      "expected": "neg",
+      "trap": "plain negative control — should be easy for any model",
+      "source": "control"
+    },
+    {
+      "id": "control-pos",
+      "text": "can't wait for this one, hype level maximum 🔥",
+      "expected": "pos",
+      "trap": "plain positive control",
+      "source": "control"
+    },
+    {
+      "id": "control-neu",
+      "text": "when is this releasing? anyone know the date",
+      "expected": "neu",
+      "trap": "plain neutral control — pure question, no sentiment",
+      "source": "control"
+    }
+  ]
+}
