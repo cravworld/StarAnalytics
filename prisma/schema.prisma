@@ -165,9 +165,10 @@ model Campaign {
   endDate   DateTime?      @map("end_date")
   type      String?
 
-  posts    Post[]
-  agencies Agency[]
-  events   CampaignEvent[]
+  posts         Post[]
+  agencies      Agency[]
+  events        CampaignEvent[]
+  buzzSnapshots CampaignBuzzSnapshot[]
 
   @@map("campaigns")
 }
@@ -187,6 +188,28 @@ model CampaignEvent {
 
   @@index([campaignId])
   @@map("campaign_events")
+}
+
+// Daily snapshot of a live campaign's buzz score — computeBuzzScore() itself stays
+// stateless/pure (buzzScore.ts), this is the history it never had: buzz score is
+// recomputed live on every page load with nothing persisted anywhere. Same shape/reasoning
+// as AccountSnapshot (follower history) — captured by a dedicated cron
+// (api/cron/snapshot-buzz), not on page view, so a campaign nobody happens to check for a
+// week still gets a real daily data point rather than a gap.
+model CampaignBuzzSnapshot {
+  id                 String   @id @default(uuid())
+  campaignId         String   @map("campaign_id")
+  campaign           Campaign @relation(fields: [campaignId], references: [id])
+  score              Int
+  sizeComponent      Int      @map("size_component")
+  // Nullable exactly like BuzzScoreResult.components.sentiment — null means "excluded from
+  // this day's score, no classified posts yet," not zero. Stored as-is, never faked.
+  sentimentComponent Int?     @map("sentiment_component")
+  momentumComponent  Int      @map("momentum_component")
+  capturedAt         DateTime @default(now()) @map("captured_at")
+
+  @@index([campaignId, capturedAt])
+  @@map("campaign_buzz_snapshots")
 }
 
 model Agency {

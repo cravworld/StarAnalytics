@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { Campaign } from "@prisma/client";
 import { computeBuzzScore, type BuzzScoreResult } from "@/lib/scoring/buzzScore";
 import { getCampaignEvents, type CampaignEventRow } from "@/lib/data/campaignEvents";
+import { getBuzzTrend, getBuzzWeekAgoDelta, type BuzzTrend } from "@/lib/data/campaignBuzzSnapshots";
 
 function fmtCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -277,6 +278,12 @@ export interface CampaignDetail {
   // Ranked by average engagement/post, not total — total just rewards whichever type has
   // more posts, average is the actual "which format performs" signal.
   contentTypeBreakdown: CampaignContentTypeRow[];
+  // Buzz score has no history anywhere else — computeBuzzScore() is stateless and this
+  // number is recomputed live on every call. See campaignBuzzSnapshots.ts.
+  buzzTrend: BuzzTrend;
+  // Null until a snapshot at least 5 days old exists — an honest "no history yet," not a
+  // fabricated 0. See getBuzzWeekAgoDelta's own comment for why 5, not exactly 7.
+  buzzWeekAgoDelta: number | null;
 }
 
 // Reuses the exact raw->hashtags containment pattern trackHashtag() already uses for global
@@ -493,6 +500,11 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     }))
     .sort((a, b) => b.avgEngagementPerPost - a.avgEngagementPerPost);
 
+  const [buzzTrend, buzzWeekAgoDelta] = await Promise.all([
+    getBuzzTrend(id),
+    getBuzzWeekAgoDelta(id, buzzScore.score),
+  ]);
+
   return {
     id: campaign.id,
     name: campaign.name,
@@ -536,6 +548,8 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     topPosts,
     events,
     contentTypeBreakdown,
+    buzzTrend,
+    buzzWeekAgoDelta,
   };
 }
 

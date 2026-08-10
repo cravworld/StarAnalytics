@@ -7,10 +7,16 @@ import {
 } from "./weeklyDigest";
 
 const GENERATED_AT = new Date("2026-08-10T09:00:00Z");
+// Same hex values as SENTIMENT_COLOR in weeklyDigest.ts (module-private, not exported) —
+// duplicated here rather than exported-just-for-tests, matching how buzzBandColor's colors
+// are asserted directly by value elsewhere in this file.
+const SENTIMENT_UP_COLOR = "#1a7a4a";
+const SENTIMENT_DOWN_COLOR = "#c62828";
 
 const CAMPAIGN: WeeklyDigestCampaignSummary = {
   name: "Pluto Movie",
   buzzScore: 81,
+  buzzWeekAgoDelta: 6,
   postCount: 361,
   engagementDisplay: "146.7K",
   sentiment: { positivePct: 60, neutralPct: 32, negativePct: 8, classifiedCount: 361, totalCount: 361 },
@@ -63,6 +69,7 @@ describe("formatWeeklyDigest", () => {
     const fresh: WeeklyDigestCampaignSummary = {
       name: "New Launch",
       buzzScore: 12,
+      buzzWeekAgoDelta: null,
       postCount: 2,
       engagementDisplay: "40",
       sentiment: null,
@@ -77,6 +84,18 @@ describe("formatWeeklyDigest", () => {
     const second: WeeklyDigestCampaignSummary = { ...CAMPAIGN, name: "NP50", buzzScore: 84 };
     const text = formatWeeklyDigest([CAMPAIGN, second], GENERATED_AT);
     expect(text.indexOf("Pluto Movie")).toBeLessThan(text.indexOf("NP50"));
+  });
+
+  it("shows a signed week-over-week delta when one exists, and omits it entirely otherwise", () => {
+    const up = formatWeeklyDigest([{ ...CAMPAIGN, buzzWeekAgoDelta: 6 }], GENERATED_AT);
+    expect(up).toContain("Buzz score: 81 (+6 vs last week)");
+
+    const down = formatWeeklyDigest([{ ...CAMPAIGN, buzzWeekAgoDelta: -4 }], GENERATED_AT);
+    expect(down).toContain("Buzz score: 81 (-4 vs last week)");
+
+    const none = formatWeeklyDigest([{ ...CAMPAIGN, buzzWeekAgoDelta: null }], GENERATED_AT);
+    expect(none).toContain("Buzz score: 81");
+    expect(none).not.toContain("vs last week");
   });
 });
 
@@ -139,6 +158,7 @@ describe("formatWeeklyDigestHtml", () => {
     const fresh: WeeklyDigestCampaignSummary = {
       name: "New Launch",
       buzzScore: 12,
+      buzzWeekAgoDelta: null,
       postCount: 2,
       engagementDisplay: "40",
       sentiment: null,
@@ -156,5 +176,18 @@ describe("formatWeeklyDigestHtml", () => {
     const html = formatWeeklyDigestHtml([{ ...CAMPAIGN, name: "R&D <Launch>" }], GENERATED_AT);
     expect(html).toContain("R&amp;D &lt;Launch&gt;");
     expect(html).not.toContain("<Launch>");
+  });
+
+  it("shows a signed, colored week-over-week delta when one exists, and omits it entirely otherwise", () => {
+    const up = formatWeeklyDigestHtml([{ ...CAMPAIGN, buzzWeekAgoDelta: 6 }], GENERATED_AT);
+    expect(up).toContain("+6 vs last week");
+    expect(up).toContain(SENTIMENT_UP_COLOR);
+
+    const down = formatWeeklyDigestHtml([{ ...CAMPAIGN, buzzWeekAgoDelta: -4 }], GENERATED_AT);
+    expect(down).toContain("-4 vs last week");
+    expect(down).toContain(SENTIMENT_DOWN_COLOR);
+
+    const none = formatWeeklyDigestHtml([{ ...CAMPAIGN, buzzWeekAgoDelta: null }], GENERATED_AT);
+    expect(none).not.toContain("vs last week");
   });
 });
