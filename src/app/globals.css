@@ -697,3 +697,39 @@ button:disabled{cursor:not-allowed;opacity:.5}
 @media (min-width:1800px){
   .content{max-width:1720px;width:100%;margin-inline:auto}
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MEDIA KIT
+   The one-pager export a talent team sends to a brand/press contact. Reuses
+   Card/KpiGrid/bar-row etc. — these are only the bits that page doesn't already
+   have: the header block, the top-posts rows, and the print rules below.
+   ══════════════════════════════════════════════════════════════════════════ */
+.mk-header{
+  display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:var(--s3);
+  padding-bottom:var(--s4);margin-bottom:var(--s4);border-bottom:2px solid var(--text)
+}
+.mk-title{font-size:28px;font-weight:800;letter-spacing:-.02em}
+.mk-tag{font-size:14px;color:var(--accent);font-weight:600;margin-top:2px}
+.mk-generated{font-size:12px;color:var(--muted)}
+.mk-post-row{display:flex;gap:var(--s3);padding:var(--s2) 0;border-bottom:1px solid var(--border)}
+.mk-post-row:last-child{border-bottom:none}
+.mk-post-rank{
+  flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--track);
+  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--muted)
+}
+.mk-footer{margin-top:var(--s5);font-size:11px;color:var(--muted);text-align:center}
+
+/* Printing renders the route in isolation: no sidebar/topbar chrome, no shadows or
+   hover affordances that mean nothing on paper, full page width. `.no-print` is the
+   general-purpose escape hatch (the back-link + Export button use it) rather than a
+   media-kit-specific class, so any future print view can reuse it the same way. */
+@media print{
+  .no-print{display:none !important}
+  /* PipelineHealthBanner has no class of its own (see the component) — role=status is
+     the stable selector it actually renders with. */
+  .sidebar,.topbar,[role="status"]{display:none !important}
+  .main{display:block}
+  .content{padding:0;max-width:none}
+  .media-kit .card{box-shadow:none;border:1px solid #ccc;break-inside:avoid}
+  body{background:#fff}
+}

@@ -55,9 +55,14 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
 
   return (
     <>
-      <Link href="/campaigns" className="back-link">
-        ← Back to Campaigns
-      </Link>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <Link href="/campaigns" className="back-link">
+          ← Back to Campaigns
+        </Link>
+        <Link href={`/campaigns/${v.id}/media-kit`} className="tb-btn">
+          Media Kit ↗
+        </Link>
+      </div>
 
       <div className="vhero">
         <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>

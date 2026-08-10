@@ -211,6 +211,24 @@ export interface CampaignHashtagRow {
   avgEngagementPerPost: number;
 }
 
+// Media-kit top-posts list (see getCampaignDetail below). No thumbnail/image field exists
+// on Post — the Apify scrape never stores a display_url column, and even `raw` (which might
+// carry one) gets nulled by prune-raw-payloads after COMMENT_RETENTION_DAYS, so this is a
+// text/stat card that links out to the real post, not an image gallery.
+export interface CampaignTopPost {
+  id: string;
+  handle: string;
+  caption: string;
+  likes: number;
+  comments: number;
+  engagement: number;
+  externalUrl: string | null;
+  postedAtLabel: string | null;
+  mediaType: string | null;
+}
+
+const TOP_POSTS_LIMIT = 10;
+
 export interface CampaignDetail {
   id: string;
   name: string;
@@ -237,6 +255,10 @@ export interface CampaignDetail {
   // mentioning both the movie tag and a cast member's tag), so totals across rows can exceed
   // the campaign's own post count. That's correct for "who's driving buzz," not a bug.
   hashtagBreakdown: CampaignHashtagRow[];
+  // Top TOP_POSTS_LIMIT posts by engagement (likes+comments) — built for the media-kit
+  // export but computed here unconditionally since it's a free sort/slice over posts this
+  // function already fetched (no new query), same discipline as buzzScore/hashtagBreakdown.
+  topPosts: CampaignTopPost[];
 }
 
 // Reuses the exact raw->hashtags containment pattern trackHashtag() already uses for global
@@ -416,6 +438,24 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
 
   const hashtagBreakdown = await getCampaignHashtagBreakdown(id, campaign.hashtags);
 
+  const topPosts: CampaignTopPost[] = [...posts]
+    .map((p) => {
+      const handle = (p.authorHandle ?? "").replace(/^@/, "");
+      return {
+        id: p.id,
+        handle: handle ? `@${handle}` : "@unknown",
+        caption: p.caption ?? "",
+        likes: p.likes ?? 0,
+        comments: p.comments ?? 0,
+        engagement: (p.likes ?? 0) + (p.comments ?? 0),
+        externalUrl: p.externalUrl ?? null,
+        postedAtLabel: (p.postedAt ?? p.scrapedAt)?.toLocaleDateString() ?? null,
+        mediaType: p.mediaType ?? null,
+      };
+    })
+    .sort((a, b) => b.engagement - a.engagement)
+    .slice(0, TOP_POSTS_LIMIT);
+
   return {
     id: campaign.id,
     name: campaign.name,
@@ -456,6 +496,7 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     keywordPills,
     stream,
     hashtagBreakdown,
+    topPosts,
   };
 }
 
