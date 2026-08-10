@@ -115,6 +115,11 @@ export interface Alert {
   type: string;
   message: string;
   createdAt: string;
+  // Optional rich rendering for the same content as `message` — most alert types are a
+  // single line and never set this. `message` stays the required plain-text form (used as
+  // the email fallback for non-HTML clients, and by channels like MockNotifierProvider that
+  // only ever log text), so no existing caller needs to change.
+  html?: string;
 }
 
 export interface NotifierProvider {

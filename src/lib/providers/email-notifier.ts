@@ -36,6 +36,10 @@ export class EmailNotifierProvider implements NotifierProvider {
         to: [toAddress()],
         subject: `StarAnalytics alert: ${alert.type}`,
         text: alert.message,
+        // Resend accepts text and html together — html renders in HTML-capable clients,
+        // text is the fallback everywhere else. Omitted entirely (not sent as undefined)
+        // for the single-line alert types that never set it.
+        ...(alert.html ? { html: alert.html } : {}),
       }),
     });
     if (!res.ok) {
