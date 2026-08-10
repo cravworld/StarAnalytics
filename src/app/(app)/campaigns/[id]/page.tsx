@@ -7,6 +7,7 @@ import { Pill, LiveDot } from "@/components/ui/Pill";
 import { LiveStream } from "@/components/campaigns/LiveStream";
 import { SentimentBar } from "@/components/campaigns/SentimentBar";
 import { SentimentTrendLine } from "@/components/charts/SentimentTrendLine";
+import { CampaignTimeline } from "@/components/campaigns/CampaignTimeline";
 
 // Green/yellow/red bands so the number reads at a glance without needing the tooltip.
 function bandColor(score: number): string {
@@ -150,9 +151,16 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
         </div>
       </div>
 
+      <Card title="Campaign Timeline">
+        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+          Log trailer drops, premieres, and release dates to see them against sentiment below.
+        </div>
+        <CampaignTimeline campaignId={v.id} events={v.events} />
+      </Card>
+
       <Card title="Sentiment Over Time">
         {v.sentimentTrend.length >= 2 ? (
-          <SentimentTrendLine data={v.sentimentTrend} />
+          <SentimentTrendLine data={v.sentimentTrend} events={v.events} />
         ) : (
           <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0" }}>
             {v.sentimentTrend.length === 0

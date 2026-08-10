@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Campaign } from "@prisma/client";
 import { computeBuzzScore, type BuzzScoreResult } from "@/lib/scoring/buzzScore";
+import { getCampaignEvents, type CampaignEventRow } from "@/lib/data/campaignEvents";
 
 function fmtCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -259,6 +260,9 @@ export interface CampaignDetail {
   // export but computed here unconditionally since it's a free sort/slice over posts this
   // function already fetched (no new query), same discipline as buzzScore/hashtagBreakdown.
   topPosts: CampaignTopPost[];
+  // Hand-logged milestones (trailer drop, premiere, ...) — see campaignEvents.ts. Read by
+  // the campaign detail page's timeline card and cross-referenced against sentimentTrend.
+  events: CampaignEventRow[];
 }
 
 // Reuses the exact raw->hashtags containment pattern trackHashtag() already uses for global
@@ -456,6 +460,8 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     .sort((a, b) => b.engagement - a.engagement)
     .slice(0, TOP_POSTS_LIMIT);
 
+  const events = await getCampaignEvents(id);
+
   return {
     id: campaign.id,
     name: campaign.name,
@@ -497,6 +503,7 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     stream,
     hashtagBreakdown,
     topPosts,
+    events,
   };
 }
 

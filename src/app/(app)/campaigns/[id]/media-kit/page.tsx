@@ -47,6 +47,18 @@ export default async function CampaignMediaKitPage({ params }: { params: Promise
         <Kpi label="Posts Tracked" value={String(v.postCount)} />
       </KpiGrid>
 
+      {v.events.length > 0 ? (
+        <Card title="Key Dates">
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {v.events.map((e) => (
+              <div key={e.id} style={{ fontSize: 12 }}>
+                <strong>{e.eventDateLabel}</strong> — {e.label}
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
+
       <Card title="Sentiment">
         <SentimentBar sentiment={v.sentiment} items={v.sentimentItems} />
       </Card>
