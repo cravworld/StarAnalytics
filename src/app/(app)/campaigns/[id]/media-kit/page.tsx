@@ -82,6 +82,20 @@ export default async function CampaignMediaKitPage({ params }: { params: Promise
         </Card>
       ) : null}
 
+      {v.contentTypeBreakdown.length > 0 ? (
+        <Card title="Content Type Performance">
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+            Ranked by average engagement per post.
+          </div>
+          {v.contentTypeBreakdown.map((c) => (
+            <div key={c.mediaType} style={{ fontSize: 12, padding: "4px 0" }}>
+              <strong>{c.mediaType}</strong> — {c.avgEngagementPerPost.toLocaleString()} avg eng ({c.postCount} post
+              {c.postCount === 1 ? "" : "s"})
+            </div>
+          ))}
+        </Card>
+      ) : null}
+
       <Card title={`Top Posts (by engagement, top ${v.topPosts.length})`}>
         {v.topPosts.length === 0 ? (
           <div style={{ fontSize: 12, color: "var(--muted)", padding: "8px 0" }}>No posts tracked yet.</div>

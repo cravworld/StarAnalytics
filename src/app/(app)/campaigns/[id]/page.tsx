@@ -198,6 +198,28 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
         </Card>
       ) : null}
 
+      {v.contentTypeBreakdown.length > 0 ? (
+        <Card title="Content Type Performance">
+          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+            Ranked by average engagement per post — which format is actually working, not just which was posted most.
+          </div>
+          {(() => {
+            const maxAvg = Math.max(1, ...v.contentTypeBreakdown.map((c) => c.avgEngagementPerPost));
+            return v.contentTypeBreakdown.map((c) => (
+              <div className="bar-row" key={c.mediaType}>
+                <div className="bar-label">{c.mediaType}</div>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: `${(c.avgEngagementPerPost / maxAvg) * 100}%` }} />
+                </div>
+                <div className="bar-val">
+                  {c.postCount} post{c.postCount === 1 ? "" : "s"} · {c.avgEngagementPerPost.toLocaleString()} avg eng
+                </div>
+              </div>
+            ));
+          })()}
+        </Card>
+      ) : null}
+
       <Card title="Live Post Stream">
         <LiveStream campaignId={v.id} initial={v.stream} />
       </Card>

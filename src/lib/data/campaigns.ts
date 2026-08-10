@@ -230,6 +230,17 @@ export interface CampaignTopPost {
 
 const TOP_POSTS_LIMIT = 10;
 
+// Which content format actually performs for this campaign — image/carousel/reel/etc.
+// Bucketed under "(unknown)" rather than dropped when mediaType is null, so the totals
+// stay honest (same "don't silently drop partial data" discipline sentiment/hashtag
+// breakdown already use) even though no post in the live dataset has hit this case yet.
+export interface CampaignContentTypeRow {
+  mediaType: string;
+  postCount: number;
+  totalEngagement: number;
+  avgEngagementPerPost: number;
+}
+
 export interface CampaignDetail {
   id: string;
   name: string;
@@ -263,6 +274,9 @@ export interface CampaignDetail {
   // Hand-logged milestones (trailer drop, premiere, ...) — see campaignEvents.ts. Read by
   // the campaign detail page's timeline card and cross-referenced against sentimentTrend.
   events: CampaignEventRow[];
+  // Ranked by average engagement/post, not total — total just rewards whichever type has
+  // more posts, average is the actual "which format performs" signal.
+  contentTypeBreakdown: CampaignContentTypeRow[];
 }
 
 // Reuses the exact raw->hashtags containment pattern trackHashtag() already uses for global
@@ -462,6 +476,23 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
 
   const events = await getCampaignEvents(id);
 
+  const contentTypeAgg = new Map<string, { postCount: number; totalEngagement: number }>();
+  for (const p of posts) {
+    const key = p.mediaType ?? "(unknown)";
+    const bucket = contentTypeAgg.get(key) ?? { postCount: 0, totalEngagement: 0 };
+    bucket.postCount++;
+    bucket.totalEngagement += (p.likes ?? 0) + (p.comments ?? 0);
+    contentTypeAgg.set(key, bucket);
+  }
+  const contentTypeBreakdown: CampaignContentTypeRow[] = Array.from(contentTypeAgg.entries())
+    .map(([mediaType, agg]) => ({
+      mediaType,
+      postCount: agg.postCount,
+      totalEngagement: agg.totalEngagement,
+      avgEngagementPerPost: Math.round(agg.totalEngagement / agg.postCount),
+    }))
+    .sort((a, b) => b.avgEngagementPerPost - a.avgEngagementPerPost);
+
   return {
     id: campaign.id,
     name: campaign.name,
@@ -504,6 +535,7 @@ export async function getCampaignDetail(id: string): Promise<CampaignDetail | nu
     hashtagBreakdown,
     topPosts,
     events,
+    contentTypeBreakdown,
   };
 }
 
