@@ -2,14 +2,21 @@
 // flat, deduped candidate list. Both parsers converge on the same ParsedCandidate shape so
 // nothing downstream cares which file format a batch came from.
 //
-// PDF field-name confirmed against a live extraction (2026-08-17) of the real
-// "BKU X Snakeplant.pdf" influencer list via pdf-parse's PDFParse class (not the old
-// callback-style v1 API this package name used to have — v2 exports a class). That file's
-// layout is a narrow-column table exported to PDF (Google Sheets-style): each row is
-// "N\tNAME" on its own line, then the instagram URL and igsh param wrapped across several
-// tab-prefixed continuation lines (word-wrapped mid-string, never at a real word boundary),
-// ending with the DELIVERABLES value (STORY/REEL). Concatenating a row's lines with no
-// separator reconstructs the original unbroken text correctly for exactly that reason.
+// PDF layout confirmed against a live extraction (2026-08-17) of the real "BKU X
+// Snakeplant.pdf" influencer list: a narrow-column table exported to PDF (Google
+// Sheets-style), where each row is "N NAME" on its own line, then the instagram URL and
+// igsh param wrapped across several continuation lines (word-wrapped mid-string, never at a
+// real word boundary — concatenating with no separator reconstructs the original unbroken
+// text), ending with the DELIVERABLES value (STORY/REEL).
+//
+// Originally built against pdf-parse's PDFParse class (tab-prefixed continuation lines,
+// distinguishable from a header line by that leading tab), then switched to `unpdf`
+// (2026-08-17, same day — pdf-parse pulls in @napi-rs/canvas, a native binary dependency
+// that works fine locally but throws on Vercel's serverless Linux runtime; confirmed live in
+// production as the actual cause of every /api/scout/upload request 500ing). unpdf's text
+// has no tab prefixes at all, so the parser below is anchored on the URL block itself
+// (a line starting "https" through the line ending STORY/REEL) rather than on indentation —
+// robust to either extractor's exact whitespace, not just the one currently in use.
 
 export interface ParsedCandidate {
   rowNumber: number | null;
@@ -70,67 +77,104 @@ export function profileUrlKey(handleOrUrl: string): string {
   return handle.trim().toLowerCase().replace(/\.+$/, "");
 }
 
-function isRecordStartLine(line: string): boolean {
-  const t = line.trim();
-  if (t === "") return false;
-  if (line.startsWith("\t")) return false;
-  if (/^https/i.test(t)) return false;
-  if (/^(influencer list|number\b)/i.test(t)) return false;
-  return true;
+function isTitleOrHeaderLine(line: string): boolean {
+  return /^(influencer list|number\b)/i.test(line);
 }
 
-/** Parses the raw text layer of an influencer-list-style PDF (see module doc). */
+/**
+ * Parses the raw text layer of an influencer-list-style PDF (see module doc). Anchored on
+ * the URL block itself — a line starting "https" through whichever later line ends in
+ * STORY/REEL is one record's worth of link data — rather than on indentation, since that
+ * varies between text extractors and isn't a signal worth depending on.
+ */
 export function parseInfluencerListText(text: string): ParseResult {
-  const lines = text.split(/\r?\n/);
-  const records: { header: string; rest: string[] }[] = [];
-  let current: { header: string; rest: string[] } | null = null;
-
-  for (const line of lines) {
-    if (isRecordStartLine(line)) {
-      if (current) records.push(current);
-      current = { header: line, rest: [] };
-    } else if (current) {
-      current.rest.push(line);
-    }
-  }
-  if (current) records.push(current);
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l !== "" && !isTitleOrHeaderLine(l));
 
   const candidates: ParsedCandidate[] = [];
   const seen = new Set<string>();
+  let headerBuf: string[] = [];
+  let urlBuf: string[] = [];
+  let inUrl = false;
+  let rowsFound = 0;
 
-  for (const { header, rest } of records) {
-    const numMatch = header.match(/^(\d{1,4})\s*\t?\s*(.*)$/);
-    const rowNumber = numMatch ? Number(numMatch[1]) : null;
-    const name = (numMatch ? numMatch[2] : header).replace(/\t/g, " ").trim() || null;
+  const finalizeRecord = () => {
+    const block = urlBuf.join("").replace(/\s+/g, "");
+    const headerLine = headerBuf.join(" ").trim();
+    headerBuf = [];
+    urlBuf = [];
+    inUrl = false;
 
-    const block = rest.join("").replace(/\t/g, "");
     const handleMatch = block.match(/instagram\.com\/([A-Za-z0-9_.]+?)(?:\?|$)/i);
-    if (!handleMatch) continue; // no usable link in this row — excluded from rowsParsed
+    if (!handleMatch) return; // no usable link in this row — excluded from rowsParsed
 
     const key = profileUrlKey(handleMatch[1]);
-    if (seen.has(key)) continue; // same account listed twice in one file — first row wins
+    if (seen.has(key)) return; // same account listed twice in one file — first row wins
     seen.add(key);
 
-    const deliverableMatch = block.match(/(STORY|REEL)\s*$/i);
+    const numMatch = headerLine.match(/^(\d{1,4})\s+(.*)$/);
+    const deliverableMatch = block.match(/(STORY|REEL)$/i);
 
     candidates.push({
-      rowNumber,
-      name,
+      rowNumber: numMatch ? Number(numMatch[1]) : null,
+      name: (numMatch ? numMatch[2] : headerLine).trim() || null,
       handle: key,
       profileUrl: `https://www.instagram.com/${key}/`,
       deliverable: deliverableMatch ? deliverableMatch[1].toUpperCase() : null,
     });
-  }
+  };
 
-  return { candidates, rowsFound: records.length, rowsParsed: candidates.length };
+  for (const line of lines) {
+    if (/^https/i.test(line)) {
+      // A new URL block starting while the last one is still open means that row had no
+      // (or an unrecognized) DELIVERABLES value — finalize what's collected so far rather
+      // than let it silently swallow every row after it. Missing/blank deliverables are a
+      // real case (that column is soft context for scoring, not something a source file is
+      // guaranteed to fill in), so the parser can't require it to segment rows correctly.
+      if (inUrl) finalizeRecord();
+      inUrl = true;
+      urlBuf = [line];
+      rowsFound++;
+      continue;
+    }
+    if (inUrl) {
+      if (/(STORY|REEL)\s*$/i.test(line)) {
+        urlBuf.push(line);
+        finalizeRecord();
+        continue;
+      }
+      // Same missing-deliverable case as above, but for the next row's NAME line rather
+      // than its URL — a URL/base64 continuation fragment is always a single unbroken
+      // token in this format (confirmed against the real extraction), so a line containing
+      // a space is name text, not part of the link. (A genuinely single-word name on a row
+      // with a missing deliverable is the one case this still can't distinguish from a
+      // fragment — rare enough, and loses only that one row's name, never its handle.)
+      if (/\s/.test(line)) {
+        finalizeRecord();
+        headerBuf.push(line);
+        continue;
+      }
+      urlBuf.push(line);
+      continue;
+    }
+    headerBuf.push(line); // name/number text for whichever record's URL starts next
+  }
+  if (inUrl) finalizeRecord(); // last row, whether or not it had a deliverable token
+
+  return { candidates, rowsFound, rowsParsed: candidates.length };
 }
 
 export async function parseInfluencerPdf(buffer: Buffer): Promise<ParseResult> {
-  // Dynamic import: this is a server-only, fairly heavy parser — no reason to let it
-  // anywhere near a client bundle.
-  const { PDFParse } = await import("pdf-parse");
-  const parser = new PDFParse({ data: buffer });
-  const { text } = await parser.getText();
+  // Dynamic import: this is a server-only parser — no reason to let it anywhere near a
+  // client bundle. `unpdf`, not `pdf-parse`: pdf-parse pulls in @napi-rs/canvas, a native
+  // binary dependency that works locally but throws on Vercel's serverless Linux runtime
+  // (confirmed live — every /api/scout/upload request 500'd in production because of it).
+  // unpdf is pure JS, built specifically for serverless/edge PDF text extraction.
+  const { extractText, getDocumentProxy } = await import("unpdf");
+  const pdf = await getDocumentProxy(new Uint8Array(buffer));
+  const { text } = await extractText(pdf, { mergePages: true });
   return parseInfluencerListText(text);
 }
 
