@@ -9,20 +9,41 @@
 // generic_comment_pattern detector against. If that's added later it slots in as a fifth
 // weighted component, same pattern as the others.
 
-const REACH_REFERENCE_FOLLOWERS = 500_000; // followers mapped to ~100 on the reach sub-score
-const ENGAGEMENT_REFERENCE_PCT = 10; // engagement rate mapped to ~100 on the engagement sub-score
+// Both reference constants and the weights below were retuned 2026-08-17 against the
+// actual distribution of the first real 202-account batch ("BKU X Snakeplant.pdf" at 100
+// posts/account) — not guessed. Percentiles pulled directly from that batch's stored
+// snapshots:
+//   followers:            p10=2,972  median=14,547  p90=106,416  max=969,363
+//   engagementRatePct:    p10=2.70   median=11.40    p90=70.47    max=827.33
+//   consistencyScore:     p10=0.00   median=0.00     p90=0.00     max=0.73
+//   contentMixClipsPct:   p10=2.63   median=59.00     p90=92.00    max=100.00
+const REACH_REFERENCE_FOLLOWERS = 1_000_000; // was 500k — that bunched every 500k-969k
+// account (a real, meaningful spread) into an indistinguishable ceiling cluster.
+const ENGAGEMENT_REFERENCE_PCT = 150; // was 10 — badly mis-scaled: 96 of 168 real accounts
+// (57%) were already pinned at the ceiling under that reference, so a 15% account and a
+// 70% account scored identically. 150 spreads the real 0.4-70%+ range across the full
+// 0-100 sub-score with only genuine outliers (>~150%) clipping.
 
 // Default weights — editable per batch from the Scoutline settings panel (ScoutSettings),
 // not a fixed constant like buzzScore.ts's. Exported so the settings UI can seed its form
 // with the same numbers this function would otherwise fall back to.
-export const DEFAULT_WEIGHTS = { engagement: 0.4, reach: 0.3, consistency: 0.15, contentMix: 0.15 };
+//
+// Consistency dropped from 0.15 to 0.05: the real data shows it's 0.00 at the median, p75,
+// AND p90 — for the large majority of real accounts it contributes no discriminating
+// information at all (an artifact of the actor's own formula clipping to 0 whenever any
+// post goes disproportionately viral, which is normal for organic/reels-heavy accounts, not
+// a quality signal). Kept small rather than dropped to 0 — when it IS positive it's a real
+// "unusually steady performer" signal, just not one most accounts will ever show. The freed
+// 0.10 moved to engagement (now well-calibrated and the most informative signal) and content
+// mix (clean, well-spread signal with no saturation issue in the real data).
+export const DEFAULT_WEIGHTS = { engagement: 0.45, reach: 0.3, consistency: 0.05, contentMix: 0.2 };
 export type InfluencerWeights = typeof DEFAULT_WEIGHTS;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
 
-// Log-scaled, not linear — this list alone spans ~1k to 500k+ followers, and a linear
+// Log-scaled, not linear — real accounts span ~200 to 969k+ followers, and a linear
 // scale would flatten every micro/mid account near 0. Same shape as buzzScore.ts's sizeScore.
 function reachScore(followers: number): number {
   if (followers <= 0) return 0;

@@ -483,3 +483,82 @@ export async function listScoutBatches(): Promise<ScoutBatchSummary[]> {
     scoredCount: b.entries.filter((e) => e.candidate.snapshots.length > 0).length,
   }));
 }
+
+/**
+ * Re-scores a batch's existing snapshots against the *current* Buzz Factor weights — no new
+ * Apify run, no new cost. Distinct from the "actor factors are frozen per batch, never
+ * retroactively changed" guarantee elsewhere in this file: that guarantee is about what got
+ * scraped (postsToAnalyze etc, which would need real money to redo), not about how already-
+ * scraped numbers get combined into a score. Re-weighting stored data with a better-
+ * calibrated formula is exactly what this is for — an explicit, opt-in action (never
+ * automatic on a settings save), so a batch's leaderboard only changes when someone
+ * deliberately asks it to. Updates the batch's own weight snapshot afterward so it stays an
+ * honest record of what its current scores were actually computed with.
+ */
+export async function recomputeScoutScores(batchId: string): Promise<{ rescored: number }> {
+  const batch = await prisma.scoutBatch.findUnique({ where: { id: batchId } });
+  if (!batch) throw new Error(`ScoutBatch ${batchId} not found`);
+
+  const settings = await getScoutSettings();
+  const weights = {
+    engagement: settings.weightEngagement,
+    reach: settings.weightReach,
+    consistency: settings.weightConsistency,
+    contentMix: settings.weightContentMix,
+  };
+
+  const entries = await prisma.scoutBatchEntry.findMany({
+    where: { batchId },
+    include: { candidate: { include: { snapshots: { orderBy: { scrapedAt: "desc" }, take: 1 } } } },
+  });
+
+  let rescored = 0;
+  for (const entry of entries) {
+    const snapshot = entry.candidate.snapshots[0];
+    if (!snapshot) continue;
+
+    const score = scoreInfluencer(
+      {
+        followersAvailable: snapshot.followersAvailable,
+        followers: snapshot.followers,
+        engagementRatePct: snapshot.engagementRatePct,
+        consistencyScore01: snapshot.consistencyScore,
+        contentMixClipsPct: snapshot.contentMixClipsPct,
+      },
+      weights,
+    );
+
+    await prisma.scoutScore.upsert({
+      where: { snapshotId: snapshot.id },
+      create: {
+        snapshotId: snapshot.id,
+        buzzFactor: score.buzzFactor,
+        reachScore: score.components.reach,
+        engagementScore: score.components.engagement,
+        consistencyScore: score.components.consistency,
+        contentMixScore: score.components.contentMix,
+      },
+      update: {
+        buzzFactor: score.buzzFactor,
+        reachScore: score.components.reach,
+        engagementScore: score.components.engagement,
+        consistencyScore: score.components.consistency,
+        contentMixScore: score.components.contentMix,
+        computedAt: new Date(),
+      },
+    });
+    rescored++;
+  }
+
+  await prisma.scoutBatch.update({
+    where: { id: batchId },
+    data: {
+      weightEngagement: weights.engagement,
+      weightReach: weights.reach,
+      weightConsistency: weights.consistency,
+      weightContentMix: weights.contentMix,
+    },
+  });
+
+  return { rescored };
+}

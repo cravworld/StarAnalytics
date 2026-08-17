@@ -527,10 +527,14 @@ model ScoutSettings {
   postTypeFilter    String   @default("all") @map("post_type_filter")
   skipPinnedPosts   Boolean  @default(true) @map("skip_pinned_posts")
   dateFilter        String?  @map("date_filter")
-  weightEngagement  Float    @default(0.4) @map("weight_engagement")
+  // Retuned 2026-08-17 against the real distribution of the first 202-account batch — see
+  // scoreInfluencer.ts's DEFAULT_WEIGHTS comment for the percentiles this was based on.
+  // Consistency dropped (it's 0.00 at the median/p75/p90 in real data, so it barely
+  // discriminates); the freed weight moved to engagement and content mix.
+  weightEngagement  Float    @default(0.45) @map("weight_engagement")
   weightReach       Float    @default(0.3) @map("weight_reach")
-  weightConsistency Float    @default(0.15) @map("weight_consistency")
-  weightContentMix  Float    @default(0.15) @map("weight_content_mix")
+  weightConsistency Float    @default(0.05) @map("weight_consistency")
+  weightContentMix  Float    @default(0.2) @map("weight_content_mix")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
   @@map("scout_settings")
