@@ -368,3 +368,170 @@ model CronLock {
 
   @@map("cron_locks")
 }
+
+// --- Scoutline: bulk Instagram-account talent scan (build plan §11) ---
+// Standalone tool, not campaign-scoped — an account vetted for one film can surface for
+// a future one. Candidates are deduped globally by profileUrlKey; batches only record
+// *membership* (which upload brought an account in, and what it arrived with), so
+// re-uploading the same handle in a later batch links to the same candidate and its
+// full snapshot history rather than creating a duplicate row.
+
+enum ScoutRunStatus {
+  queued
+  running
+  done
+  error
+}
+
+model ScoutBatch {
+  id            String   @id @default(uuid())
+  fileName      String   @map("file_name")
+  sourceType    String   @map("source_type") // "pdf" | "excel" | "manual"
+  expectedCount Int      @map("expected_count")
+  parsedCount   Int      @map("parsed_count")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // Snapshot of ScoutSettings at the moment this batch was started — not a live pointer to
+  // "whatever the settings are now". Editing settings after a batch has already been kicked
+  // off must never change what that batch's Apify runs asked for or how its scores were
+  // computed; it only affects the *next* batch. This is also the transparent record of
+  // "what factors actually produced this leaderboard" the settings panel promises.
+  // Defaults here match ScoutSettings' own defaults and the actual parameters the very
+  // first Scoutline batch ran with (before this table existed) — so backfilling this
+  // migration onto that row is accurate, not a placeholder.
+  postsToAnalyze     Int     @default(15) @map("posts_to_analyze")
+  postTypeFilter     String  @default("all") @map("post_type_filter")
+  skipPinnedPosts    Boolean @default(true) @map("skip_pinned_posts")
+  dateFilter         String? @map("date_filter")
+  weightEngagement   Float   @default(0.4) @map("weight_engagement")
+  weightReach        Float   @default(0.3) @map("weight_reach")
+  weightConsistency  Float   @default(0.15) @map("weight_consistency")
+  weightContentMix   Float   @default(0.15) @map("weight_content_mix")
+
+  entries ScoutBatchEntry[]
+  runs    ScoutRun[]
+
+  @@map("scout_batches")
+}
+
+model ScoutCandidate {
+  id            String   @id @default(uuid())
+  igHandle      String   @map("ig_handle")
+  // Normalized dedup key (lowercased handle) — mirrors apify-normalize.ts's postUrlKey
+  // discipline: the raw URL varies (query params, trailing slash), the handle doesn't.
+  profileUrlKey String   @unique @map("profile_url_key")
+  firstSeenAt   DateTime @default(now()) @map("first_seen_at")
+
+  batchEntries ScoutBatchEntry[]
+  snapshots    ScoutSnapshot[]
+
+  @@map("scout_candidates")
+}
+
+// One row per (batch, candidate) — the "supplied" fields are what the source sheet said,
+// kept as context even if a later scan finds the account has since renamed itself.
+// `deliverable` (STORY/REEL from the source sheet) is deliberately just a String, not an
+// enum tied into scoring — soft context to show alongside the score, never a gate on it.
+model ScoutBatchEntry {
+  id           String         @id @default(uuid())
+  batchId      String         @map("batch_id")
+  batch        ScoutBatch     @relation(fields: [batchId], references: [id])
+  candidateId  String         @map("candidate_id")
+  candidate    ScoutCandidate @relation(fields: [candidateId], references: [id])
+  rowNumber    Int?           @map("row_number")
+  suppliedName String?        @map("supplied_name")
+  deliverable  String?
+
+  @@unique([batchId, candidateId])
+  @@map("scout_batch_entries")
+}
+
+// Tracks a live Apify run for the async handoff (client.ts's own warning: a route killed
+// mid-wait orphans a billed run) — a cron polls these rather than a request blocking on them.
+model ScoutRun {
+  id          String         @id @default(uuid())
+  batchId     String         @map("batch_id")
+  batch       ScoutBatch     @relation(fields: [batchId], references: [id])
+  actorId     String         @map("actor_id")
+  apifyRunId  String         @map("apify_run_id")
+  datasetId   String         @map("dataset_id")
+  status      ScoutRunStatus @default(queued)
+  handleCount Int            @map("handle_count")
+  startedAt   DateTime       @default(now()) @map("started_at")
+  finishedAt  DateTime?      @map("finished_at")
+  error       String?
+
+  @@index([status])
+  @@map("scout_runs")
+}
+
+// Append-only, same discipline as AccountSnapshot — a re-scan adds a row, never overwrites,
+// so engagement trend over time is possible later without a schema change.
+model ScoutSnapshot {
+  id                      String         @id @default(uuid())
+  candidateId             String         @map("candidate_id")
+  candidate               ScoutCandidate @relation(fields: [candidateId], references: [id])
+  runId                   String         @map("run_id")
+  followers               Int?
+  followersAvailable      Boolean        @map("followers_available")
+  postsAnalyzed           Int            @map("posts_analyzed")
+  engagementRatePct       Float?         @map("engagement_rate_pct")
+  commentRatePct          Float?         @map("comment_rate_pct")
+  consistencyScore        Float?         @map("consistency_score")
+  postingFrequencyPerWeek Float?         @map("posting_frequency_per_week")
+  contentMixClipsPct      Float?         @map("content_mix_clips_pct")
+  contentMixCarouselPct   Float?         @map("content_mix_carousel_pct")
+  contentMixImagePct      Float?         @map("content_mix_image_pct")
+  mostEngagedPostUrl      String?        @map("most_engaged_post_url")
+  note                    String?
+  raw                     Json
+  scrapedAt               DateTime       @default(now()) @map("scraped_at")
+
+  score ScoutScore?
+
+  @@index([candidateId, scrapedAt])
+  @@map("scout_snapshots")
+}
+
+// Pure downstream computation from a ScoutSnapshot — same "exclude rather than fake
+// missing data" discipline as buzzScore.ts. A null component score means that signal
+// wasn't measurable for this account (e.g. followers_available=false), not that it
+// scored zero.
+model ScoutScore {
+  id               String        @id @default(uuid())
+  snapshotId       String        @unique @map("snapshot_id")
+  snapshot         ScoutSnapshot @relation(fields: [snapshotId], references: [id])
+  buzzFactor       Int           @map("buzz_factor")
+  reachScore       Int?          @map("reach_score")
+  engagementScore  Int?          @map("engagement_score")
+  consistencyScore Int?          @map("consistency_score")
+  contentMixScore  Int?          @map("content_mix_score")
+  computedAt       DateTime      @default(now()) @map("computed_at")
+
+  @@map("scout_scores")
+}
+
+// Singleton (fixed id="default") — the actor input factors + score weights a new batch
+// starts from, editable from the Scoutline settings panel. Not versioned/audited like
+// ThresholdConfig — nobody disputes a scan setting the way an agency disputes an
+// authenticity score (same reasoning buzzScore.ts gives for its own named-constant
+// weights) — but it must still be DB-backed so it's actually editable from the UI rather
+// than a redeploy. Each ScoutBatch snapshots these values at creation time (see its own
+// comment), so changing this row only ever affects batches started after the change.
+model ScoutSettings {
+  id                String   @id @default("default")
+  // 100, not the actor's own default of 30 — 2026-08-17 direction: "just 15 wont do it
+  // justice... atleast latest 100 posts have to be analyzed" (fewer is fine if an account
+  // genuinely has fewer, the actor already handles that — this is a ceiling, not a floor).
+  postsToAnalyze    Int      @default(100) @map("posts_to_analyze")
+  postTypeFilter    String   @default("all") @map("post_type_filter")
+  skipPinnedPosts   Boolean  @default(true) @map("skip_pinned_posts")
+  dateFilter        String?  @map("date_filter")
+  weightEngagement  Float    @default(0.4) @map("weight_engagement")
+  weightReach       Float    @default(0.3) @map("weight_reach")
+  weightConsistency Float    @default(0.15) @map("weight_consistency")
+  weightContentMix  Float    @default(0.15) @map("weight_content_mix")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("scout_settings")
+}
