@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
 import { ScoutAutoRefresh } from "@/components/scout/ScoutAutoRefresh";
 import { ScoutRetryButton } from "@/components/scout/ScoutRetryButton";
+import { ScoutRescoreButton } from "@/components/scout/ScoutRescoreButton";
 import { ScoutViewToggle } from "@/components/scout/ScoutViewToggle";
 import { ScoutDataTable } from "@/components/scout/ScoutDataTable";
 import { CsvExportRegistrar } from "@/components/shell/CsvExportRegistrar";
@@ -51,6 +52,12 @@ export default async function ScoutBatchPage({ params }: { params: Promise<{ bat
           <div className="kpi-val" style={{ fontSize: 16 }}>{batch.fileName}</div>
         </div>
       </div>
+
+      {!scanning ? (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+          <ScoutRescoreButton batchId={batch.id} />
+        </div>
+      ) : null}
 
       {missingCount > 0 ? (
         <div className="card" style={{ marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
