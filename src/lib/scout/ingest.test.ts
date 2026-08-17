@@ -1,38 +1,44 @@
 import { describe, expect, it } from "vitest";
 import { parseInfluencerListText, profileUrlKey } from "./ingest";
 
-// Fixture shaped like the real pdf-parse extraction of a narrow-column table exported from
+// Fixture shaped like the real `unpdf` extraction of a narrow-column table exported from
 // Google Sheets to PDF (confirmed live against "BKU X Snakeplant.pdf", 2026-08-17): each row
-// is "N\tNAME" on its own line, the URL/igsh wraps across tab-prefixed continuation lines
-// with no inserted spaces, and a couple of trailing rows have no row number at all.
+// is "N NAME" on its own line, then the URL/igsh wraps across several continuation lines
+// with no inserted spaces (word-wrapped mid-string, not tab-prefixed — unlike the earlier
+// pdf-parse-based extraction this replaced), ending with the DELIVERABLES value.
 const FIXTURE = [
   "Influencer List",
-  "NUMBER \tNAME \tLINK \tDELIVERABLES",
-  "1 \tJEEVA",
+  "NUMBER NAME LINK DELIVERABLES",
+  "1 JEEVA",
   "https://www.",
-  "\tinstagram.",
-  "\tcom/iamjeevaa?",
-  "\tigsh=OHl3dm5n",
-  "\teW9kem5i \tSTORY",
-  "2 \tSHIYON SAJI",
+  "instagram.",
+  "com/iamjeevaa?",
+  "igsh=OHl3dm5n",
+  "eW9kem5i STORY",
+  "2 SHIYON SAJI",
   "https://www.",
-  "\tinstagram.",
-  "\tcom/shiyonsaji",
-  "\tmusic?",
-  "\tigsh=MXUzYTg",
-  "\t3YTl6ZGo0Yg=",
-  "\t= \tREEL",
-  "3 \tDUPLICATE OF ROW 1",
+  "instagram.",
+  "com/shiyonsaji",
+  "music?",
+  "igsh=MXUzYTg",
+  "3YTl6ZGo0Yg=",
+  "= REEL",
+  "3 DUPLICATE OF ROW 1",
   "https://www.",
-  "\tinstagram.",
-  "\tcom/IamJeevaa?",
-  "\tigsh=xyz \tREEL",
+  "instagram.",
+  "com/IamJeevaa?",
+  "igsh=xyz REEL",
+  "4 MISSING DELIVERABLE",
+  "https://www.",
+  "instagram.",
+  "com/nodelivrbl?",
+  "igsh=zzz",
   "PARVATHY NAIR",
   "https://www.",
-  "\tinstagram.",
-  "\tcom/parvathy__",
-  "\tnair____?",
-  "\tigsh=abc \tREEL",
+  "instagram.",
+  "com/parvathy__",
+  "nair____?",
+  "igsh=abc REEL",
 ].join("\n");
 
 describe("parseInfluencerListText", () => {
@@ -54,24 +60,33 @@ describe("parseInfluencerListText", () => {
   });
 
   it("dedupes the same account listed twice (case-insensitively), keeping the first row", () => {
-    const { candidates, rowsFound, rowsParsed } = parseInfluencerListText(FIXTURE);
-    expect(rowsFound).toBe(4);
-    expect(rowsParsed).toBe(3); // row 3 is a dup of row 1's handle
+    const { candidates } = parseInfluencerListText(FIXTURE);
     expect(candidates.filter((c) => c.handle === "iamjeevaa")).toHaveLength(1);
     expect(candidates.find((c) => c.handle === "iamjeevaa")?.rowNumber).toBe(1); // first row wins
   });
 
-  it("handles a row with no leading number", () => {
+  it("still extracts a row whose DELIVERABLES value is missing, instead of swallowing every row after it", () => {
     const { candidates } = parseInfluencerListText(FIXTURE);
+    const noDeliverable = candidates.find((c) => c.handle === "nodelivrbl");
+    expect(noDeliverable).toBeDefined();
+    expect(noDeliverable?.deliverable).toBeNull();
+    // and the row right after it (which has no leading number) still parsed correctly,
+    // proving it wasn't absorbed into the row-4 block.
     const last = candidates[candidates.length - 1];
     expect(last.rowNumber).toBeNull();
     expect(last.name).toBe("PARVATHY NAIR");
     expect(last.handle).toBe("parvathy__nair____");
   });
 
+  it("counts every URL block toward rowsFound, and only ones with a usable link toward rowsParsed", () => {
+    const { rowsFound, rowsParsed } = parseInfluencerListText(FIXTURE);
+    expect(rowsFound).toBe(5);
+    expect(rowsParsed).toBe(4); // row 3 is a dup of row 1's handle
+  });
+
   it("reports a parse shortfall rather than silently dropping rows", () => {
     const shortfall = parseInfluencerListText("NAME ONLY\nno link here at all\n");
-    expect(shortfall.rowsFound).toBe(2); // both lines look like record starts, neither has a link
+    expect(shortfall.rowsFound).toBe(0); // neither line even starts a URL block
     expect(shortfall.rowsParsed).toBe(0);
   });
 });
