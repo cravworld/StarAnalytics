@@ -87,24 +87,35 @@ export async function createScoutBatch(
     },
   });
 
-  for (const c of candidates) {
-    const candidate = await prisma.scoutCandidate.upsert({
-      where: { profileUrlKey: c.handle },
-      create: { igHandle: c.handle, profileUrlKey: c.handle },
-      update: {},
+  // Bulk, not one upsert-pair per candidate — a 202-account batch was doing ~404 sequential
+  // DB round-trips here alone, the dominant cause of the real /api/scout/upload 504 in
+  // production. Same end state (dedup by profileUrlKey, one entry per candidate in this
+  // batch), 3 queries total instead of hundreds.
+  const keys = candidates.map((c) => c.handle);
+  const existing = await prisma.scoutCandidate.findMany({ where: { profileUrlKey: { in: keys } } });
+  const existingByKey = new Map(existing.map((c) => [c.profileUrlKey, c]));
+
+  const newKeys = [...new Set(keys.filter((k) => !existingByKey.has(k)))];
+  if (newKeys.length > 0) {
+    await prisma.scoutCandidate.createMany({
+      data: newKeys.map((k) => ({ igHandle: k, profileUrlKey: k })),
+      skipDuplicates: true, // belt-and-braces against a race with another concurrent upload
     });
-    await prisma.scoutBatchEntry.upsert({
-      where: { batchId_candidateId: { batchId: batch.id, candidateId: candidate.id } },
-      create: {
-        batchId: batch.id,
-        candidateId: candidate.id,
-        rowNumber: c.rowNumber,
-        suppliedName: c.name,
-        deliverable: c.deliverable,
-      },
-      update: { rowNumber: c.rowNumber, suppliedName: c.name, deliverable: c.deliverable },
-    });
+    const created = await prisma.scoutCandidate.findMany({ where: { profileUrlKey: { in: newKeys } } });
+    for (const c of created) existingByKey.set(c.profileUrlKey, c);
   }
+
+  await prisma.scoutBatchEntry.createMany({
+    // batchId is brand new (just created above), so there can be no pre-existing entry for
+    // it — plain createMany, no upsert semantics needed the way the old per-row loop had.
+    data: candidates.map((c) => ({
+      batchId: batch.id,
+      candidateId: existingByKey.get(c.handle)!.id,
+      rowNumber: c.rowNumber,
+      suppliedName: c.name,
+      deliverable: c.deliverable,
+    })),
+  });
 
   return { batchId: batch.id, expectedCount: rowsFound, parsedCount: candidates.length };
 }
@@ -147,9 +158,19 @@ async function startRunsForHandles(
   };
   if (batch.dateFilter) actorInput.dateFilter = batch.dateFilter;
 
+  // Concurrent, not sequential — a deep scan (postsToAnalyze=100) shrinks chunkSize down to
+  // ~6, meaning ~34 separate *start* calls for a 202-account batch. One-at-a-time, each
+  // costing a real HTTP round-trip to Apify, was the other dominant cause (alongside the DB
+  // loop above) of the real production 504: starting a run is a single cheap POST that
+  // returns almost immediately, there's no reason 34 of them can't fire together. Bounded at
+  // 8 concurrent rather than unbounded, out of courtesy to Apify's API rather than any limit
+  // that's actually been hit (their own maxConcurrentActorJobs is 128, confirmed via
+  // /users/me/limits on this account).
+  const CONCURRENCY = 8;
   let runsStarted = 0;
   let runsFailed = 0;
-  for (const handleChunk of chunks) {
+
+  async function startOneChunk(handleChunk: string[]) {
     try {
       const maxChargeUsd = chunkMaxChargeUsd(handleChunk.length, batch.postsToAnalyze);
       const timeoutSecs = estimateTimeoutSecs(handleChunk.length, batch.postsToAnalyze) * timeoutMultiplier;
@@ -186,6 +207,10 @@ async function startRunsForHandles(
       });
       runsFailed++;
     }
+  }
+
+  for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+    await Promise.all(chunks.slice(i, i + CONCURRENCY).map(startOneChunk));
   }
   return { runsStarted, runsFailed };
 }

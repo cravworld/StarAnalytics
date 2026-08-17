@@ -8,7 +8,7 @@ import { auth } from "@/auth";
 import { createScoutBatch, startScoutRuns } from "@/lib/data/scout";
 import { parseInfluencerExcel, parseInfluencerPdf } from "@/lib/scout/ingest";
 
-export const maxDuration = 60;
+export const maxDuration = 120; // backstop only — the real fix was bulk DB writes + parallel Apify run-starts (scout.ts), not a longer window
 
 export async function POST(request: Request) {
   const session = await auth();
