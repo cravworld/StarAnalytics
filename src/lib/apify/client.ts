@@ -20,8 +20,24 @@ export interface ApifyRunHandle {
   status: string;
 }
 
-export async function runActor(actorId: string, input: Record<string, unknown>): Promise<ApifyRunHandle> {
-  const res = await fetch(`${API_BASE}/acts/${actorPath(actorId)}/runs?token=${token()}`, {
+export interface RunActorOptions {
+  /** Per-run spend ceiling in USD — Apify aborts the run itself once hit. Additive, optional:
+   * every pre-existing caller keeps its old (uncapped) behavior unless it opts in. */
+  maxChargeUsd?: number;
+  /** Server-side run timeout in seconds — bounds how long a run can bill for if nobody
+   * ever reads its status again. */
+  timeoutSecs?: number;
+}
+
+export async function runActor(
+  actorId: string,
+  input: Record<string, unknown>,
+  options: RunActorOptions = {},
+): Promise<ApifyRunHandle> {
+  const params = new URLSearchParams({ token: token() });
+  if (options.maxChargeUsd !== undefined) params.set("maxTotalChargeUsd", String(options.maxChargeUsd));
+  if (options.timeoutSecs !== undefined) params.set("timeout", String(Math.ceil(options.timeoutSecs)));
+  const res = await fetch(`${API_BASE}/acts/${actorPath(actorId)}/runs?${params}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
