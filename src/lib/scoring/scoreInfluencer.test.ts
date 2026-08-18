@@ -39,20 +39,43 @@ describe("scoreInfluencer", () => {
     expect(viral.components.engagement).toBeLessThanOrEqual(100);
   });
 
-  it("excludes reach/engagement (not fakes them) when followers_count is unavailable, renormalizing over the remaining components", () => {
+  it("still excludes reach (not fakes it) when only ONE popularity signal is missing, renormalizing over what's left", () => {
+    // engagement present, reach missing — this is the "exclude one, keep going" case,
+    // distinct from the "both popularity signals missing" case below.
+    const result = scoreInfluencer({
+      followersAvailable: false,
+      followers: null,
+      engagementRatePct: 15,
+      consistencyScore01: 0.5,
+      contentMixClipsPct: 60,
+    });
+    expect(result.components.reach).toBeNull();
+    expect(result.components.engagement).not.toBeNull();
+    expect(result.components.consistency).toBe(50);
+    expect(result.components.contentMix).toBe(60);
+    expect(result.buzzFactor).toBeGreaterThan(0);
+  });
+
+  it("withholds the buzz factor (0) when BOTH reach and engagement are unmeasurable, rather than scoring purely on consistency/content-mix", () => {
+    // Real bug, caught against live data (2026-08-18): 5 real accounts with
+    // followers_count_available:false (so engagement rate couldn't be computed either)
+    // scored 82-97 — ranking at the very top of a real 202-account batch — purely because
+    // consistency+content-mix got renormalized to 100% of the score. Neither signal
+    // measures popularity; a bare "% of posts that are reels" isn't a buzz factor.
     const result = scoreInfluencer({
       followersAvailable: false,
       followers: null,
       engagementRatePct: null,
       consistencyScore01: 0.5,
-      contentMixClipsPct: 60,
+      contentMixClipsPct: 97, // the exact shape of the real "poohlaala" account that scored 97
     });
     expect(result.components.reach).toBeNull();
     expect(result.components.engagement).toBeNull();
+    // The individual numbers are still real and still shown — only the aggregate is
+    // withheld, so someone looking at the data table can still see what WAS measured.
     expect(result.components.consistency).toBe(50);
-    expect(result.components.contentMix).toBe(60);
-    expect(Number.isFinite(result.buzzFactor)).toBe(true);
-    expect(result.buzzFactor).toBeGreaterThan(0);
+    expect(result.components.contentMix).toBe(97);
+    expect(result.buzzFactor).toBe(0);
   });
 
   it("returns a 0 buzz factor with every component null for a totally unmeasurable account, without dividing by zero", () => {

@@ -361,6 +361,16 @@ async function ingestInstagramItem(
     weights,
   );
 
+  // scoreInfluencer forces buzzFactor to 0 when neither reach nor engagement is
+  // measurable (see its own comment — a real bug this fixed, caught live) — surface *why*
+  // rather than leaving a bare 0 with no explanation, since this account may still have
+  // real consistency/content-mix numbers visible in the data table.
+  const note =
+    normalized.note ??
+    (score.buzzFactor === 0 && score.components.reach === null && score.components.engagement === null
+      ? "follower count unavailable, so engagement rate couldn't be computed either — buzz factor withheld rather than scored on content mix alone"
+      : null);
+
   const snapshot = await prisma.scoutSnapshot.create({
     data: {
       candidateId: candidate.id,
@@ -376,7 +386,7 @@ async function ingestInstagramItem(
       contentMixCarouselPct: normalized.contentMixCarouselPct,
       contentMixImagePct: normalized.contentMixImagePct,
       mostEngagedPostUrl: normalized.mostEngagedPostUrl,
-      note: normalized.note,
+      note,
       raw: normalized.raw as object,
     },
   });

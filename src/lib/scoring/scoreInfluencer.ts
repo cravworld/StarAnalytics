@@ -109,9 +109,20 @@ export function scoreInfluencer(
   const activeWeight = parts.reduce((sum, [v, w]) => sum + (v !== null ? w : 0), 0);
   const weightedSum = parts.reduce((sum, [v, w]) => sum + (v !== null ? v * w : 0), 0);
 
-  // No measurable signal at all (private/unreachable account, zero posts analyzed) —
-  // 0 with every component null, not a silently-omitted account.
-  const buzzFactor = activeWeight > 0 ? Math.round(weightedSum / activeWeight) : 0;
+  // Real bug, caught against live data (2026-08-18): when BOTH reach and engagement are
+  // unmeasurable (a real, observed case — followers_count_available:false on the actor
+  // means it can't compute an engagement rate either), the old renormalization left the
+  // score computed entirely from consistency + content-mix — i.e., "what % of posts are
+  // reels" alone, since consistency is ~0 for most real accounts anyway. Confirmed live:
+  // five real accounts scored 82-97 (ranking at the very top of a 202-account batch) with
+  // zero actual popularity or engagement measured, just a high reels percentage. Reach and
+  // engagement are the only two signals that actually measure "does anyone care about this
+  // account" — consistency and content-mix are strategy signals, not popularity ones, and
+  // were never meant to carry a score on their own. Requiring at least one of the two
+  // meaningful signals to be present (not just *some* signal) keeps the "exclude rather
+  // than fake" discipline honest instead of technically-true-but-misleading.
+  const hasPopularitySignal = reach !== null || engagement !== null;
+  const buzzFactor = hasPopularitySignal && activeWeight > 0 ? Math.round(weightedSum / activeWeight) : 0;
 
   return {
     buzzFactor,
