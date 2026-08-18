@@ -9,6 +9,10 @@ export async function POST(_request: Request, { params }: { params: Promise<{ ba
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const { batchId } = await params;
-  const result = await retryMissingScoutCandidates(batchId);
-  return NextResponse.json(result);
+  try {
+    const result = await retryMissingScoutCandidates(batchId);
+    return NextResponse.json(result);
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 409 });
+  }
 }

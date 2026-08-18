@@ -227,6 +227,16 @@ export async function retryMissingScoutCandidates(
   const batch = await prisma.scoutBatch.findUnique({ where: { id: batchId } });
   if (!batch) throw new Error(`ScoutBatch ${batchId} not found`);
 
+  // Guards against a real race, not just a UI nicety (the batch page only shows the retry
+  // button once every run is terminal, but this function is reachable directly via its
+  // route regardless) — a candidate with no snapshot yet might just belong to a chunk
+  // that's still running, not one that actually failed. Retrying it here would kick off a
+  // second, redundant Apify run for handles already being (successfully) scanned.
+  const stillRunning = await prisma.scoutRun.count({ where: { batchId, status: { in: ["queued", "running"] } } });
+  if (stillRunning > 0) {
+    throw new Error(`${stillRunning} run(s) in this batch are still in progress — wait for them to finish before retrying`);
+  }
+
   const entries = await prisma.scoutBatchEntry.findMany({
     where: { batchId },
     include: { candidate: { include: { snapshots: { where: { runId: { in: await runIdsForBatch(batchId) } }, take: 1 } } } },
@@ -269,15 +279,15 @@ export async function pollAndIngestScoutRuns(): Promise<{ checked: number; inges
       const status = await getRunStatus(run.apifyRunId);
       if (!TERMINAL.has(status.status)) continue;
 
-      if (status.status !== "SUCCEEDED") {
-        await prisma.scoutRun.update({
-          where: { id: run.id },
-          data: { status: "error", error: `Apify run ended ${status.status}`, finishedAt: new Date() },
-        });
-        errored++;
-        continue;
-      }
-
+      // Read the dataset regardless of terminal status, not only on SUCCEEDED — confirmed
+      // live (2026-08-18) that a TIMED-OUT run had already written 43 items ($0.37 already
+      // spent) that the old "SUCCEEDED-only" read silently discarded, forcing a full
+      // re-scan of every handle in that chunk at 2x cost. Apify writes dataset items
+      // incrementally as each profile finishes, so a run that dies partway through still
+      // has real, already-paid-for results worth keeping. Marked "error" below (not "done")
+      // whenever the status wasn't a clean SUCCEEDED, so retryMissingScoutCandidates still
+      // picks up whichever handles in this chunk didn't make it into the dataset — just no
+      // longer re-scanning ones that did.
       const items = await getDatasetItems<Record<string, unknown>>(status.datasetId);
       for (const raw of items) {
         const normalized = normalizeScoutItem(raw);
@@ -333,11 +343,26 @@ export async function pollAndIngestScoutRuns(): Promise<{ checked: number; inges
         });
       }
 
-      await prisma.scoutRun.update({
-        where: { id: run.id },
-        data: { status: "done", finishedAt: new Date() },
-      });
-      ingested++;
+      if (status.status === "SUCCEEDED") {
+        await prisma.scoutRun.update({
+          where: { id: run.id },
+          data: { status: "done", finishedAt: new Date() },
+        });
+        ingested++;
+      } else {
+        // Still "error" (not "done") even though items may have been salvaged above — the
+        // run itself didn't finish cleanly, and any handle in this chunk that never made it
+        // into the dataset needs the retry path, not to be silently treated as complete.
+        await prisma.scoutRun.update({
+          where: { id: run.id },
+          data: {
+            status: "error",
+            error: `Apify run ended ${status.status} — salvaged ${items.length} item(s) from its dataset before marking it errored`,
+            finishedAt: new Date(),
+          },
+        });
+        errored++;
+      }
     } catch (err) {
       // A poll/ingest failure on one run must not block the others in this tick.
       console.error(`Scoutline: failed to ingest run ${run.id}:`, err);
@@ -478,35 +503,64 @@ export interface ScoutBatchSummary {
   expectedCount: number;
   parsedCount: number;
   createdAt: Date;
+  archivedAt: Date | null;
   runsTotal: number;
   runsDone: number;
   runsErrored: number;
   scoredCount: number;
 }
 
-export async function getScoutBatch(batchId: string): Promise<ScoutBatchSummary | null> {
-  const all = await listScoutBatches();
-  return all.find((b) => b.id === batchId) ?? null;
-}
-
-export async function listScoutBatches(): Promise<ScoutBatchSummary[]> {
-  const batches = await prisma.scoutBatch.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { runs: true, entries: { include: { candidate: { include: { snapshots: { take: 1, orderBy: { scrapedAt: "desc" } } } } } } },
-  });
-
-  return batches.map((b) => ({
+function summarizeBatch(b: {
+  id: string;
+  fileName: string;
+  sourceType: string;
+  expectedCount: number;
+  parsedCount: number;
+  createdAt: Date;
+  archivedAt: Date | null;
+  runs: { status: string }[];
+  entries: { candidate: { snapshots: unknown[] } }[];
+}): ScoutBatchSummary {
+  return {
     id: b.id,
     fileName: b.fileName,
     sourceType: b.sourceType,
     expectedCount: b.expectedCount,
     parsedCount: b.parsedCount,
     createdAt: b.createdAt,
+    archivedAt: b.archivedAt,
     runsTotal: b.runs.length,
     runsDone: b.runs.filter((r) => r.status === "done").length,
     runsErrored: b.runs.filter((r) => r.status === "error").length,
     scoredCount: b.entries.filter((e) => e.candidate.snapshots.length > 0).length,
-  }));
+  };
+}
+
+const BATCH_SUMMARY_INCLUDE = {
+  runs: true,
+  entries: { include: { candidate: { include: { snapshots: { take: 1, orderBy: { scrapedAt: "desc" as const } } } } } },
+};
+
+// Fetched directly by id (not filtered through listScoutBatches' archived-exclusion) — a
+// direct link to an archived batch (e.g. from a bookmark, or before someone archived it)
+// should still open, it just won't show up in the default list anymore.
+export async function getScoutBatch(batchId: string): Promise<ScoutBatchSummary | null> {
+  const batch = await prisma.scoutBatch.findUnique({ where: { id: batchId }, include: BATCH_SUMMARY_INCLUDE });
+  return batch ? summarizeBatch(batch) : null;
+}
+
+export async function listScoutBatches(includeArchived = false): Promise<ScoutBatchSummary[]> {
+  const batches = await prisma.scoutBatch.findMany({
+    where: includeArchived ? {} : { archivedAt: null },
+    orderBy: { createdAt: "desc" },
+    include: BATCH_SUMMARY_INCLUDE,
+  });
+  return batches.map(summarizeBatch);
+}
+
+/** Soft delete — see ScoutBatch.archivedAt's schema comment for why this isn't a hard delete. */
+export async function setScoutBatchArchived(batchId: string, archived: boolean): Promise<void> {
+  await prisma.scoutBatch.update({ where: { id: batchId }, data: { archivedAt: archived ? new Date() : null } });
 }
 
 /**
@@ -586,4 +640,29 @@ export async function recomputeScoutScores(batchId: string): Promise<{ rescored:
   });
 
   return { rescored };
+}
+
+export interface ScoutBatchComparison {
+  batch: ScoutBatchSummary;
+  avgBuzzFactor: number | null;
+  topAccounts: { handle: string; buzzFactor: number }[];
+}
+
+/** Side-by-side summary stats for 2-4 batches — not a merge, each batch's own numbers. */
+export async function getScoutBatchCompareData(batchIds: string[]): Promise<ScoutBatchComparison[]> {
+  const results: ScoutBatchComparison[] = [];
+  for (const batchId of batchIds) {
+    const batch = await getScoutBatch(batchId);
+    if (!batch) continue;
+    const rows = await getScoutLeaderboard(batchId);
+    const scored = rows.filter((r) => r.buzzFactor !== null);
+    const avgBuzzFactor =
+      scored.length > 0 ? Math.round(scored.reduce((sum, r) => sum + (r.buzzFactor ?? 0), 0) / scored.length) : null;
+    results.push({
+      batch,
+      avgBuzzFactor,
+      topAccounts: scored.slice(0, 5).map((r) => ({ handle: r.handle, buzzFactor: r.buzzFactor! })),
+    });
+  }
+  return results;
 }

@@ -390,6 +390,11 @@ model ScoutBatch {
   expectedCount Int      @map("expected_count")
   parsedCount   Int      @map("parsed_count")
   createdAt     DateTime @default(now()) @map("created_at")
+  // Soft delete, not hard delete — a candidate's ScoutSnapshot history is valuable even
+  // after the batch that produced it is no longer wanted in the list, and ScoutRun rows
+  // can't be cascade-deleted without either losing that history or a schema change to
+  // nullify snapshot.runId. Archived batches are just hidden from the default list.
+  archivedAt    DateTime? @map("archived_at")
 
   // Snapshot of ScoutSettings at the moment this batch was started — not a live pointer to
   // "whatever the settings are now". Editing settings after a batch has already been kicked
