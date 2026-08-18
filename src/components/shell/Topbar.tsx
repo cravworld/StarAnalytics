@@ -17,9 +17,11 @@ const BREADCRUMBS: Record<string, string[]> = {
   "/campaigns/new": ["Campaigns", "Own Campaigns", "New Campaign"],
   "/fan-pages": ["Fan Pages"],
   "/scout": ["Scoutline"],
+  "/scout/compare": ["Scoutline", "Compare Batches"],
 };
 
 const KNOWN_CAMPAIGN_SUBROUTES = ["/campaigns/hashtag", "/campaigns/keywords", "/campaigns/compare-own", "/campaigns/agency", "/campaigns/new"];
+const KNOWN_SCOUT_SUBROUTES = ["/scout/compare"];
 
 export function Topbar() {
   const pathname = usePathname();
@@ -31,7 +33,10 @@ export function Topbar() {
     pathname.startsWith("/campaigns/") &&
     !KNOWN_CAMPAIGN_SUBROUTES.some((r) => pathname.startsWith(r));
   // /scout/[batchId] — same "detail route with a DB-generated id" shape as campaign detail.
-  const isScoutBatchDetail = pathname !== "/scout" && pathname.startsWith("/scout/");
+  const isScoutBatchDetail =
+    pathname !== "/scout" &&
+    pathname.startsWith("/scout/") &&
+    !KNOWN_SCOUT_SUBROUTES.some((r) => pathname.startsWith(r));
   const crumbs = isCampaignDetail
     ? ["Campaigns", "Own Campaigns", "Campaign Detail"]
     : isScoutBatchDetail

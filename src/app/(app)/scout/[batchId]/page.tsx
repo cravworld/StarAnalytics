@@ -5,12 +5,8 @@ import { Pill } from "@/components/ui/Pill";
 import { ScoutAutoRefresh } from "@/components/scout/ScoutAutoRefresh";
 import { ScoutRetryButton } from "@/components/scout/ScoutRetryButton";
 import { ScoutRescoreButton } from "@/components/scout/ScoutRescoreButton";
-import { ScoutViewToggle } from "@/components/scout/ScoutViewToggle";
-import { ScoutDataTable } from "@/components/scout/ScoutDataTable";
+import { ScoutLeaderboardFilterable } from "@/components/scout/ScoutLeaderboardFilterable";
 import { CsvExportRegistrar } from "@/components/shell/CsvExportRegistrar";
-
-const rankClass = (i: number) => (i === 0 ? "r1" : i === 1 ? "r2" : i === 2 ? "r3" : "");
-const scoreColor = (s: number) => (s >= 70 ? "#1a7a4a" : s >= 40 ? "#b45309" : "#b71c1c");
 
 export default async function ScoutBatchPage({ params }: { params: Promise<{ batchId: string }> }) {
   const { batchId } = await params;
@@ -85,55 +81,7 @@ export default async function ScoutBatchPage({ params }: { params: Promise<{ bat
         ])}
       />
 
-      <ScoutViewToggle
-        leaderboard={
-          <Card title="Buzz Factor Leaderboard">
-            {rows.length === 0 ? (
-              <div style={{ color: "var(--muted)", textAlign: "center", padding: "16px 0" }}>No accounts in this batch.</div>
-            ) : (
-              rows.map((r, i) => (
-                <div className="lb-row" key={r.candidateId}>
-                  <div className={`lb-rank ${rankClass(i)}`}>{r.buzzFactor !== null ? i + 1 : "–"}</div>
-                  <div className="lb-body">
-                    <div className="lb-name">
-                      <a href={`https://www.instagram.com/${r.handle}/`} target="_blank" rel="noreferrer">
-                        @{r.handle}
-                      </a>
-                      {r.suppliedName ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>{r.suppliedName}</span> : null}
-                      {r.deliverable ? <Pill kind="default">{r.deliverable}</Pill> : null}
-                    </div>
-                    {r.buzzFactor !== null ? (
-                      <>
-                        <div className="lb-bar-track">
-                          <div className="lb-bar-fill" style={{ width: `${r.buzzFactor}%`, background: scoreColor(r.buzzFactor) }} />
-                        </div>
-                        <div className="lb-meta">
-                          {r.followers !== null ? <span>Followers <strong>{r.followers.toLocaleString()}</strong></span> : null}
-                          {r.engagementRatePct !== null ? (
-                            <span>Engagement <strong>{r.engagementRatePct.toFixed(1)}%</strong></span>
-                          ) : null}
-                          {r.components ? (
-                            <span>
-                              Reach {r.components.reach ?? "–"} · Consistency {r.components.consistency ?? "–"} · Content mix {r.components.contentMix ?? "–"}
-                            </span>
-                          ) : null}
-                          {r.note ? <span style={{ color: "var(--amber)" }}>{r.note}</span> : null}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="lb-meta">Scan in progress…</div>
-                    )}
-                  </div>
-                  {r.buzzFactor !== null ? (
-                    <div className="lb-score" style={{ color: scoreColor(r.buzzFactor) }}>{r.buzzFactor}</div>
-                  ) : null}
-                </div>
-              ))
-            )}
-          </Card>
-        }
-        table={<ScoutDataTable rows={rawRows} />}
-      />
+      <ScoutLeaderboardFilterable rows={rows} rawRows={rawRows} />
     </>
   );
 }
