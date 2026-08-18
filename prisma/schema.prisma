@@ -44,6 +44,20 @@ enum Platform {
   youtube
 }
 
+// Scoutline's own platform enum, deliberately separate from Platform above — that enum is
+// scoped to the Graph-API-integration features (Post/AccountSnapshot/CompetitorAccount/
+// FanPage), all consumed through the PlatformId union in providers/types.ts which only
+// covers instagram/youtube. Adding facebook to the shared enum directly (tried first, then
+// reverted) broke type-narrowing in every one of those unrelated features — they'd have
+// needed real Facebook-handling logic added just to satisfy the type checker, which is out
+// of scope for a Scoutline-only feature. A second enum costs nothing and keeps the two
+// concerns — "which official API this content came from" vs "which data source normalized
+// this scan" — decoupled the way they actually are.
+enum ScoutPlatform {
+  instagram
+  facebook
+}
+
 model Post {
   id            String     @id @default(uuid())
   source        PostSource
@@ -396,23 +410,13 @@ model ScoutBatch {
   // nullify snapshot.runId. Archived batches are just hidden from the default list.
   archivedAt    DateTime? @map("archived_at")
 
-  // Snapshot of ScoutSettings at the moment this batch was started — not a live pointer to
-  // "whatever the settings are now". Editing settings after a batch has already been kicked
-  // off must never change what that batch's Apify runs asked for or how its scores were
-  // computed; it only affects the *next* batch. This is also the transparent record of
-  // "what factors actually produced this leaderboard" the settings panel promises.
-  // Defaults here match ScoutSettings' own defaults and the actual parameters the very
-  // first Scoutline batch ran with (before this table existed) — so backfilling this
-  // migration onto that row is accurate, not a placeholder.
-  postsToAnalyze     Int     @default(15) @map("posts_to_analyze")
-  postTypeFilter     String  @default("all") @map("post_type_filter")
-  skipPinnedPosts    Boolean @default(true) @map("skip_pinned_posts")
-  dateFilter         String? @map("date_filter")
-  weightEngagement   Float   @default(0.4) @map("weight_engagement")
-  weightReach        Float   @default(0.3) @map("weight_reach")
-  weightConsistency  Float   @default(0.15) @map("weight_consistency")
-  weightContentMix   Float   @default(0.15) @map("weight_content_mix")
-
+  // Actor-factor and weight snapshotting moved from here to ScoutRun (2026-08-18, adding
+  // Facebook support) — a single batch can now hold a mix of Instagram and Facebook
+  // candidates (a source file isn't one-platform-per-upload), so "what factors this batch
+  // ran with" stopped being a single answer the moment a second platform existed. Each
+  // ScoutRun is always single-platform (chunking splits by platform before grouping), so
+  // that's the correct place for a per-platform factors/weights snapshot now — see its
+  // own comment.
   entries ScoutBatchEntry[]
   runs    ScoutRun[]
 
@@ -420,10 +424,17 @@ model ScoutBatch {
 }
 
 model ScoutCandidate {
-  id            String   @id @default(uuid())
-  igHandle      String   @map("ig_handle")
-  // Normalized dedup key (lowercased handle) — mirrors apify-normalize.ts's postUrlKey
-  // discipline: the raw URL varies (query params, trailing slash), the handle doesn't.
+  id       String        @id @default(uuid())
+  platform ScoutPlatform @default(instagram)
+  // Generic "handle" (was igHandle before Facebook support) — an Instagram username, a
+  // Facebook page slug/ID, whatever the platform's own actors key off of. Kept mapped to
+  // the original ig_handle column deliberately — a real column rename risks the migration
+  // tool treating it as drop+add and losing every existing candidate's handle; renaming
+  // only the Prisma-side field name needs no data migration at all.
+  handle   String   @map("ig_handle")
+  // Normalized dedup key, now platform-prefixed ("instagram:somehandle") — a bare handle
+  // string alone is no longer guaranteed unique once two platforms are in play (mirrors
+  // apify-normalize.ts's postUrlKey discipline: the raw URL varies, this doesn't).
   profileUrlKey String   @unique @map("profile_url_key")
   firstSeenAt   DateTime @default(now()) @map("first_seen_at")
 
@@ -457,6 +468,7 @@ model ScoutRun {
   id          String         @id @default(uuid())
   batchId     String         @map("batch_id")
   batch       ScoutBatch     @relation(fields: [batchId], references: [id])
+  platform    ScoutPlatform  @default(instagram)
   actorId     String         @map("actor_id")
   apifyRunId  String         @map("apify_run_id")
   datasetId   String         @map("dataset_id")
@@ -466,12 +478,36 @@ model ScoutRun {
   finishedAt  DateTime?      @map("finished_at")
   error       String?
 
+  // Snapshot of whatever ScoutSettings (for this run's platform) was live at start time —
+  // moved down from ScoutBatch (see its own comment) now that a batch can mix platforms.
+  // JSON, not typed columns: Instagram's actor factors (postsToAnalyze/postTypeFilter/
+  // skipPinnedPosts/dateFilter) are a real, non-trivial shape; Facebook's is currently just
+  // {} (page-only scan, no configurable factors — see ScoutSettings' own comment), but the
+  // JSON shape stays generic rather than assuming Instagram's shape is the only one that'll
+  // ever exist. Weights stay as real columns since they're the same 4 numbers regardless of
+  // platform, and having them queryable/typed is worth the extra columns.
+  // Defaults exist only to backfill existing rows (all real Instagram runs to date) during
+  // migration — every new run going forward always sets these explicitly, same as
+  // ScoutBatch's own factor snapshot did before this moved here.
+  actorFactors      Json  @default("{}") @map("actor_factors")
+  weightEngagement  Float @default(0.45) @map("weight_engagement")
+  weightReach       Float @default(0.3) @map("weight_reach")
+  weightConsistency Float @default(0.05) @map("weight_consistency")
+  weightContentMix  Float @default(0.2) @map("weight_content_mix")
+
   @@index([status])
   @@map("scout_runs")
 }
 
 // Append-only, same discipline as AccountSnapshot — a re-scan adds a row, never overwrites,
 // so engagement trend over time is possible later without a schema change.
+//
+// Platform-generic on purpose (not split into per-platform tables): every field here is a
+// normalized, computed metric (Instagram's actor computes them for us; Facebook's are
+// computed by our own normalizer from raw post data — see apify-scout-normalize.ts and its
+// planned Facebook counterpart), so the shape is the same regardless of source. The
+// content-mix trio means clips/carousel/image for Instagram and video/(unused)/photo for
+// Facebook — same concept (dominant content type), different platform-native categories.
 model ScoutSnapshot {
   id                      String         @id @default(uuid())
   candidateId             String         @map("candidate_id")
@@ -516,30 +552,50 @@ model ScoutScore {
   @@map("scout_scores")
 }
 
-// Singleton (fixed id="default") — the actor input factors + score weights a new batch
-// starts from, editable from the Scoutline settings panel. Not versioned/audited like
-// ThresholdConfig — nobody disputes a scan setting the way an agency disputes an
-// authenticity score (same reasoning buzzScore.ts gives for its own named-constant
-// weights) — but it must still be DB-backed so it's actually editable from the UI rather
-// than a redeploy. Each ScoutBatch snapshots these values at creation time (see its own
-// comment), so changing this row only ever affects batches started after the change.
+// One row per platform (2026-08-18, adding Facebook — was a fixed id="default" singleton
+// when Instagram was the only platform). The actor input factors + score weights a new
+// batch starts from for that platform, editable from the Scoutline settings panel. Not
+// versioned/audited like ThresholdConfig — nobody disputes a scan setting the way an agency
+// disputes an authenticity score (same reasoning buzzScore.ts gives for its own
+// named-constant weights) — but it must still be DB-backed so it's actually editable from
+// the UI rather than a redeploy. Each ScoutRun snapshots these values at start time (see its
+// own comment), so changing this row only ever affects runs started after the change.
+//
+// Instagram and Facebook fields are both nullable because only one set is meaningful per
+// row (platform decides which) — an alternative (two separate models) would duplicate the
+// weight columns and the settings-panel/upsert-on-read logic for no real benefit.
 model ScoutSettings {
-  id                String   @id @default("default")
+  platform ScoutPlatform @id
+
+  // Instagram — easy_scraper/instagram-profile-engagement-analytics's own input shape.
   // 100, not the actor's own default of 30 — 2026-08-17 direction: "just 15 wont do it
   // justice... atleast latest 100 posts have to be analyzed" (fewer is fine if an account
   // genuinely has fewer, the actor already handles that — this is a ceiling, not a floor).
-  postsToAnalyze    Int      @default(100) @map("posts_to_analyze")
-  postTypeFilter    String   @default("all") @map("post_type_filter")
-  skipPinnedPosts   Boolean  @default(true) @map("skip_pinned_posts")
-  dateFilter        String?  @map("date_filter")
-  // Retuned 2026-08-17 against the real distribution of the first 202-account batch — see
-  // scoreInfluencer.ts's DEFAULT_WEIGHTS comment for the percentiles this was based on.
-  // Consistency dropped (it's 0.00 at the median/p75/p90 in real data, so it barely
-  // discriminates); the freed weight moved to engagement and content mix.
-  weightEngagement  Float    @default(0.45) @map("weight_engagement")
-  weightReach       Float    @default(0.3) @map("weight_reach")
-  weightConsistency Float    @default(0.05) @map("weight_consistency")
-  weightContentMix  Float    @default(0.2) @map("weight_content_mix")
+  igPostsToAnalyze  Int?    @map("ig_posts_to_analyze")
+  igPostTypeFilter  String? @map("ig_post_type_filter")
+  igSkipPinnedPosts Boolean? @map("ig_skip_pinned_posts")
+  igDateFilter      String? @map("ig_date_filter")
+
+  // Facebook — deliberately page-only (2026-08-18 direction: "not take the posts into
+  // account... based on the people talking about this"), not a two-actor pages+posts
+  // pipeline. apify/facebook-pages-scraper alone, takes no configurable factors beyond the
+  // URL itself — this section exists so a per-platform row still makes sense structurally,
+  // but there is currently nothing to store here.
+
+  // Weights — same 4 numbers regardless of platform, but NOT shared values: Facebook's
+  // organic engagement runs structurally lower than Instagram's, so the same reference
+  // constants/weights tuned against real Instagram data would score every Facebook account
+  // as weak by comparison. Facebook's defaults below are first-guesses (same 0.4/0.3/0.15/
+  // 0.15 split Instagram itself started at before being retuned against real data) —
+  // expect to retune these the same way, against a real Facebook batch, not before one
+  // exists. In practice only engagement+reach will ever be non-null for Facebook (no
+  // post-level data means consistency/content-mix stay null and get excluded, same
+  // "exclude rather than fake" discipline scoreInfluencer.ts already has) — consistency/
+  // content-mix weights are kept for schema symmetry but are inert for this platform.
+  weightEngagement  Float    @map("weight_engagement")
+  weightReach       Float    @map("weight_reach")
+  weightConsistency Float    @map("weight_consistency")
+  weightContentMix  Float    @map("weight_content_mix")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
   @@map("scout_settings")

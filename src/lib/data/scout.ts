@@ -5,17 +5,32 @@
 // mid-wait orphans a billed, unread Apify run). createScoutBatch + startScoutRuns return
 // as soon as the run is *started*, not finished — src/app/api/cron/poll-scout-runs/route.ts
 // does the waiting.
+//
+// Facebook support (2026-08-18) branches by platform at the chunking/actor level — a single
+// batch can hold both Instagram and Facebook candidates, and each platform uses a completely
+// different actor with a different cost/timing shape, so "one chunking scheme fits both"
+// was never true. Facebook is deliberately page-only ("not take the posts into account...
+// based on the people talking about this" — 2026-08-18 direction): apify/facebook-pages-
+// scraper alone, no post-scraping actor, no consistency/content-mix signal for Facebook
+// candidates (they stay null and get excluded, same discipline scoreInfluencer.ts already
+// has for any missing signal).
+import type { ScoutPlatform } from "@prisma/client";
 import { getDatasetItems, getRunStatus, runActor } from "@/lib/apify/client";
 import { normalizeScoutItem } from "@/lib/providers/apify-scout-normalize";
+import { normalizeFacebookScoutItem } from "@/lib/providers/apify-scout-normalize-facebook";
 import { prisma } from "@/lib/prisma";
 import { scoreInfluencer } from "@/lib/scoring/scoreInfluencer";
 import { getScoutSettings } from "@/lib/data/scoutSettings";
 import { profileUrlKey, type ParsedCandidate } from "@/lib/scout/ingest";
 
-// 2026-08-17 direction: this single actor is the whole pipeline for now — no profile/post/
-// comment-scraper pass, no authenticity component. Overridable so a future environment (or
-// a switch back to a different actor) doesn't need a code change.
-export const SCOUT_ACTOR_ID = process.env.APIFY_ACTOR_SCOUT || "easy_scraper/instagram-profile-engagement-analytics";
+// 2026-08-17 direction: Instagram's single actor is the whole pipeline for that platform —
+// no separate profile/post/comment-scraper pass, no authenticity component. Overridable so
+// a future environment (or a switch back to a different actor) doesn't need a code change.
+export const INSTAGRAM_ACTOR_ID =
+  process.env.APIFY_ACTOR_SCOUT || "easy_scraper/instagram-profile-engagement-analytics";
+// apify/facebook-pages-scraper — confirmed live (2026-08-18) against real pages. Takes no
+// configurable factors beyond the URL list itself.
+export const FACEBOOK_ACTOR_ID = process.env.APIFY_ACTOR_SCOUT_FACEBOOK || "apify/facebook-pages-scraper";
 
 // Chunk size and per-run timeout both scale with postsToAnalyze — a fixed 40-handle chunk
 // was sized around a 15-posts-per-account baseline (confirmed live: ~0.9s of actor runtime
@@ -25,15 +40,15 @@ export const SCOUT_ACTOR_ID = process.env.APIFY_ACTOR_SCOUT || "easy_scraper/ins
 // Keeping "handles x postsToAnalyze" roughly constant across settings keeps both the
 // per-chunk wall-clock and the blast radius of one bad chunk stable regardless of how deep
 // a scan is configured to go.
-const TARGET_CHUNK_WORK_UNITS = 40 * 15;
-const SECONDS_PER_WORK_UNIT = 2; // ~2.2x the observed ~0.9s/unit, as margin against a slow run
+const IG_TARGET_CHUNK_WORK_UNITS = 40 * 15;
+const IG_SECONDS_PER_WORK_UNIT = 2; // ~2.2x the observed ~0.9s/unit, as margin against a slow run
 
-function computeChunkSize(postsToAnalyze: number): number {
-  return Math.max(1, Math.min(40, Math.floor(TARGET_CHUNK_WORK_UNITS / postsToAnalyze)));
+function igChunkSize(postsToAnalyze: number): number {
+  return Math.max(1, Math.min(40, Math.floor(IG_TARGET_CHUNK_WORK_UNITS / postsToAnalyze)));
 }
 
-function estimateTimeoutSecs(handleCount: number, postsToAnalyze: number): number {
-  return Math.max(300, Math.ceil(handleCount * postsToAnalyze * SECONDS_PER_WORK_UNIT));
+function igTimeoutSecs(handleCount: number, postsToAnalyze: number): number {
+  return Math.max(300, Math.ceil(handleCount * postsToAnalyze * IG_SECONDS_PER_WORK_UNIT));
 }
 
 // $0.0006/post analyzed (confirmed via a live run's pricingInfo) + $0.0001/dataset item +
@@ -41,9 +56,23 @@ function estimateTimeoutSecs(handleCount: number, postsToAnalyze: number): numbe
 // analysis cost is bounded above by chunkSize x postsToAnalyze regardless of how active the
 // real accounts are — there's no "per-URL multiplies unboundedly" risk here the way the
 // comment-scraper has (see client.ts's own warning about that actor).
-function chunkMaxChargeUsd(handleCount: number, postsToAnalyze: number): number {
+function igMaxChargeUsd(handleCount: number, postsToAnalyze: number): number {
   const arithmeticMax = handleCount * postsToAnalyze * 0.0006 + handleCount * 0.0001 + 0.001;
   return Math.ceil(arithmeticMax * 1.5 * 100) / 100;
+}
+
+// Facebook: no "depth" dimension at all (page-only, no posts scraped), so cost/time scale
+// purely with handle count. $0.0065/page confirmed live via a real run's pricingInfo.
+// Fixed 40/chunk matches Instagram's own ceiling; timeout is generous relative to the
+// ~6-11s/page observed live, since Facebook scraping is confirmed less consistently paced
+// than Instagram's (one of three live verification runs came back empty and needed a
+// retry — see apify-scout-normalize-facebook.ts's module doc).
+const FB_CHUNK_SIZE = 40;
+function fbTimeoutSecs(handleCount: number): number {
+  return Math.max(180, handleCount * 15);
+}
+function fbMaxChargeUsd(handleCount: number): number {
+  return Math.ceil((handleCount * 0.0065 * 1.5 + 0.01) * 100) / 100;
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -58,47 +87,33 @@ export interface CreateBatchResult {
   parsedCount: number;
 }
 
-/**
- * Persists the batch + deduped candidates + per-batch entries. Does not start any Apify run.
- * Snapshots the *current* ScoutSettings onto the batch row (see its schema comment) — a
- * settings change after this point never reaches back into an already-created batch.
- */
+/** Persists the batch + deduped candidates + per-batch entries. Does not start any Apify run. */
 export async function createScoutBatch(
   fileName: string,
   sourceType: "pdf" | "excel" | "manual",
   rowsFound: number,
   candidates: ParsedCandidate[],
 ): Promise<CreateBatchResult> {
-  const settings = await getScoutSettings();
   const batch = await prisma.scoutBatch.create({
-    data: {
-      fileName,
-      sourceType,
-      expectedCount: rowsFound,
-      parsedCount: candidates.length,
-      postsToAnalyze: settings.postsToAnalyze,
-      postTypeFilter: settings.postTypeFilter,
-      skipPinnedPosts: settings.skipPinnedPosts,
-      dateFilter: settings.dateFilter,
-      weightEngagement: settings.weightEngagement,
-      weightReach: settings.weightReach,
-      weightConsistency: settings.weightConsistency,
-      weightContentMix: settings.weightContentMix,
-    },
+    data: { fileName, sourceType, expectedCount: rowsFound, parsedCount: candidates.length },
   });
 
   // Bulk, not one upsert-pair per candidate — a 202-account batch was doing ~404 sequential
   // DB round-trips here alone, the dominant cause of the real /api/scout/upload 504 in
   // production. Same end state (dedup by profileUrlKey, one entry per candidate in this
   // batch), 3 queries total instead of hundreds.
-  const keys = candidates.map((c) => c.handle);
+  const byKey = new Map(candidates.map((c) => [profileUrlKey(c.handle, c.platform), c]));
+  const keys = [...byKey.keys()];
   const existing = await prisma.scoutCandidate.findMany({ where: { profileUrlKey: { in: keys } } });
   const existingByKey = new Map(existing.map((c) => [c.profileUrlKey, c]));
 
-  const newKeys = [...new Set(keys.filter((k) => !existingByKey.has(k)))];
+  const newKeys = keys.filter((k) => !existingByKey.has(k));
   if (newKeys.length > 0) {
     await prisma.scoutCandidate.createMany({
-      data: newKeys.map((k) => ({ igHandle: k, profileUrlKey: k })),
+      data: newKeys.map((k) => {
+        const c = byKey.get(k)!;
+        return { handle: c.handle, platform: c.platform, profileUrlKey: k };
+      }),
       skipDuplicates: true, // belt-and-braces against a race with another concurrent upload
     });
     const created = await prisma.scoutCandidate.findMany({ where: { profileUrlKey: { in: newKeys } } });
@@ -107,10 +122,10 @@ export async function createScoutBatch(
 
   await prisma.scoutBatchEntry.createMany({
     // batchId is brand new (just created above), so there can be no pre-existing entry for
-    // it — plain createMany, no upsert semantics needed the way the old per-row loop had.
+    // it — plain createMany, no upsert semantics needed the way an old per-row loop had.
     data: candidates.map((c) => ({
       batchId: batch.id,
-      candidateId: existingByKey.get(c.handle)!.id,
+      candidateId: existingByKey.get(profileUrlKey(c.handle, c.platform))!.id,
       rowNumber: c.rowNumber,
       suppliedName: c.name,
       deliverable: c.deliverable,
@@ -120,99 +135,166 @@ export async function createScoutBatch(
   return { batchId: batch.id, expectedCount: rowsFound, parsedCount: candidates.length };
 }
 
-/**
- * Kicks off one Apify run per chunk of the batch's candidates, using the actor factors this
- * batch was snapshotted with at creation time (never "whatever settings are current now").
- * Returns immediately per run.
- */
-export async function startScoutRuns(batchId: string): Promise<{ runsStarted: number; runsFailed: number }> {
-  const batch = await prisma.scoutBatch.findUnique({ where: { id: batchId } });
-  if (!batch) throw new Error(`ScoutBatch ${batchId} not found`);
-
-  const entries = await prisma.scoutBatchEntry.findMany({
-    where: { batchId },
-    include: { candidate: true },
-  });
-  const handles = entries.map((e) => e.candidate.igHandle);
-  return startRunsForHandles(batchId, batch, handles, 1);
-}
-
 // A chunk that hit its timeout (proxy/rate variance, not a cost or code issue — confirmed
 // on the very first real batch: 1 of 6 identically-sized chunks timed out while the other 5
 // succeeded at the same settings) gets a longer window on retry rather than the same one
 // again.
 const RETRY_TIMEOUT_MULTIPLIER = 2;
 
-async function startRunsForHandles(
+// Concurrent, not sequential — a deep Instagram scan (postsToAnalyze=100) shrinks chunk size
+// down to ~6, meaning ~34 separate *start* calls for a 202-account batch. One-at-a-time, each
+// costing a real HTTP round-trip to Apify, was the dominant cause (alongside a DB N+1 fixed
+// separately) of a real production 504: starting a run is a single cheap POST that returns
+// almost immediately, there's no reason many of them can't fire together. Bounded at 8
+// concurrent rather than unbounded, out of courtesy to Apify's API rather than any limit
+// that's actually been hit (their own maxConcurrentActorJobs is 128, confirmed via
+// /users/me/limits on this account).
+const RUN_START_CONCURRENCY = 8;
+
+async function startOneRun(
   batchId: string,
-  batch: { postsToAnalyze: number; postTypeFilter: string; skipPinnedPosts: boolean; dateFilter: string | null },
+  platform: ScoutPlatform,
+  actorId: string,
+  input: Record<string, unknown>,
+  handleCount: number,
+  maxChargeUsd: number,
+  timeoutSecs: number,
+  actorFactors: Record<string, unknown>,
+  weights: { engagement: number; reach: number; consistency: number; contentMix: number },
+): Promise<boolean> {
+  try {
+    const run = await runActor(actorId, input, { maxChargeUsd, timeoutSecs });
+    await prisma.scoutRun.create({
+      data: {
+        batchId,
+        platform,
+        actorId,
+        apifyRunId: run.runId,
+        datasetId: run.datasetId,
+        status: "running",
+        handleCount,
+        actorFactors: actorFactors as object,
+        weightEngagement: weights.engagement,
+        weightReach: weights.reach,
+        weightConsistency: weights.consistency,
+        weightContentMix: weights.contentMix,
+      },
+    });
+    return true;
+  } catch (err) {
+    // One chunk failing to *start* shouldn't block the rest — log it as a run row so it's
+    // visible in the batch's status rather than only in server logs.
+    await prisma.scoutRun.create({
+      data: {
+        batchId,
+        platform,
+        actorId,
+        apifyRunId: "",
+        datasetId: "",
+        status: "error",
+        handleCount,
+        actorFactors: actorFactors as object,
+        weightEngagement: weights.engagement,
+        weightReach: weights.reach,
+        weightConsistency: weights.consistency,
+        weightContentMix: weights.contentMix,
+        error: err instanceof Error ? err.message : String(err),
+        finishedAt: new Date(),
+      },
+    });
+    return false;
+  }
+}
+
+async function runInBatches<T>(items: T[], concurrency: number, fn: (item: T) => Promise<boolean>) {
+  let started = 0;
+  let failed = 0;
+  for (let i = 0; i < items.length; i += concurrency) {
+    const results = await Promise.all(items.slice(i, i + concurrency).map(fn));
+    for (const ok of results) ok ? started++ : failed++;
+  }
+  return { runsStarted: started, runsFailed: failed };
+}
+
+async function startInstagramRuns(
+  batchId: string,
   handles: string[],
   timeoutMultiplier: number,
 ): Promise<{ runsStarted: number; runsFailed: number }> {
-  const chunkSize = computeChunkSize(batch.postsToAnalyze);
+  const settings = await getScoutSettings("instagram");
+  const chunkSize = igChunkSize(settings.postsToAnalyze!);
   const chunks = chunk(handles, chunkSize);
-  const actorInput: Record<string, unknown> = {
-    postsToAnalyze: batch.postsToAnalyze,
-    postTypeFilter: batch.postTypeFilter,
-    skipPinnedPosts: batch.skipPinnedPosts,
+  const actorFactors: Record<string, unknown> = {
+    postsToAnalyze: settings.postsToAnalyze,
+    postTypeFilter: settings.postTypeFilter,
+    skipPinnedPosts: settings.skipPinnedPosts,
   };
-  if (batch.dateFilter) actorInput.dateFilter = batch.dateFilter;
+  if (settings.dateFilter) actorFactors.dateFilter = settings.dateFilter;
+  const weights = {
+    engagement: settings.weightEngagement,
+    reach: settings.weightReach,
+    consistency: settings.weightConsistency,
+    contentMix: settings.weightContentMix,
+  };
 
-  // Concurrent, not sequential — a deep scan (postsToAnalyze=100) shrinks chunkSize down to
-  // ~6, meaning ~34 separate *start* calls for a 202-account batch. One-at-a-time, each
-  // costing a real HTTP round-trip to Apify, was the other dominant cause (alongside the DB
-  // loop above) of the real production 504: starting a run is a single cheap POST that
-  // returns almost immediately, there's no reason 34 of them can't fire together. Bounded at
-  // 8 concurrent rather than unbounded, out of courtesy to Apify's API rather than any limit
-  // that's actually been hit (their own maxConcurrentActorJobs is 128, confirmed via
-  // /users/me/limits on this account).
-  const CONCURRENCY = 8;
-  let runsStarted = 0;
-  let runsFailed = 0;
+  return runInBatches(chunks, RUN_START_CONCURRENCY, (handleChunk) =>
+    startOneRun(
+      batchId,
+      "instagram",
+      INSTAGRAM_ACTOR_ID,
+      { profiles: handleChunk, ...actorFactors },
+      handleChunk.length,
+      igMaxChargeUsd(handleChunk.length, settings.postsToAnalyze!),
+      igTimeoutSecs(handleChunk.length, settings.postsToAnalyze!) * timeoutMultiplier,
+      actorFactors,
+      weights,
+    ),
+  );
+}
 
-  async function startOneChunk(handleChunk: string[]) {
-    try {
-      const maxChargeUsd = chunkMaxChargeUsd(handleChunk.length, batch.postsToAnalyze);
-      const timeoutSecs = estimateTimeoutSecs(handleChunk.length, batch.postsToAnalyze) * timeoutMultiplier;
-      const run = await runActor(
-        SCOUT_ACTOR_ID,
-        { profiles: handleChunk, ...actorInput },
-        { maxChargeUsd, timeoutSecs },
-      );
-      await prisma.scoutRun.create({
-        data: {
-          batchId,
-          actorId: SCOUT_ACTOR_ID,
-          apifyRunId: run.runId,
-          datasetId: run.datasetId,
-          status: "running",
-          handleCount: handleChunk.length,
-        },
-      });
-      runsStarted++;
-    } catch (err) {
-      // One chunk failing to *start* shouldn't block the rest — log it as a run row so
-      // it's visible in the batch's status rather than only in server logs.
-      await prisma.scoutRun.create({
-        data: {
-          batchId,
-          actorId: SCOUT_ACTOR_ID,
-          apifyRunId: "",
-          datasetId: "",
-          status: "error",
-          handleCount: handleChunk.length,
-          error: err instanceof Error ? err.message : String(err),
-          finishedAt: new Date(),
-        },
-      });
-      runsFailed++;
-    }
-  }
+async function startFacebookRuns(
+  batchId: string,
+  handles: string[],
+  timeoutMultiplier: number,
+): Promise<{ runsStarted: number; runsFailed: number }> {
+  const settings = await getScoutSettings("facebook");
+  const chunks = chunk(handles, FB_CHUNK_SIZE);
+  const weights = {
+    engagement: settings.weightEngagement,
+    reach: settings.weightReach,
+    consistency: settings.weightConsistency,
+    contentMix: settings.weightContentMix,
+  };
 
-  for (let i = 0; i < chunks.length; i += CONCURRENCY) {
-    await Promise.all(chunks.slice(i, i + CONCURRENCY).map(startOneChunk));
-  }
-  return { runsStarted, runsFailed };
+  return runInBatches(chunks, RUN_START_CONCURRENCY, (handleChunk) =>
+    startOneRun(
+      batchId,
+      "facebook",
+      FACEBOOK_ACTOR_ID,
+      { startUrls: handleChunk.map((h) => ({ url: `https://www.facebook.com/${h}` })) },
+      handleChunk.length,
+      fbMaxChargeUsd(handleChunk.length),
+      fbTimeoutSecs(handleChunk.length) * timeoutMultiplier,
+      {},
+      weights,
+    ),
+  );
+}
+
+/**
+ * Kicks off one Apify run per chunk of the batch's candidates, per platform (a batch can
+ * hold both). Returns immediately per run.
+ */
+export async function startScoutRuns(batchId: string): Promise<{ runsStarted: number; runsFailed: number }> {
+  const entries = await prisma.scoutBatchEntry.findMany({ where: { batchId }, include: { candidate: true } });
+  const igHandles = entries.filter((e) => e.candidate.platform === "instagram").map((e) => e.candidate.handle);
+  const fbHandles = entries.filter((e) => e.candidate.platform === "facebook").map((e) => e.candidate.handle);
+
+  const [ig, fb] = await Promise.all([
+    igHandles.length > 0 ? startInstagramRuns(batchId, igHandles, 1) : { runsStarted: 0, runsFailed: 0 },
+    fbHandles.length > 0 ? startFacebookRuns(batchId, fbHandles, 1) : { runsStarted: 0, runsFailed: 0 },
+  ]);
+  return { runsStarted: ig.runsStarted + fb.runsStarted, runsFailed: ig.runsFailed + fb.runsFailed };
 }
 
 /**
@@ -224,9 +306,6 @@ async function startRunsForHandles(
 export async function retryMissingScoutCandidates(
   batchId: string,
 ): Promise<{ retried: number; runsStarted: number; runsFailed: number }> {
-  const batch = await prisma.scoutBatch.findUnique({ where: { id: batchId } });
-  if (!batch) throw new Error(`ScoutBatch ${batchId} not found`);
-
   // Guards against a real race, not just a UI nicety (the batch page only shows the retry
   // button once every run is terminal, but this function is reachable directly via its
   // route regardless) — a candidate with no snapshot yet might just belong to a chunk
@@ -237,28 +316,137 @@ export async function retryMissingScoutCandidates(
     throw new Error(`${stillRunning} run(s) in this batch are still in progress — wait for them to finish before retrying`);
   }
 
+  const runIds = (await prisma.scoutRun.findMany({ where: { batchId }, select: { id: true } })).map((r) => r.id);
   const entries = await prisma.scoutBatchEntry.findMany({
     where: { batchId },
-    include: { candidate: { include: { snapshots: { where: { runId: { in: await runIdsForBatch(batchId) } }, take: 1 } } } },
+    include: { candidate: { include: { snapshots: { where: { runId: { in: runIds } }, take: 1 } } } },
   });
   const missing = entries.filter((e) => e.candidate.snapshots.length === 0);
   if (missing.length === 0) return { retried: 0, runsStarted: 0, runsFailed: 0 };
 
-  const { runsStarted, runsFailed } = await startRunsForHandles(
-    batchId,
-    batch,
-    missing.map((e) => e.candidate.igHandle),
-    RETRY_TIMEOUT_MULTIPLIER,
-  );
-  return { retried: missing.length, runsStarted, runsFailed };
-}
-
-async function runIdsForBatch(batchId: string): Promise<string[]> {
-  const runs = await prisma.scoutRun.findMany({ where: { batchId }, select: { id: true } });
-  return runs.map((r) => r.id);
+  const igHandles = missing.filter((e) => e.candidate.platform === "instagram").map((e) => e.candidate.handle);
+  const fbHandles = missing.filter((e) => e.candidate.platform === "facebook").map((e) => e.candidate.handle);
+  const [ig, fb] = await Promise.all([
+    igHandles.length > 0
+      ? startInstagramRuns(batchId, igHandles, RETRY_TIMEOUT_MULTIPLIER)
+      : { runsStarted: 0, runsFailed: 0 },
+    fbHandles.length > 0
+      ? startFacebookRuns(batchId, fbHandles, RETRY_TIMEOUT_MULTIPLIER)
+      : { runsStarted: 0, runsFailed: 0 },
+  ]);
+  return { retried: missing.length, runsStarted: ig.runsStarted + fb.runsStarted, runsFailed: ig.runsFailed + fb.runsFailed };
 }
 
 const TERMINAL = new Set(["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]);
+
+async function ingestInstagramItem(
+  raw: Record<string, unknown>,
+  runId: string,
+  weights: { engagement: number; reach: number; consistency: number; contentMix: number },
+): Promise<boolean> {
+  const normalized = normalizeScoutItem(raw);
+  if (!normalized.profileUsername) return false; // unattributable row — nothing to link it to
+  const key = profileUrlKey(normalized.profileUsername, "instagram");
+  const candidate = await prisma.scoutCandidate.findUnique({ where: { profileUrlKey: key } });
+  if (!candidate) return false; // shouldn't happen (we only ever send handles we stored), skip defensively
+
+  const score = scoreInfluencer(
+    {
+      followersAvailable: normalized.followersAvailable,
+      followers: normalized.followers,
+      engagementRatePct: normalized.engagementRatePct,
+      consistencyScore01: normalized.consistencyScore01,
+      contentMixClipsPct: normalized.contentMixClipsPct,
+    },
+    weights,
+  );
+
+  const snapshot = await prisma.scoutSnapshot.create({
+    data: {
+      candidateId: candidate.id,
+      runId,
+      followers: normalized.followers,
+      followersAvailable: normalized.followersAvailable,
+      postsAnalyzed: normalized.postsAnalyzed,
+      engagementRatePct: normalized.engagementRatePct,
+      commentRatePct: normalized.commentRatePct,
+      consistencyScore: normalized.consistencyScore01,
+      postingFrequencyPerWeek: normalized.postingFrequencyPerWeek,
+      contentMixClipsPct: normalized.contentMixClipsPct,
+      contentMixCarouselPct: normalized.contentMixCarouselPct,
+      contentMixImagePct: normalized.contentMixImagePct,
+      mostEngagedPostUrl: normalized.mostEngagedPostUrl,
+      note: normalized.note,
+      raw: normalized.raw as object,
+    },
+  });
+  await prisma.scoutScore.create({
+    data: {
+      snapshotId: snapshot.id,
+      buzzFactor: score.buzzFactor,
+      reachScore: score.components.reach,
+      engagementScore: score.components.engagement,
+      consistencyScore: score.components.consistency,
+      contentMixScore: score.components.contentMix,
+    },
+  });
+  return true;
+}
+
+async function ingestFacebookItem(
+  raw: Record<string, unknown>,
+  runId: string,
+  weights: { engagement: number; reach: number; consistency: number; contentMix: number },
+): Promise<boolean> {
+  const normalized = normalizeFacebookScoutItem(raw);
+  if (!normalized.pageUsername) return false;
+  const key = profileUrlKey(normalized.pageUsername, "facebook");
+  const candidate = await prisma.scoutCandidate.findUnique({ where: { profileUrlKey: key } });
+  if (!candidate) return false;
+
+  // No post-level data at all (page-only scan) — engagementRatePct is a proxy from
+  // Facebook's own "talking about this" figure, not a likes/comments-based rate; consistency
+  // and content-mix are always null here and get excluded from scoring, not faked.
+  const engagementRatePct =
+    normalized.talkingAbout !== null && normalized.followers
+      ? (normalized.talkingAbout / normalized.followers) * 100
+      : null;
+
+  const score = scoreInfluencer(
+    {
+      followersAvailable: normalized.followersAvailable,
+      followers: normalized.followers,
+      engagementRatePct,
+      consistencyScore01: null,
+      contentMixClipsPct: null,
+    },
+    weights,
+  );
+
+  const snapshot = await prisma.scoutSnapshot.create({
+    data: {
+      candidateId: candidate.id,
+      runId,
+      followers: normalized.followers,
+      followersAvailable: normalized.followersAvailable,
+      postsAnalyzed: 0,
+      engagementRatePct,
+      note: normalized.note,
+      raw: normalized.raw as object,
+    },
+  });
+  await prisma.scoutScore.create({
+    data: {
+      snapshotId: snapshot.id,
+      buzzFactor: score.buzzFactor,
+      reachScore: score.components.reach,
+      engagementScore: score.components.engagement,
+      consistencyScore: score.components.consistency,
+      contentMixScore: score.components.contentMix,
+    },
+  });
+  return true;
+}
 
 /**
  * Cron entry point — checks every non-terminal ScoutRun, ingests any that finished. Never
@@ -266,10 +454,7 @@ const TERMINAL = new Set(["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"]);
  * still going just gets checked again on the next tick.
  */
 export async function pollAndIngestScoutRuns(): Promise<{ checked: number; ingested: number; errored: number }> {
-  const pending = await prisma.scoutRun.findMany({
-    where: { status: { in: ["queued", "running"] } },
-    include: { batch: true },
-  });
+  const pending = await prisma.scoutRun.findMany({ where: { status: { in: ["queued", "running"] } } });
   let ingested = 0;
   let errored = 0;
 
@@ -281,73 +466,27 @@ export async function pollAndIngestScoutRuns(): Promise<{ checked: number; inges
 
       // Read the dataset regardless of terminal status, not only on SUCCEEDED — confirmed
       // live (2026-08-18) that a TIMED-OUT run had already written 43 items ($0.37 already
-      // spent) that the old "SUCCEEDED-only" read silently discarded, forcing a full
-      // re-scan of every handle in that chunk at 2x cost. Apify writes dataset items
-      // incrementally as each profile finishes, so a run that dies partway through still
-      // has real, already-paid-for results worth keeping. Marked "error" below (not "done")
+      // spent) that an old "SUCCEEDED-only" read would have silently discarded, forcing a
+      // full re-scan of every handle in that chunk at 2x cost. Apify writes dataset items
+      // incrementally as each profile finishes, so a run that dies partway through still has
+      // real, already-paid-for results worth keeping. Marked "error" below (not "done")
       // whenever the status wasn't a clean SUCCEEDED, so retryMissingScoutCandidates still
       // picks up whichever handles in this chunk didn't make it into the dataset — just no
       // longer re-scanning ones that did.
       const items = await getDatasetItems<Record<string, unknown>>(status.datasetId);
+      const weights = {
+        engagement: run.weightEngagement,
+        reach: run.weightReach,
+        consistency: run.weightConsistency,
+        contentMix: run.weightContentMix,
+      };
+      const ingestItem = run.platform === "facebook" ? ingestFacebookItem : ingestInstagramItem;
       for (const raw of items) {
-        const normalized = normalizeScoutItem(raw);
-        if (!normalized.profileUsername) continue; // unattributable row — nothing to link it to
-        const key = profileUrlKey(normalized.profileUsername);
-        const candidate = await prisma.scoutCandidate.findUnique({ where: { profileUrlKey: key } });
-        if (!candidate) continue; // shouldn't happen (we only ever send handles we stored), skip defensively
-
-        const score = scoreInfluencer(
-          {
-            followersAvailable: normalized.followersAvailable,
-            followers: normalized.followers,
-            engagementRatePct: normalized.engagementRatePct,
-            consistencyScore01: normalized.consistencyScore01,
-            contentMixClipsPct: normalized.contentMixClipsPct,
-          },
-          {
-            engagement: run.batch.weightEngagement,
-            reach: run.batch.weightReach,
-            consistency: run.batch.weightConsistency,
-            contentMix: run.batch.weightContentMix,
-          },
-        );
-
-        const snapshot = await prisma.scoutSnapshot.create({
-          data: {
-            candidateId: candidate.id,
-            runId: run.id,
-            followers: normalized.followers,
-            followersAvailable: normalized.followersAvailable,
-            postsAnalyzed: normalized.postsAnalyzed,
-            engagementRatePct: normalized.engagementRatePct,
-            commentRatePct: normalized.commentRatePct,
-            consistencyScore: normalized.consistencyScore01,
-            postingFrequencyPerWeek: normalized.postingFrequencyPerWeek,
-            contentMixClipsPct: normalized.contentMixClipsPct,
-            contentMixCarouselPct: normalized.contentMixCarouselPct,
-            contentMixImagePct: normalized.contentMixImagePct,
-            mostEngagedPostUrl: normalized.mostEngagedPostUrl,
-            note: normalized.note,
-            raw: normalized.raw as object,
-          },
-        });
-        await prisma.scoutScore.create({
-          data: {
-            snapshotId: snapshot.id,
-            buzzFactor: score.buzzFactor,
-            reachScore: score.components.reach,
-            engagementScore: score.components.engagement,
-            consistencyScore: score.components.consistency,
-            contentMixScore: score.components.contentMix,
-          },
-        });
+        await ingestItem(raw, run.id, weights);
       }
 
       if (status.status === "SUCCEEDED") {
-        await prisma.scoutRun.update({
-          where: { id: run.id },
-          data: { status: "done", finishedAt: new Date() },
-        });
+        await prisma.scoutRun.update({ where: { id: run.id }, data: { status: "done", finishedAt: new Date() } });
         ingested++;
       } else {
         // Still "error" (not "done") even though items may have been salvaged above — the
@@ -374,6 +513,7 @@ export async function pollAndIngestScoutRuns(): Promise<{ checked: number; inges
 
 export interface ScoutLeaderboardRow {
   candidateId: string;
+  platform: ScoutPlatform;
   handle: string;
   suppliedName: string | null;
   deliverable: string | null;
@@ -408,7 +548,8 @@ export async function getScoutLeaderboard(batchId: string): Promise<ScoutLeaderb
     const snapshot = e.candidate.snapshots[0] ?? null;
     return {
       candidateId: e.candidateId,
-      handle: e.candidate.igHandle,
+      platform: e.candidate.platform,
+      handle: e.candidate.handle,
       suppliedName: e.suppliedName,
       deliverable: e.deliverable,
       rowNumber: e.rowNumber,
@@ -441,6 +582,7 @@ export async function getScoutLeaderboard(batchId: string): Promise<ScoutLeaderb
 }
 
 export interface ScoutRawRow {
+  platform: ScoutPlatform;
   handle: string;
   suppliedName: string | null;
   deliverable: string | null;
@@ -475,7 +617,8 @@ export async function getScoutRawRows(batchId: string): Promise<ScoutRawRow[]> {
   return entries.map((e) => {
     const s = e.candidate.snapshots[0] ?? null;
     return {
-      handle: e.candidate.igHandle,
+      platform: e.candidate.platform,
+      handle: e.candidate.handle,
       suppliedName: e.suppliedName,
       deliverable: e.deliverable,
       buzzFactor: s?.score?.buzzFactor ?? null,
@@ -565,25 +708,30 @@ export async function setScoutBatchArchived(batchId: string, archived: boolean):
 
 /**
  * Re-scores a batch's existing snapshots against the *current* Buzz Factor weights — no new
- * Apify run, no new cost. Distinct from the "actor factors are frozen per batch, never
+ * Apify run, no new cost. Distinct from the "actor factors are frozen per run, never
  * retroactively changed" guarantee elsewhere in this file: that guarantee is about what got
- * scraped (postsToAnalyze etc, which would need real money to redo), not about how already-
- * scraped numbers get combined into a score. Re-weighting stored data with a better-
- * calibrated formula is exactly what this is for — an explicit, opt-in action (never
- * automatic on a settings save), so a batch's leaderboard only changes when someone
- * deliberately asks it to. Updates the batch's own weight snapshot afterward so it stays an
- * honest record of what its current scores were actually computed with.
+ * scraped (real money to redo), not about how already-scraped numbers get combined into a
+ * score. Re-weighting stored data with a better-calibrated formula is exactly what this is
+ * for — an explicit, opt-in action (never automatic on a settings save), so a batch's
+ * leaderboard only changes when someone deliberately asks it to. Each candidate is
+ * re-weighted using *its own platform's* current settings — a mixed-platform batch doesn't
+ * get one global weight set applied to everyone.
  */
 export async function recomputeScoutScores(batchId: string): Promise<{ rescored: number }> {
-  const batch = await prisma.scoutBatch.findUnique({ where: { id: batchId } });
-  if (!batch) throw new Error(`ScoutBatch ${batchId} not found`);
-
-  const settings = await getScoutSettings();
-  const weights = {
-    engagement: settings.weightEngagement,
-    reach: settings.weightReach,
-    consistency: settings.weightConsistency,
-    contentMix: settings.weightContentMix,
+  const [igSettings, fbSettings] = await Promise.all([getScoutSettings("instagram"), getScoutSettings("facebook")]);
+  const weightsByPlatform: Record<ScoutPlatform, { engagement: number; reach: number; consistency: number; contentMix: number }> = {
+    instagram: {
+      engagement: igSettings.weightEngagement,
+      reach: igSettings.weightReach,
+      consistency: igSettings.weightConsistency,
+      contentMix: igSettings.weightContentMix,
+    },
+    facebook: {
+      engagement: fbSettings.weightEngagement,
+      reach: fbSettings.weightReach,
+      consistency: fbSettings.weightConsistency,
+      contentMix: fbSettings.weightContentMix,
+    },
   };
 
   const entries = await prisma.scoutBatchEntry.findMany({
@@ -604,7 +752,7 @@ export async function recomputeScoutScores(batchId: string): Promise<{ rescored:
         consistencyScore01: snapshot.consistencyScore,
         contentMixClipsPct: snapshot.contentMixClipsPct,
       },
-      weights,
+      weightsByPlatform[entry.candidate.platform],
     );
 
     await prisma.scoutScore.upsert({
@@ -628,16 +776,6 @@ export async function recomputeScoutScores(batchId: string): Promise<{ rescored:
     });
     rescored++;
   }
-
-  await prisma.scoutBatch.update({
-    where: { id: batchId },
-    data: {
-      weightEngagement: weights.engagement,
-      weightReach: weights.reach,
-      weightConsistency: weights.consistency,
-      weightContentMix: weights.contentMix,
-    },
-  });
 
   return { rescored };
 }

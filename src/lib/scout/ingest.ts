@@ -1,6 +1,6 @@
-// Scoutline ingestion: turns an uploaded PDF or Excel/CSV sheet of Instagram links into a
-// flat, deduped candidate list. Both parsers converge on the same ParsedCandidate shape so
-// nothing downstream cares which file format a batch came from.
+// Scoutline ingestion: turns an uploaded PDF or Excel/CSV sheet of Instagram/Facebook links
+// into a flat, deduped candidate list. Both parsers converge on the same ParsedCandidate
+// shape so nothing downstream cares which file format a batch came from.
 //
 // PDF layout confirmed against a live extraction (2026-08-17) of the real "BKU X
 // Snakeplant.pdf" influencer list: a narrow-column table exported to PDF (Google
@@ -17,10 +17,16 @@
 // has no tab prefixes at all, so the parser below is anchored on the URL block itself
 // (a line starting "https" through the line ending STORY/REEL) rather than on indentation —
 // robust to either extractor's exact whitespace, not just the one currently in use.
+//
+// Facebook support added 2026-08-18 — platform is detected from the URL's domain itself
+// (instagram.com vs facebook.com), not a separate column, so an existing source file with
+// only Instagram links needs no changes to keep working exactly as before.
+import type { ScoutPlatform } from "@prisma/client";
 
 export interface ParsedCandidate {
   rowNumber: number | null;
   name: string | null;
+  platform: ScoutPlatform;
   handle: string;
   profileUrl: string;
   deliverable: string | null;
@@ -28,18 +34,47 @@ export interface ParsedCandidate {
 
 export interface ParseResult {
   candidates: ParsedCandidate[];
-  // Rows the file appeared to contain vs rows that yielded a usable Instagram handle —
-  // reported so a bad parse (e.g. a scanned-image PDF with no text layer) fails loudly
-  // instead of silently ingesting a handful of 200 rows. See client.ts's own "never let a
-  // shortfall go unnoticed" precedent.
+  // Rows the file appeared to contain vs rows that yielded a usable link — reported so a
+  // bad parse (e.g. a scanned-image PDF with no text layer) fails loudly instead of silently
+  // ingesting a handful of 200 rows. See client.ts's own "never let a shortfall go
+  // unnoticed" precedent.
   rowsFound: number;
   rowsParsed: number;
 }
 
+interface PlatformHandleMatch {
+  platform: ScoutPlatform;
+  handle: string;
+}
+
+// Facebook path segments that are never a page/profile identifier — without this guard,
+// e.g. "facebook.com/pages/Some-Movie/12345" would extract "pages" as the handle.
+const FB_RESERVED_SEGMENTS = new Set(["pages", "profile.php", "groups", "watch", "events", "marketplace", "people"]);
+
+/** Finds the first Instagram or Facebook profile/page link in `text` and extracts its
+ * platform + handle. Instagram takes priority if a string somehow contains both. */
+function extractPlatformHandle(text: string): PlatformHandleMatch | null {
+  const ig = text.match(/instagram\.com\/([A-Za-z0-9_.]+?)(?:[/?]|$)/i);
+  if (ig) return { platform: "instagram", handle: ig[1] };
+
+  const fbProfileId = text.match(/facebook\.com\/profile\.php\?id=(\d+)/i);
+  if (fbProfileId) return { platform: "facebook", handle: fbProfileId[1] };
+
+  const fbPagesId = text.match(/facebook\.com\/pages\/[^/?]+\/(\d+)/i);
+  if (fbPagesId) return { platform: "facebook", handle: fbPagesId[1] };
+
+  const fb = text.match(/facebook\.com\/([A-Za-z0-9_.]+?)(?:[/?]|$)/i);
+  if (fb && !FB_RESERVED_SEGMENTS.has(fb[1].toLowerCase())) return { platform: "facebook", handle: fb[1] };
+
+  return null;
+}
+
 /**
  * A user typing one or a few links/handles directly, one per line (commas also accepted) —
- * no name/deliverable column to read, so those come back null. Same dedup + shortfall
- * reporting as the file parsers so a stray non-Instagram line doesn't silently vanish.
+ * no name/deliverable column to read, so those come back null. Bare handles (no domain) are
+ * assumed Instagram, since that's the only platform with a "just type the handle" shorthand
+ * in practice — a Facebook page is only ever recognizable from its URL. Same dedup +
+ * shortfall reporting as the file parsers so a stray non-link line doesn't silently vanish.
  */
 export function parseInfluencerManualText(text: string): ParseResult {
   const tokens = text
@@ -51,18 +86,23 @@ export function parseInfluencerManualText(text: string): ParseResult {
   const seen = new Set<string>();
 
   for (const token of tokens) {
-    // A bare word with no "instagram.com" and no plausible handle characters isn't a
-    // link or a handle — profileUrlKey falls back to the raw token verbatim in that case,
-    // so guard against garbage being treated as a real account.
-    if (!/instagram\.com/i.test(token) && !/^[A-Za-z0-9_.]+$/.test(token)) continue;
-    const key = profileUrlKey(token);
-    if (!key || seen.has(key)) continue;
+    const match = extractPlatformHandle(token);
+    const platform: ScoutPlatform = match?.platform ?? "instagram";
+    const rawHandle = match?.handle ?? token;
+    // A bare word that isn't a recognized link and doesn't even look like a plausible
+    // handle isn't worth treating as a real account.
+    if (!match && !/^[A-Za-z0-9_.]+$/.test(token)) continue;
+
+    const handle = rawHandle.trim().toLowerCase().replace(/\.+$/, "");
+    const key = profileUrlKey(handle, platform);
+    if (seen.has(key)) continue;
     seen.add(key);
     candidates.push({
       rowNumber: null,
       name: null,
-      handle: key,
-      profileUrl: `https://www.instagram.com/${key}/`,
+      platform,
+      handle,
+      profileUrl: profileUrl(platform, handle),
       deliverable: null,
     });
   }
@@ -70,11 +110,18 @@ export function parseInfluencerManualText(text: string): ParseResult {
   return { candidates, rowsFound: tokens.length, rowsParsed: candidates.length };
 }
 
-/** Normalized dedup key for an Instagram handle or URL — lowercased, no trailing punctuation. */
-export function profileUrlKey(handleOrUrl: string): string {
-  const m = handleOrUrl.match(/instagram\.com\/([A-Za-z0-9_.]+)/i);
-  const handle = m ? m[1] : handleOrUrl;
-  return handle.trim().toLowerCase().replace(/\.+$/, "");
+/** Normalized dedup key for an Instagram/Facebook handle or URL — platform-prefixed
+ * ("instagram:somehandle") since a bare handle string alone isn't unique once two
+ * platforms are in play. */
+export function profileUrlKey(handleOrUrl: string, platform: ScoutPlatform = "instagram"): string {
+  const match = extractPlatformHandle(handleOrUrl);
+  const resolvedPlatform = match?.platform ?? platform;
+  const handle = (match?.handle ?? handleOrUrl).trim().toLowerCase().replace(/\.+$/, "");
+  return `${resolvedPlatform}:${handle}`;
+}
+
+function profileUrl(platform: ScoutPlatform, handle: string): string {
+  return platform === "facebook" ? `https://www.facebook.com/${handle}/` : `https://www.instagram.com/${handle}/`;
 }
 
 function isTitleOrHeaderLine(line: string): boolean {
@@ -101,27 +148,37 @@ export function parseInfluencerListText(text: string): ParseResult {
   let rowsFound = 0;
 
   const finalizeRecord = () => {
-    const block = urlBuf.join("").replace(/\s+/g, "");
+    // Deliverable extracted BEFORE whitespace-stripping, and stripped back out of the block
+    // used for handle extraction — an Instagram link always has a "?igsh=..." query string
+    // after the handle (from IG's mobile share-link format) so a glued-on "REEL"/"STORY"
+    // past that "?" never touched the handle match. A bare Facebook URL has no such
+    // terminator, so blanket-stripping all whitespace could glue a trailing deliverable
+    // word directly onto the handle (confirmed by a failing test, not a hypothetical).
+    const deliverableMatch = urlBuf.join(" ").match(/(STORY|REEL)\s*$/i);
+    const block = urlBuf
+      .join("")
+      .replace(/\s+/g, "")
+      .replace(/(STORY|REEL)$/i, "");
     const headerLine = headerBuf.join(" ").trim();
     headerBuf = [];
     urlBuf = [];
     inUrl = false;
 
-    const handleMatch = block.match(/instagram\.com\/([A-Za-z0-9_.]+?)(?:\?|$)/i);
-    if (!handleMatch) return; // no usable link in this row — excluded from rowsParsed
+    const match = extractPlatformHandle(block);
+    if (!match) return; // no usable link in this row — excluded from rowsParsed
 
-    const key = profileUrlKey(handleMatch[1]);
+    const key = profileUrlKey(match.handle, match.platform);
     if (seen.has(key)) return; // same account listed twice in one file — first row wins
     seen.add(key);
 
     const numMatch = headerLine.match(/^(\d{1,4})\s+(.*)$/);
-    const deliverableMatch = block.match(/(STORY|REEL)$/i);
 
     candidates.push({
       rowNumber: numMatch ? Number(numMatch[1]) : null,
       name: (numMatch ? numMatch[2] : headerLine).trim() || null,
-      handle: key,
-      profileUrl: `https://www.instagram.com/${key}/`,
+      platform: match.platform,
+      handle: match.handle.toLowerCase(),
+      profileUrl: profileUrl(match.platform, match.handle),
       deliverable: deliverableMatch ? deliverableMatch[1].toUpperCase() : null,
     });
   };
@@ -180,8 +237,8 @@ export async function parseInfluencerPdf(buffer: Buffer): Promise<ParseResult> {
 
 /**
  * Excel/CSV variant. Looks for a header row containing NAME/LINK-ish columns first (matches
- * the PDF's own column names); falls back to "whichever column has an instagram.com URL in
- * it" if no recognizable header exists, so a plain single-column list of links still works.
+ * the PDF's own column names); falls back to "whichever column has a recognized link in it"
+ * if no recognizable header exists, so a plain single-column list of links still works.
  */
 export async function parseInfluencerExcel(buffer: Buffer): Promise<ParseResult> {
   const XLSX = await import("xlsx");
@@ -198,7 +255,7 @@ export async function parseInfluencerExcel(buffer: Buffer): Promise<ParseResult>
 
   for (let i = 0; i < Math.min(rows.length, 5); i++) {
     const row = rows[i];
-    const li = row.findIndex((c) => isHeaderCell(c, /^link$|instagram/i));
+    const li = row.findIndex((c) => isHeaderCell(c, /^link$|instagram|facebook/i));
     if (li === -1) continue;
     headerRowIdx = i;
     linkCol = li;
@@ -216,20 +273,21 @@ export async function parseInfluencerExcel(buffer: Buffer): Promise<ParseResult>
   for (const row of dataRows) {
     // No recognized header: scan every cell in the row for a link instead of a fixed column.
     const cells = row.map((c) => String(c ?? ""));
-    const linkCell =
-      linkCol >= 0 ? cells[linkCol] : cells.find((c) => /instagram\.com/i.test(c));
-    if (!linkCell || !/instagram\.com/i.test(linkCell)) continue;
+    const linkCell = linkCol >= 0 ? cells[linkCol] : cells.find((c) => extractPlatformHandle(c) !== null);
+    const match = linkCell ? extractPlatformHandle(linkCell) : null;
+    if (!match) continue;
     rowsFound++;
 
-    const key = profileUrlKey(linkCell);
-    if (!key || seen.has(key)) continue;
+    const key = profileUrlKey(match.handle, match.platform);
+    if (seen.has(key)) continue;
     seen.add(key);
 
     candidates.push({
       rowNumber: numCol >= 0 ? Number(cells[numCol]) || null : null,
       name: nameCol >= 0 ? cells[nameCol].trim() || null : null,
-      handle: key,
-      profileUrl: `https://www.instagram.com/${key}/`,
+      platform: match.platform,
+      handle: match.handle.toLowerCase(),
+      profileUrl: profileUrl(match.platform, match.handle),
       deliverable: deliverableCol >= 0 ? cells[deliverableCol].trim().toUpperCase() || null : null,
     });
   }
