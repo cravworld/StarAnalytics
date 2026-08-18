@@ -22,6 +22,7 @@ import { prisma } from "@/lib/prisma";
 import { scoreInfluencer } from "@/lib/scoring/scoreInfluencer";
 import { getScoutSettings } from "@/lib/data/scoutSettings";
 import { profileUrlKey, type ParsedCandidate } from "@/lib/scout/ingest";
+import { tryAcquireCronLock, releaseCronLock } from "@/lib/cronLock";
 
 // 2026-08-17 direction: Instagram's single actor is the whole pipeline for that platform —
 // no separate profile/post/comment-scraper pass, no authenticity component. Overridable so
@@ -528,67 +529,106 @@ async function ingestFacebookItem(
   return true;
 }
 
+const POLL_LOCK_NAME = "poll-scout-runs";
+// Matches the route's own maxDuration (300s) + a buffer — same reasoning as
+// backfill-comment-sentiment's lock TTL: if this invocation is killed rather than returning,
+// the TTL (not the finally block) is what recovers the lock for the next tick.
+const POLL_LOCK_TTL_SECONDS = 300 + 60;
+
+// Bounded concurrency for polling+ingesting pending runs, not the previous one-at-a-time
+// loop. Real cause, confirmed live 2026-08-18: two batches landing close together put 100
+// runs in "queued"/"running" at once; checking + ingesting them sequentially was itself slow
+// enough that a single tick could outlast the 2-minute cron interval, and — because this
+// route had no overlap guard until the fix below — that let Vercel fire a second invocation
+// on top of the first, both racing over the same pending set. Same courtesy-not-limit
+// reasoning as RUN_START_CONCURRENCY.
+const POLL_CONCURRENCY = 8;
+
+async function pollOneRun(
+  run: { id: string; apifyRunId: string; platform: ScoutPlatform; weightEngagement: number; weightReach: number; weightConsistency: number; weightContentMix: number },
+): Promise<"ingested" | "errored" | "skipped"> {
+  if (!run.apifyRunId) return "skipped"; // failed-to-start rows are already terminal (status "error")
+  try {
+    const status = await getRunStatus(run.apifyRunId);
+    if (!TERMINAL.has(status.status)) return "skipped";
+
+    // Read the dataset regardless of terminal status, not only on SUCCEEDED — confirmed
+    // live (2026-08-18) that a TIMED-OUT run had already written 43 items ($0.37 already
+    // spent) that an old "SUCCEEDED-only" read would have silently discarded, forcing a
+    // full re-scan of every handle in that chunk at 2x cost. Apify writes dataset items
+    // incrementally as each profile finishes, so a run that dies partway through still has
+    // real, already-paid-for results worth keeping. Marked "error" below (not "done")
+    // whenever the status wasn't a clean SUCCEEDED, so retryMissingScoutCandidates still
+    // picks up whichever handles in this chunk didn't make it into the dataset — just no
+    // longer re-scanning ones that did.
+    const items = await getDatasetItems<Record<string, unknown>>(status.datasetId);
+    const weights = {
+      engagement: run.weightEngagement,
+      reach: run.weightReach,
+      consistency: run.weightConsistency,
+      contentMix: run.weightContentMix,
+    };
+    const ingestItem = run.platform === "facebook" ? ingestFacebookItem : ingestInstagramItem;
+    for (const raw of items) {
+      await ingestItem(raw, run.id, weights);
+    }
+
+    if (status.status === "SUCCEEDED") {
+      await prisma.scoutRun.update({ where: { id: run.id }, data: { status: "done", finishedAt: new Date() } });
+      return "ingested";
+    } else {
+      // Still "error" (not "done") even though items may have been salvaged above — the
+      // run itself didn't finish cleanly, and any handle in this chunk that never made it
+      // into the dataset needs the retry path, not to be silently treated as complete.
+      await prisma.scoutRun.update({
+        where: { id: run.id },
+        data: {
+          status: "error",
+          error: `Apify run ended ${status.status} — salvaged ${items.length} item(s) from its dataset before marking it errored`,
+          finishedAt: new Date(),
+        },
+      });
+      return "errored";
+    }
+  } catch (err) {
+    // A poll/ingest failure on one run must not block the others in this tick.
+    console.error(`Scoutline: failed to ingest run ${run.id}:`, err);
+    return "skipped";
+  }
+}
+
 /**
  * Cron entry point — checks every non-terminal ScoutRun, ingests any that finished. Never
  * waits on a run itself (that's what orphaned the client.ts comment-scrape runs); a run
  * still going just gets checked again on the next tick.
+ *
+ * Lock-guarded (2026-08-18 fix) — without this, a big-enough backlog made one tick slow
+ * enough to still be running when the next tick fired, and two overlapping invocations would
+ * both see the same runs as newly-terminal and both ingest them: confirmed live, 3,129
+ * duplicate ScoutSnapshot rows from exactly this race. A tick that finds the lock held just
+ * returns a no-op result rather than erroring — same as backfill-comment-sentiment's pattern.
  */
 export async function pollAndIngestScoutRuns(): Promise<{ checked: number; ingested: number; errored: number }> {
-  const pending = await prisma.scoutRun.findMany({ where: { status: { in: ["queued", "running"] } } });
-  let ingested = 0;
-  let errored = 0;
-
-  for (const run of pending) {
-    if (!run.apifyRunId) continue; // failed-to-start rows are already terminal (status "error")
-    try {
-      const status = await getRunStatus(run.apifyRunId);
-      if (!TERMINAL.has(status.status)) continue;
-
-      // Read the dataset regardless of terminal status, not only on SUCCEEDED — confirmed
-      // live (2026-08-18) that a TIMED-OUT run had already written 43 items ($0.37 already
-      // spent) that an old "SUCCEEDED-only" read would have silently discarded, forcing a
-      // full re-scan of every handle in that chunk at 2x cost. Apify writes dataset items
-      // incrementally as each profile finishes, so a run that dies partway through still has
-      // real, already-paid-for results worth keeping. Marked "error" below (not "done")
-      // whenever the status wasn't a clean SUCCEEDED, so retryMissingScoutCandidates still
-      // picks up whichever handles in this chunk didn't make it into the dataset — just no
-      // longer re-scanning ones that did.
-      const items = await getDatasetItems<Record<string, unknown>>(status.datasetId);
-      const weights = {
-        engagement: run.weightEngagement,
-        reach: run.weightReach,
-        consistency: run.weightConsistency,
-        contentMix: run.weightContentMix,
-      };
-      const ingestItem = run.platform === "facebook" ? ingestFacebookItem : ingestInstagramItem;
-      for (const raw of items) {
-        await ingestItem(raw, run.id, weights);
-      }
-
-      if (status.status === "SUCCEEDED") {
-        await prisma.scoutRun.update({ where: { id: run.id }, data: { status: "done", finishedAt: new Date() } });
-        ingested++;
-      } else {
-        // Still "error" (not "done") even though items may have been salvaged above — the
-        // run itself didn't finish cleanly, and any handle in this chunk that never made it
-        // into the dataset needs the retry path, not to be silently treated as complete.
-        await prisma.scoutRun.update({
-          where: { id: run.id },
-          data: {
-            status: "error",
-            error: `Apify run ended ${status.status} — salvaged ${items.length} item(s) from its dataset before marking it errored`,
-            finishedAt: new Date(),
-          },
-        });
-        errored++;
-      }
-    } catch (err) {
-      // A poll/ingest failure on one run must not block the others in this tick.
-      console.error(`Scoutline: failed to ingest run ${run.id}:`, err);
-    }
+  if (!(await tryAcquireCronLock(POLL_LOCK_NAME, POLL_LOCK_TTL_SECONDS))) {
+    return { checked: 0, ingested: 0, errored: 0 };
   }
+  try {
+    const pending = await prisma.scoutRun.findMany({ where: { status: { in: ["queued", "running"] } } });
+    let ingested = 0;
+    let errored = 0;
 
-  return { checked: pending.length, ingested, errored };
+    for (const runChunk of chunk(pending, POLL_CONCURRENCY)) {
+      const results = await Promise.all(runChunk.map(pollOneRun));
+      for (const r of results) {
+        if (r === "ingested") ingested++;
+        else if (r === "errored") errored++;
+      }
+    }
+
+    return { checked: pending.length, ingested, errored };
+  } finally {
+    await releaseCronLock(POLL_LOCK_NAME);
+  }
 }
 
 export interface ScoutLeaderboardRow {
