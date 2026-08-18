@@ -5,9 +5,14 @@ import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
 import { ScoutDataTable } from "@/components/scout/ScoutDataTable";
 import type { ScoutLeaderboardRow, ScoutRawRow } from "@/lib/data/scout";
+import type { ScoutPlatform } from "@prisma/client";
 
 const rankClass = (i: number) => (i === 0 ? "r1" : i === 1 ? "r2" : i === 2 ? "r3" : "");
 const scoreColor = (s: number) => (s >= 70 ? "#1a7a4a" : s >= 40 ? "#b45309" : "#b71c1c");
+const profileUrl = (platform: ScoutPlatform, handle: string) =>
+  platform === "facebook" ? `https://www.facebook.com/${handle}/` : `https://www.instagram.com/${handle}/`;
+
+const PLATFORM_LABEL: Record<ScoutPlatform, string> = { instagram: "Instagram", facebook: "Facebook" };
 
 export function ScoutLeaderboardFilterable({ rows, rawRows }: { rows: ScoutLeaderboardRow[]; rawRows: ScoutRawRow[] }) {
   const [view, setView] = useState<"leaderboard" | "table">("leaderboard");
@@ -29,6 +34,17 @@ export function ScoutLeaderboardFilterable({ rows, rawRows }: { rows: ScoutLeade
     () => rawRows.filter((r) => matches(r.handle, r.suppliedName, r.deliverable)),
     [rawRows, search, deliverable],
   );
+
+  // Batches can mix platforms (a combined Excel upload can carry both Instagram and
+  // Facebook links) — scores aren't comparable across platforms (different actors,
+  // different weight defaults, Facebook has no per-post reach/engagement data at all), so
+  // each platform gets its own independently-ranked section rather than one mixed list.
+  // A single-platform batch still shows just its one section, unchanged from before.
+  const platformsPresent = useMemo(() => {
+    const set = new Set<ScoutPlatform>(rows.map((r) => r.platform));
+    const order: ScoutPlatform[] = ["instagram", "facebook"];
+    return order.filter((p) => set.has(p));
+  }, [rows]);
 
   return (
     <>
@@ -56,52 +72,69 @@ export function ScoutLeaderboardFilterable({ rows, rawRows }: { rows: ScoutLeade
       </div>
 
       {view === "leaderboard" ? (
-        <Card title="Buzz Factor Leaderboard">
-          {filteredRows.length === 0 ? (
+        filteredRows.length === 0 ? (
+          <Card title="Buzz Factor Leaderboard">
             <div style={{ color: "var(--muted)", textAlign: "center", padding: "16px 0" }}>
               {rows.length === 0 ? "No accounts in this batch." : "No accounts match this filter."}
             </div>
-          ) : (
-            filteredRows.map((r, i) => (
-              <div className="lb-row" key={r.candidateId}>
-                <div className={`lb-rank ${rankClass(i)}`}>{r.buzzFactor !== null ? i + 1 : "–"}</div>
-                <div className="lb-body">
-                  <div className="lb-name">
-                    <a href={`https://www.instagram.com/${r.handle}/`} target="_blank" rel="noreferrer">
-                      @{r.handle}
-                    </a>
-                    {r.suppliedName ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>{r.suppliedName}</span> : null}
-                    {r.deliverable ? <Pill kind="default">{r.deliverable}</Pill> : null}
-                  </div>
-                  {r.buzzFactor !== null ? (
-                    <>
-                      <div className="lb-bar-track">
-                        <div className="lb-bar-fill" style={{ width: `${r.buzzFactor}%`, background: scoreColor(r.buzzFactor) }} />
+          </Card>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {platformsPresent.map((platform) => {
+              const sectionRows = filteredRows.filter((r) => r.platform === platform);
+              if (sectionRows.length === 0) return null;
+              return (
+                <Card
+                  key={platform}
+                  title={
+                    platformsPresent.length > 1
+                      ? `${PLATFORM_LABEL[platform]} Leaderboard (${sectionRows.length})`
+                      : "Buzz Factor Leaderboard"
+                  }
+                >
+                  {sectionRows.map((r, i) => (
+                    <div className="lb-row" key={r.candidateId}>
+                      <div className={`lb-rank ${rankClass(i)}`}>{r.buzzFactor !== null ? i + 1 : "–"}</div>
+                      <div className="lb-body">
+                        <div className="lb-name">
+                          <a href={profileUrl(r.platform, r.handle)} target="_blank" rel="noreferrer">
+                            @{r.handle}
+                          </a>
+                          {r.suppliedName ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>{r.suppliedName}</span> : null}
+                          {r.deliverable ? <Pill kind="default">{r.deliverable}</Pill> : null}
+                        </div>
+                        {r.buzzFactor !== null ? (
+                          <>
+                            <div className="lb-bar-track">
+                              <div className="lb-bar-fill" style={{ width: `${r.buzzFactor}%`, background: scoreColor(r.buzzFactor) }} />
+                            </div>
+                            <div className="lb-meta">
+                              {r.followers !== null ? <span>Followers <strong>{r.followers.toLocaleString()}</strong></span> : null}
+                              {r.engagementRatePct !== null ? (
+                                <span>Engagement <strong>{r.engagementRatePct.toFixed(1)}%</strong></span>
+                              ) : null}
+                              {r.components ? (
+                                <span>
+                                  Reach {r.components.reach ?? "–"} · Consistency {r.components.consistency ?? "–"} · Content mix {r.components.contentMix ?? "–"}
+                                </span>
+                              ) : null}
+                              {r.note ? <span style={{ color: "var(--amber)" }}>{r.note}</span> : null}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="lb-meta">Scan in progress…</div>
+                        )}
                       </div>
-                      <div className="lb-meta">
-                        {r.followers !== null ? <span>Followers <strong>{r.followers.toLocaleString()}</strong></span> : null}
-                        {r.engagementRatePct !== null ? (
-                          <span>Engagement <strong>{r.engagementRatePct.toFixed(1)}%</strong></span>
-                        ) : null}
-                        {r.components ? (
-                          <span>
-                            Reach {r.components.reach ?? "–"} · Consistency {r.components.consistency ?? "–"} · Content mix {r.components.contentMix ?? "–"}
-                          </span>
-                        ) : null}
-                        {r.note ? <span style={{ color: "var(--amber)" }}>{r.note}</span> : null}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="lb-meta">Scan in progress…</div>
-                  )}
-                </div>
-                {r.buzzFactor !== null ? (
-                  <div className="lb-score" style={{ color: scoreColor(r.buzzFactor) }}>{r.buzzFactor}</div>
-                ) : null}
-              </div>
-            ))
-          )}
-        </Card>
+                      {r.buzzFactor !== null ? (
+                        <div className="lb-score" style={{ color: scoreColor(r.buzzFactor) }}>{r.buzzFactor}</div>
+                      ) : null}
+                    </div>
+                  ))}
+                </Card>
+              );
+            })}
+          </div>
+        )
       ) : (
         <ScoutDataTable rows={filteredRawRows} />
       )}

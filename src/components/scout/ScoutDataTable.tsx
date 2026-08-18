@@ -1,7 +1,14 @@
 import type { ScoutRawRow } from "@/lib/data/scout";
 
+function profileUrl(row: Pick<ScoutRawRow, "platform" | "handle">): string {
+  return row.platform === "facebook"
+    ? `https://www.facebook.com/${row.handle}/`
+    : `https://www.instagram.com/${row.handle}/`;
+}
+
 const COLS: { key: keyof ScoutRawRow; label: string }[] = [
   { key: "handle", label: "Handle" },
+  { key: "platform", label: "Platform" },
   { key: "suppliedName", label: "Name" },
   { key: "deliverable", label: "Deliverable" },
   { key: "buzzFactor", label: "Buzz" },
@@ -45,7 +52,7 @@ export function ScoutDataTable({ rows }: { rows: ScoutRawRow[] }) {
               {COLS.map((c) => (
                 <td key={c.key} style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>
                   {c.key === "handle" ? (
-                    <a href={`https://www.instagram.com/${r.handle}/`} target="_blank" rel="noreferrer">
+                    <a href={profileUrl(r)} target="_blank" rel="noreferrer">
                       @{r.handle}
                     </a>
                   ) : (
