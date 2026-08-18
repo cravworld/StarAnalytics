@@ -442,34 +442,43 @@ async function ingestInstagramItem(
       ? "follower count unavailable, so engagement rate couldn't be computed either — buzz factor withheld rather than scored on content mix alone"
       : null);
 
-  const snapshot = await prisma.scoutSnapshot.create({
-    data: {
-      candidateId: candidate.id,
-      runId,
-      followers: normalized.followers,
-      followersAvailable: normalized.followersAvailable,
-      postsAnalyzed: normalized.postsAnalyzed,
-      engagementRatePct: normalized.engagementRatePct,
-      commentRatePct: normalized.commentRatePct,
-      consistencyScore: normalized.consistencyScore01,
-      postingFrequencyPerWeek: normalized.postingFrequencyPerWeek,
-      contentMixClipsPct: normalized.contentMixClipsPct,
-      contentMixCarouselPct: normalized.contentMixCarouselPct,
-      contentMixImagePct: normalized.contentMixImagePct,
-      mostEngagedPostUrl: normalized.mostEngagedPostUrl,
-      note,
-      raw: normalized.raw as object,
-    },
-  });
-  await prisma.scoutScore.create({
-    data: {
-      snapshotId: snapshot.id,
-      buzzFactor: score.buzzFactor,
-      reachScore: score.components.reach,
-      engagementScore: score.components.engagement,
-      consistencyScore: score.components.consistency,
-      contentMixScore: score.components.contentMix,
-    },
+  // One transaction, not two sequential creates (2026-08-18 fix) — confirmed live that a
+  // snapshot could get written and then the process die/error before its paired score did
+  // (most likely during the same overlapping-cron-invocation race the lock above now
+  // prevents, but not exclusively caused by it), leaving a real orphaned snapshot with real
+  // scraped data that the leaderboard could only ever show as "Scan in progress…" forever —
+  // 4 confirmed live, none reachable by a retry since the candidate technically already has
+  // a snapshot from this run. Atomic now: either both rows land or neither does.
+  await prisma.$transaction(async (tx) => {
+    const snapshot = await tx.scoutSnapshot.create({
+      data: {
+        candidateId: candidate.id,
+        runId,
+        followers: normalized.followers,
+        followersAvailable: normalized.followersAvailable,
+        postsAnalyzed: normalized.postsAnalyzed,
+        engagementRatePct: normalized.engagementRatePct,
+        commentRatePct: normalized.commentRatePct,
+        consistencyScore: normalized.consistencyScore01,
+        postingFrequencyPerWeek: normalized.postingFrequencyPerWeek,
+        contentMixClipsPct: normalized.contentMixClipsPct,
+        contentMixCarouselPct: normalized.contentMixCarouselPct,
+        contentMixImagePct: normalized.contentMixImagePct,
+        mostEngagedPostUrl: normalized.mostEngagedPostUrl,
+        note,
+        raw: normalized.raw as object,
+      },
+    });
+    await tx.scoutScore.create({
+      data: {
+        snapshotId: snapshot.id,
+        buzzFactor: score.buzzFactor,
+        reachScore: score.components.reach,
+        engagementScore: score.components.engagement,
+        consistencyScore: score.components.consistency,
+        contentMixScore: score.components.contentMix,
+      },
+    });
   });
   return true;
 }
@@ -504,27 +513,30 @@ async function ingestFacebookItem(
     weights,
   );
 
-  const snapshot = await prisma.scoutSnapshot.create({
-    data: {
-      candidateId: candidate.id,
-      runId,
-      followers: normalized.followers,
-      followersAvailable: normalized.followersAvailable,
-      postsAnalyzed: 0,
-      engagementRatePct,
-      note: normalized.note,
-      raw: normalized.raw as object,
-    },
-  });
-  await prisma.scoutScore.create({
-    data: {
-      snapshotId: snapshot.id,
-      buzzFactor: score.buzzFactor,
-      reachScore: score.components.reach,
-      engagementScore: score.components.engagement,
-      consistencyScore: score.components.consistency,
-      contentMixScore: score.components.contentMix,
-    },
+  // Atomic for the same reason as ingestInstagramItem's own comment above.
+  await prisma.$transaction(async (tx) => {
+    const snapshot = await tx.scoutSnapshot.create({
+      data: {
+        candidateId: candidate.id,
+        runId,
+        followers: normalized.followers,
+        followersAvailable: normalized.followersAvailable,
+        postsAnalyzed: 0,
+        engagementRatePct,
+        note: normalized.note,
+        raw: normalized.raw as object,
+      },
+    });
+    await tx.scoutScore.create({
+      data: {
+        snapshotId: snapshot.id,
+        buzzFactor: score.buzzFactor,
+        reachScore: score.components.reach,
+        engagementScore: score.components.engagement,
+        consistencyScore: score.components.consistency,
+        contentMixScore: score.components.contentMix,
+      },
+    });
   });
   return true;
 }
