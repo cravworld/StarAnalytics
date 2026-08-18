@@ -7,11 +7,15 @@ import { ScoutSettingsPanel } from "@/components/scout/ScoutSettingsPanel";
 import { ScoutBatchList } from "@/components/scout/ScoutBatchList";
 
 export default async function ScoutPage() {
-  const [batches, settings] = await Promise.all([listScoutBatches(true), getScoutSettings()]);
+  const [batches, igSettings, fbSettings] = await Promise.all([
+    listScoutBatches(true),
+    getScoutSettings("instagram"),
+    getScoutSettings("facebook"),
+  ]);
 
   return (
     <>
-      <ScoutSettingsPanel initial={settings} />
+      <ScoutSettingsPanel initial={{ instagram: igSettings, facebook: fbSettings }} />
       <ScoutUploadForm />
       <ScoutQuickAddForm />
       <Card title="Scan Batches">

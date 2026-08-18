@@ -39,6 +39,9 @@ const FIXTURE = [
   "com/parvathy__",
   "nair____?",
   "igsh=abc REEL",
+  "5 A FACEBOOK PAGE",
+  "https://www.facebook.com/MarvelStudios",
+  " REEL",
 ].join("\n");
 
 describe("parseInfluencerListText", () => {
@@ -47,9 +50,20 @@ describe("parseInfluencerListText", () => {
     expect(candidates[0]).toEqual({
       rowNumber: 1,
       name: "JEEVA",
+      platform: "instagram",
       handle: "iamjeevaa",
       profileUrl: "https://www.instagram.com/iamjeevaa/",
       deliverable: "STORY",
+    });
+  });
+
+  it("recognizes a facebook.com link and tags it as the facebook platform", () => {
+    const { candidates } = parseInfluencerListText(FIXTURE);
+    const fb = candidates.find((c) => c.platform === "facebook");
+    expect(fb).toMatchObject({
+      handle: "marvelstudios",
+      profileUrl: "https://www.facebook.com/MarvelStudios/",
+      deliverable: "REEL",
     });
   });
 
@@ -72,16 +86,15 @@ describe("parseInfluencerListText", () => {
     expect(noDeliverable?.deliverable).toBeNull();
     // and the row right after it (which has no leading number) still parsed correctly,
     // proving it wasn't absorbed into the row-4 block.
-    const last = candidates[candidates.length - 1];
-    expect(last.rowNumber).toBeNull();
-    expect(last.name).toBe("PARVATHY NAIR");
-    expect(last.handle).toBe("parvathy__nair____");
+    const parvathy = candidates.find((c) => c.handle === "parvathy__nair____");
+    expect(parvathy?.rowNumber).toBeNull();
+    expect(parvathy?.name).toBe("PARVATHY NAIR");
   });
 
   it("counts every URL block toward rowsFound, and only ones with a usable link toward rowsParsed", () => {
     const { rowsFound, rowsParsed } = parseInfluencerListText(FIXTURE);
-    expect(rowsFound).toBe(5);
-    expect(rowsParsed).toBe(4); // row 3 is a dup of row 1's handle
+    expect(rowsFound).toBe(6);
+    expect(rowsParsed).toBe(5); // row 3 is a dup of row 1's handle
   });
 
   it("reports a parse shortfall rather than silently dropping rows", () => {
@@ -92,8 +105,18 @@ describe("parseInfluencerListText", () => {
 });
 
 describe("profileUrlKey", () => {
-  it("normalizes a full URL and a bare handle to the same key", () => {
-    expect(profileUrlKey("https://www.instagram.com/SomeHandle/")).toBe("somehandle");
-    expect(profileUrlKey("SomeHandle")).toBe("somehandle");
+  it("normalizes a full URL and a bare handle to the same platform-prefixed key", () => {
+    expect(profileUrlKey("https://www.instagram.com/SomeHandle/")).toBe("instagram:somehandle");
+    expect(profileUrlKey("SomeHandle")).toBe("instagram:somehandle");
+  });
+
+  it("detects facebook.com URLs and prefixes the key with facebook instead", () => {
+    expect(profileUrlKey("https://www.facebook.com/SomePage/")).toBe("facebook:somepage");
+  });
+
+  it("keeps instagram and facebook keys distinct for the same-looking handle", () => {
+    expect(profileUrlKey("https://www.instagram.com/marvel/")).not.toBe(
+      profileUrlKey("https://www.facebook.com/marvel/"),
+    );
   });
 });
