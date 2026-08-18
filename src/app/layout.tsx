@@ -15,9 +15,32 @@ const inter = Inter({
   variable: "--font-sans",
 });
 
+// VERCEL_URL is set automatically per-deployment (preview and production alike) — using it
+// rather than a hardcoded domain means metadataBase (needed to resolve the icon/OG image
+// file conventions below into absolute URLs) is always correct without a manual update on
+// every new deployment URL. Falls back to production's known domain for local dev, where
+// VERCEL_URL isn't set at all.
+const siteUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://staranalytics.vercel.app";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "StarAnalytics — Nivin Pauly",
   description: "Social media intelligence dashboard — Confidential",
+  // Deliberately generic (app name + category description only) rather than naming the
+  // client/actor this deployment is for — unlike the in-app sidebar, this metadata renders
+  // in link-preview cards (Slack, WhatsApp, iMessage, etc.) to anyone who sees a shared URL,
+  // signed in or not, so it shouldn't say more than the page's own <title> already does.
+  openGraph: {
+    title: "StarAnalytics",
+    description: "Social media intelligence dashboard",
+    siteName: "StarAnalytics",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "StarAnalytics",
+    description: "Social media intelligence dashboard",
+  },
 };
 
 export default function RootLayout({
