@@ -281,14 +281,84 @@ async function startFacebookRuns(
   );
 }
 
+// How recent a candidate's last scan has to be before a re-upload treats it as "already
+// covered" rather than worth spending fresh Apify credits on. 7 days: long enough that a
+// same-week re-upload of an overlapping list (the exact case that surfaced the legacy-
+// duplicate-key bug, 2026-08-18) doesn't burn credits re-scraping accounts whose numbers
+// haven't had time to meaningfully move; short enough that a genuinely stale account still
+// gets refreshed on the next real scan.
+export const FRESHNESS_STALE_DAYS = 7;
+
+export interface ScoutBatchFreshness {
+  total: number;
+  freshCount: number; // already scanned within FRESHNESS_STALE_DAYS — a re-scan is optional
+  needsScanCount: number;
+  freshAccounts: Array<{
+    candidateId: string;
+    handle: string;
+    platform: ScoutPlatform;
+    lastScrapedAt: Date;
+    lastBuzzFactor: number | null;
+  }>;
+  needsScanCandidateIds: string[];
+}
+
+/**
+ * Checks a just-created batch's candidates against their own scan history (across ANY batch,
+ * not just this one — ScoutCandidate is shared) before any Apify run starts. Lets the upload
+ * flow ask "skip the N already-fresh accounts?" instead of unconditionally re-scanning
+ * everyone, which is what startScoutRuns did before this existed — real cost on a batch that
+ * overlaps a recent one, and the exact scenario that made the legacy-duplicate-key bug matter
+ * (2026-08-18 audit: 201 accounts had silently been scanned twice under two candidate rows).
+ */
+export async function getScoutBatchFreshness(
+  batchId: string,
+  staleDays: number = FRESHNESS_STALE_DAYS,
+): Promise<ScoutBatchFreshness> {
+  const entries = await prisma.scoutBatchEntry.findMany({
+    where: { batchId },
+    include: {
+      candidate: { include: { snapshots: { orderBy: { scrapedAt: "desc" }, take: 1, include: { score: true } } } },
+    },
+  });
+  const cutoff = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000);
+
+  const freshAccounts: ScoutBatchFreshness["freshAccounts"] = [];
+  const needsScanCandidateIds: string[] = [];
+  for (const e of entries) {
+    const snapshot = e.candidate.snapshots[0];
+    if (snapshot && snapshot.scrapedAt > cutoff) {
+      freshAccounts.push({
+        candidateId: e.candidateId,
+        handle: e.candidate.handle,
+        platform: e.candidate.platform,
+        lastScrapedAt: snapshot.scrapedAt,
+        lastBuzzFactor: snapshot.score?.buzzFactor ?? null,
+      });
+    } else {
+      needsScanCandidateIds.push(e.candidateId);
+    }
+  }
+
+  return { total: entries.length, freshCount: freshAccounts.length, needsScanCount: needsScanCandidateIds.length, freshAccounts, needsScanCandidateIds };
+}
+
 /**
  * Kicks off one Apify run per chunk of the batch's candidates, per platform (a batch can
- * hold both). Returns immediately per run.
+ * hold both). Returns immediately per run. `onlyCandidateIds`, when passed, scans only that
+ * subset of the batch's entries — the "skip already-fresh accounts" path from the upload
+ * confirmation step; omitted, every entry in the batch gets scanned (unchanged default).
  */
-export async function startScoutRuns(batchId: string): Promise<{ runsStarted: number; runsFailed: number }> {
+export async function startScoutRuns(
+  batchId: string,
+  options?: { onlyCandidateIds?: string[] },
+): Promise<{ runsStarted: number; runsFailed: number }> {
   const entries = await prisma.scoutBatchEntry.findMany({ where: { batchId }, include: { candidate: true } });
-  const igHandles = entries.filter((e) => e.candidate.platform === "instagram").map((e) => e.candidate.handle);
-  const fbHandles = entries.filter((e) => e.candidate.platform === "facebook").map((e) => e.candidate.handle);
+  const scoped = options?.onlyCandidateIds
+    ? entries.filter((e) => options.onlyCandidateIds!.includes(e.candidateId))
+    : entries;
+  const igHandles = scoped.filter((e) => e.candidate.platform === "instagram").map((e) => e.candidate.handle);
+  const fbHandles = scoped.filter((e) => e.candidate.platform === "facebook").map((e) => e.candidate.handle);
 
   const [ig, fb] = await Promise.all([
     igHandles.length > 0 ? startInstagramRuns(batchId, igHandles, 1) : { runsStarted: 0, runsFailed: 0 },
@@ -535,6 +605,13 @@ export interface ScoutLeaderboardRow {
   postsAnalyzed: number | null;
   note: string | null;
   scrapedAt: Date | null;
+  // Trend vs this same candidate's next-most-recent snapshot, from ANY batch — a candidate
+  // that's been scanned before (this list or a different one) carries its history with it,
+  // since ScoutSnapshot is keyed off the candidate, not the batch. Both null when this is
+  // the first time this account has ever been scanned (nothing to compare against).
+  previousBuzzFactor: number | null;
+  previousScrapedAt: Date | null;
+  buzzFactorDelta: number | null;
 }
 
 /** Latest snapshot+score per candidate in a batch, ranked by buzz factor descending. */
@@ -544,9 +621,12 @@ export async function getScoutLeaderboard(batchId: string): Promise<ScoutLeaderb
     include: {
       candidate: {
         include: {
+          // take 2, not 1: the second-most-recent snapshot is what powers the trend delta
+          // below. Ordered globally by scrapedAt, so "previous" can be from a wholly
+          // different earlier batch that happened to scan the same account.
           snapshots: {
             orderBy: { scrapedAt: "desc" },
-            take: 1,
+            take: 2,
             include: { score: true },
           },
         },
@@ -556,6 +636,9 @@ export async function getScoutLeaderboard(batchId: string): Promise<ScoutLeaderb
 
   const rows: ScoutLeaderboardRow[] = entries.map((e) => {
     const snapshot = e.candidate.snapshots[0] ?? null;
+    const previous = e.candidate.snapshots[1] ?? null;
+    const previousBuzzFactor = previous?.score?.buzzFactor ?? null;
+    const buzzFactor = snapshot?.score?.buzzFactor ?? null;
     return {
       candidateId: e.candidateId,
       platform: e.candidate.platform,
@@ -563,7 +646,7 @@ export async function getScoutLeaderboard(batchId: string): Promise<ScoutLeaderb
       suppliedName: e.suppliedName,
       deliverable: e.deliverable,
       rowNumber: e.rowNumber,
-      buzzFactor: snapshot?.score?.buzzFactor ?? null,
+      buzzFactor,
       components: snapshot?.score
         ? {
             reach: snapshot.score.reachScore,
@@ -577,6 +660,9 @@ export async function getScoutLeaderboard(batchId: string): Promise<ScoutLeaderb
       postsAnalyzed: snapshot?.postsAnalyzed ?? null,
       note: snapshot?.note ?? null,
       scrapedAt: snapshot?.scrapedAt ?? null,
+      previousBuzzFactor,
+      previousScrapedAt: previous?.scrapedAt ?? null,
+      buzzFactorDelta: buzzFactor !== null && previousBuzzFactor !== null ? buzzFactor - previousBuzzFactor : null,
     };
   });
 

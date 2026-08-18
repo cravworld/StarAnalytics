@@ -118,6 +118,14 @@ export function ScoutLeaderboardFilterable({ rows, rawRows }: { rows: ScoutLeade
                                   Reach {r.components.reach ?? "–"} · Consistency {r.components.consistency ?? "–"} · Content mix {r.components.contentMix ?? "–"}
                                 </span>
                               ) : null}
+                              {r.buzzFactorDelta !== null ? (
+                                <span style={{ color: r.buzzFactorDelta > 0 ? "#1a7a4a" : r.buzzFactorDelta < 0 ? "#b71c1c" : "var(--muted)" }}>
+                                  {r.buzzFactorDelta > 0 ? `▲${r.buzzFactorDelta}` : r.buzzFactorDelta < 0 ? `▼${Math.abs(r.buzzFactorDelta)}` : "no change"}
+                                  {" "}
+                                  since last scan
+                                  {r.previousScrapedAt ? ` (${new Date(r.previousScrapedAt).toLocaleDateString()})` : ""}
+                                </span>
+                              ) : null}
                               {r.note ? <span style={{ color: "var(--amber)" }}>{r.note}</span> : null}
                             </div>
                           </>
@@ -126,7 +134,14 @@ export function ScoutLeaderboardFilterable({ rows, rawRows }: { rows: ScoutLeade
                         )}
                       </div>
                       {r.buzzFactor !== null ? (
-                        <div className="lb-score" style={{ color: scoreColor(r.buzzFactor) }}>{r.buzzFactor}</div>
+                        <div style={{ textAlign: "right" }}>
+                          <div className="lb-score" style={{ color: scoreColor(r.buzzFactor) }}>{r.buzzFactor}</div>
+                          {r.buzzFactorDelta !== null && r.buzzFactorDelta !== 0 ? (
+                            <div style={{ fontSize: 11, color: r.buzzFactorDelta > 0 ? "#1a7a4a" : "#b71c1c" }}>
+                              {r.buzzFactorDelta > 0 ? `▲${r.buzzFactorDelta}` : `▼${Math.abs(r.buzzFactorDelta)}`}
+                            </div>
+                          ) : null}
+                        </div>
                       ) : null}
                     </div>
                   ))}

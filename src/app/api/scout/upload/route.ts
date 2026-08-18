@@ -1,11 +1,12 @@
 // Upload endpoint for a Scoutline batch — a route handler, not a Server Action, since
 // Server Actions cap request bodies at 1MB by default (see server-actions.md) and an
-// uploaded PDF/Excel sheet can exceed that. Parses the file, persists the batch +
-// candidates, kicks off the Apify run(s), and returns immediately — ingestion happens on
-// the poll-scout-runs cron, never inline on this request (see scout.ts's module doc).
+// uploaded PDF/Excel sheet can exceed that. Parses the file and persists the batch +
+// candidates, but deliberately does NOT start any Apify run itself (see 2026-08-18 freshness
+// change below) — /api/scout/[batchId]/start-runs does that, once the client has had a
+// chance to see whether any of these accounts were already scanned recently.
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { createScoutBatch, startScoutRuns } from "@/lib/data/scout";
+import { createScoutBatch, getScoutBatchFreshness, FRESHNESS_STALE_DAYS } from "@/lib/data/scout";
 import { parseInfluencerExcel, parseInfluencerPdf } from "@/lib/scout/ingest";
 
 export const maxDuration = 120; // backstop only — the real fix was bulk DB writes + parallel Apify run-starts (scout.ts), not a longer window
@@ -40,13 +41,14 @@ export async function POST(request: Request) {
   }
 
   const batch = await createScoutBatch(file.name, isPdf ? "pdf" : "excel", result.rowsFound, result.candidates);
-  const { runsStarted, runsFailed } = await startScoutRuns(batch.batchId);
+  const freshness = await getScoutBatchFreshness(batch.batchId);
 
   return NextResponse.json({
     batchId: batch.batchId,
     expectedCount: batch.expectedCount,
     parsedCount: batch.parsedCount,
-    runsStarted,
-    runsFailed,
+    freshCount: freshness.freshCount,
+    needsScanCount: freshness.needsScanCount,
+    staleDays: FRESHNESS_STALE_DAYS,
   });
 }
