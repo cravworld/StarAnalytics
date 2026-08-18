@@ -54,7 +54,10 @@ export default async function ScoutBatchPage({ params }: { params: Promise<{ bat
       </div>
 
       {!scanning ? (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginBottom: 16 }}>
+          <a className="btn" href={`/api/scout/${batch.id}/export`}>
+            Export to Excel
+          </a>
           <ScoutRescoreButton batchId={batch.id} />
         </div>
       ) : null}
