@@ -1,3 +1,4 @@
+import { isApifyQuotaFailure } from "@/lib/apify/quotaBreaker";
 import { prisma } from "@/lib/prisma";
 import { fetchProfileSnapshot, backfillFanPageLink } from "@/lib/providers/apify-public-content";
 import { PLATFORM_HANDLE_VALIDATORS, contentProviderFor } from "@/lib/providers/platform-utils";
@@ -302,12 +303,22 @@ export async function addFanPage(handleInput: string, platform: PlatformId = "in
 export async function refreshStaleFanPages(): Promise<{ handle: string; ok: boolean; error?: string }[]> {
   const youtubePages = await prisma.fanPage.findMany({ where: { platform: "youtube", isActive: true } });
   const results: { handle: string; ok: boolean; error?: string }[] = [];
+  let quotaExhausted = false;
   for (const p of youtubePages) {
     if (!isStale(p.lastCheckedAt)) continue;
+    // Same account-wide short-circuit as refreshStaleCompetitors. These channels are
+    // YouTube-API-backed rather than Apify-backed today, so this is defensive rather than
+    // load-bearing — but this loop shares the provider seam, and the cost of getting it
+    // wrong (one wasted call per channel per tick) is exactly what it was elsewhere.
+    if (quotaExhausted) {
+      results.push({ handle: p.igHandle, ok: false, error: "Apify quota exhausted — not attempted" });
+      continue;
+    }
     try {
       await scrapeYouTubeFanChannel(p.igHandle);
       results.push({ handle: p.igHandle, ok: true });
     } catch (err) {
+      if (isApifyQuotaFailure(err)) quotaExhausted = true;
       results.push({ handle: p.igHandle, ok: false, error: err instanceof Error ? err.message : String(err) });
     }
   }

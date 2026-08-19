@@ -10,6 +10,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { classifyCommentsForSentiment } from "@/lib/data/commentSentiment";
+import { checkNegativeSentimentSpikes } from "@/lib/data/negativeSentimentAlerts";
 import { tryAcquireCronLock, releaseCronLock } from "@/lib/cronLock";
 
 const LOCK_NAME = "backfill-comment-sentiment";
@@ -63,10 +64,27 @@ export async function GET(request: Request) {
     const commentIds = candidates.map((c) => c.id);
     try {
       const { classified, failedBatches } = await classifyCommentsForSentiment(commentIds);
+
+      // This is the only place new CommentSentiment rows appear, so it's the only moment a
+      // spike verdict can change — checking anywhere else would just re-evaluate unchanged
+      // data. Isolated in its own try/catch: alerting is a side effect of this pipeline, and
+      // an alerting failure must never make a successful classification pass report an
+      // error (which would strand the classified rows behind a 500 the caller retries).
+      let spikeAlerts = 0;
+      if (classified > 0) {
+        try {
+          const spikes = await checkNegativeSentimentSpikes();
+          spikeAlerts = spikes.filter((s) => s.alerted).length;
+        } catch (err) {
+          console.error("negative sentiment spike check failed:", err);
+        }
+      }
+
       return NextResponse.json({
         candidates: commentIds.length,
         classified,
         failedBatches,
+        spikeAlerts,
         chunkSize: CHUNK_SIZE,
       });
     } catch (err) {

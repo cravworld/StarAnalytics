@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { isCampaignDetailRoute } from "@/lib/campaignRoutes";
 
 const TABS = [
   { href: "/campaigns", label: "Own Campaigns" },
@@ -18,11 +19,13 @@ export default function CampaignsLayout({ children }: { children: ReactNode }) {
   // panel, and toggling between them never hides the tab bar — "Own Campaigns"
   // stays the active tab on a detail route, which the isDetailRoute check below
   // covers generically instead of special-casing any one campaign's slug.
-  const knownSubRoutes = ["/campaigns/hashtag", "/campaigns/agency", "/campaigns/new"];
-  const isDetailRoute =
-    pathname !== "/campaigns" &&
-    pathname.startsWith("/campaigns/") &&
-    !knownSubRoutes.some((r) => pathname.startsWith(r));
+  //
+  // Note TABS is deliberately a subset of the sidebar's nav: not every campaign page
+  // gets a tab. The detail check must still consider the FULL subroute list, though —
+  // its own local copy omitted /campaigns/keywords, /campaigns/compare-own and
+  // /campaigns/comments, so each of those rendered with "Own Campaigns" highlighted and
+  // aria-current="page" pointing a screen reader at a page the user was not on.
+  const isDetailRoute = isCampaignDetailRoute(pathname);
 
   return (
     <>

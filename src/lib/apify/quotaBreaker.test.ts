@@ -1,10 +1,18 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   isApifyQuotaError,
+  isApifyQuotaFailure,
+  isAccountBudgetExhausted,
   isQuotaCircuitOpen,
+  resetAccountBudgetCache,
   ApifyQuotaExhaustedError,
+  BUDGET_RESERVE_USD,
   QUOTA_ERROR_MARKER,
 } from "./quotaBreaker";
+import { readAccountUsage } from "@/lib/apify/client";
+
+vi.mock("@/lib/apify/client", () => ({ readAccountUsage: vi.fn() }));
+const mockUsage = vi.mocked(readAccountUsage);
 
 // Verbatim from prod (scrape_runs.error, 2026-08-07) — not a paraphrase, since the
 // whole matcher is a substring check against exactly this payload.
@@ -40,6 +48,79 @@ describe("isApifyQuotaError", () => {
     const skip = new ApifyQuotaExhaustedError("apify/instagram-hashtag-scraper");
     expect(isApifyQuotaError(skip.message)).toBe(false);
     expect(skip.message).not.toContain(QUOTA_ERROR_MARKER);
+  });
+});
+
+describe("isApifyQuotaFailure", () => {
+  // Every loop that scrapes more than one thing asks this before trying the next one, and
+  // the answer arrives in two different shapes depending on whether the breaker skipped
+  // pre-emptively or Apify actually rejected the call.
+  it("matches both the pre-emptive skip and a real Apify rejection", () => {
+    expect(isApifyQuotaFailure(new ApifyQuotaExhaustedError("apify/instagram-post-scraper"))).toBe(true);
+    expect(isApifyQuotaFailure(new Error(REAL_QUOTA_ERROR))).toBe(true);
+  });
+
+  // The mid-run case: Apify aborts a run that was legal when it started, reporting a plain
+  // ABORTED with no quota marker of its own. trackedRun stamps the marker on after checking
+  // the account, and this is what has to recognise the result.
+  it("matches the mid-run abort message trackedRun composes", () => {
+    expect(
+      isApifyQuotaFailure(
+        new Error(`Apify run ended with status ABORTED — account budget exhausted (${QUOTA_ERROR_MARKER})`),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not match ordinary failures or non-errors", () => {
+    expect(isApifyQuotaFailure(new Error("Apify run abc did not finish within 180000ms — aborted"))).toBe(false);
+    expect(isApifyQuotaFailure("some string")).toBe(false);
+    expect(isApifyQuotaFailure(null)).toBe(false);
+  });
+});
+
+describe("isAccountBudgetExhausted", () => {
+  beforeEach(() => {
+    resetAccountBudgetCache();
+    mockUsage.mockReset();
+  });
+
+  it("reports exhausted once headroom drops to the reserve", async () => {
+    mockUsage.mockResolvedValue({ monthlyUsageUsd: 29 - BUDGET_RESERVE_USD, maxMonthlyUsageUsd: 29 });
+    expect(await isAccountBudgetExhausted()).toBe(true);
+  });
+
+  // The state the account was actually in when this was written: over the cap, not merely at it.
+  it("reports exhausted when already over the cap", async () => {
+    mockUsage.mockResolvedValue({ monthlyUsageUsd: 29.24, maxMonthlyUsageUsd: 29 });
+    expect(await isAccountBudgetExhausted()).toBe(true);
+  });
+
+  it("reports available with real headroom left", async () => {
+    mockUsage.mockResolvedValue({ monthlyUsageUsd: 4, maxMonthlyUsageUsd: 29 });
+    expect(await isAccountBudgetExhausted()).toBe(false);
+  });
+
+  // Fails open on purpose: an Apify API blip must not be able to halt ingestion by itself,
+  // since the 403 breaker still covers the start-time rejection independently.
+  it("treats an unreadable usage endpoint as available", async () => {
+    mockUsage.mockResolvedValue(null);
+    expect(await isAccountBudgetExhausted()).toBe(false);
+  });
+
+  it("caches, so a burst of runs in one tick costs one usage lookup", async () => {
+    mockUsage.mockResolvedValue({ monthlyUsageUsd: 29.24, maxMonthlyUsageUsd: 29 });
+    expect(await isAccountBudgetExhausted()).toBe(true);
+    expect(await isAccountBudgetExhausted()).toBe(true);
+    expect(mockUsage).toHaveBeenCalledTimes(1);
+  });
+
+  // A null answer must not be cached, or one blip would suppress budget checks for the
+  // whole cache window.
+  it("does not cache the fail-open answer", async () => {
+    mockUsage.mockResolvedValue(null);
+    expect(await isAccountBudgetExhausted()).toBe(false);
+    expect(await isAccountBudgetExhausted()).toBe(false);
+    expect(mockUsage).toHaveBeenCalledTimes(2);
   });
 });
 

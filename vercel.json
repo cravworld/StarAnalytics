@@ -1,16 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/cron/poll-hashtags",
-      "schedule": "0 * * * *"
-    },
-    {
       "path": "/api/cron/prune-raw-payloads",
       "schedule": "0 7 * * *"
-    },
-    {
-      "path": "/api/cron/backfill-sentiment",
-      "schedule": "0 * * * *"
     },
     {
       "path": "/api/cron/backfill-comment-sentiment",
@@ -27,6 +19,18 @@
     {
       "path": "/api/cron/poll-scout-runs",
       "schedule": "*/2 * * * *"
+    }
+  ],
+  "_disabledCrons": [
+    {
+      "path": "/api/cron/poll-hashtags",
+      "schedule": "0 * * * *",
+      "reason": "Spends Apify credit (hashtag + comment scraping). Disabled 2026-08-17 ahead of the Scale plan top-up so it doesn't start eating credits the moment they land. Restore this entry to re-enable."
+    },
+    {
+      "path": "/api/cron/backfill-sentiment",
+      "schedule": "0 * * * *",
+      "reason": "Calls scrapeCommentsForPosts (Apify) per APIFY-USAGE-AUDIT.md finding A. Disabled 2026-08-17 for the same reason as poll-hashtags. Restore this entry to re-enable."
     }
   ]
 }
