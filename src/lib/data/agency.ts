@@ -7,19 +7,10 @@ import { getActiveThresholdConfig } from "@/lib/scoring/config";
 import { scorePost } from "@/lib/scoring/scorePost";
 import { FLAG_REGISTRY, type Flag, type PostForScoring } from "@/lib/scoring/types";
 import type { AgencyUrlRow } from "@/lib/upload/parseAgencySheet";
+import { IDENTITY_INKS } from "@/lib/palette";
 
-const AGENCY_COLOR_PALETTE = [
-  "#E1306C",
-  "#833AB4",
-  "#F77737",
-  "#1a7a4a",
-  "#558b2f",
-  "#00838f",
-  "#ad1457",
-  "#1565c0",
-  "#6a1b9a",
-  "#4527a0",
-];
+// Identity colours live in one place now — see lib/palette.ts for why.
+const AGENCY_COLOR_PALETTE = IDENTITY_INKS;
 
 // Apify's Instagram Post Scraper documents no hard cap on the `username`
 // array (confirmed against its input-schema page), but a few hundred URLs per

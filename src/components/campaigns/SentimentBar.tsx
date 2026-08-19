@@ -6,10 +6,14 @@ import type { CampaignSentiment, CampaignSentimentItem } from "@/lib/data/campai
 // Renders a partial (not "complete-looking but actually partial") aggregate — see
 // AGENTS.md Phase 4 §B4. sentiment is null only when zero posts are classified yet.
 
+// "fill" paints the bar segment, "text" the label beneath it. They used to be one
+// field, which forced comparing the colour string itself to special-case
+// neutral — a check that would have silently stopped matching the moment the
+// palette changed, quietly turning the neutral label the wrong colour.
 const LABEL_META = {
-  pos: { color: "#1a7a4a", noun: "positive" },
-  neu: { color: "#bdbdbd", noun: "neutral" },
-  neg: { color: "#c62828", noun: "negative" },
+  pos: { fill: "var(--pencil-green)", text: "var(--pencil-green)", noun: "positive" },
+  neu: { fill: "var(--ink-faint)", text: "var(--ink-soft)", noun: "neutral" },
+  neg: { fill: "var(--pencil-red)", text: "var(--pencil-red)", noun: "negative" },
 } as const;
 
 type Label = keyof typeof LABEL_META;
@@ -80,7 +84,7 @@ export function SentimentBar({
             onClick={() => setOpen((prev) => (prev === label ? null : label))}
             style={{
               width: `${pct[label]}%`,
-              background: LABEL_META[label].color,
+              background: LABEL_META[label].fill,
               border: "none",
               padding: 0,
               cursor: pct[label] > 0 ? "pointer" : "default",
@@ -100,7 +104,7 @@ export function SentimentBar({
               background: "none",
               border: "none",
               padding: 0,
-              color: LABEL_META[label].color === "#bdbdbd" ? "var(--muted)" : LABEL_META[label].color,
+              color: LABEL_META[label].text,
               cursor: items[label].length > 0 ? "pointer" : "default",
               fontWeight: open === label ? 700 : 400,
               textDecoration: open === label ? "underline" : "none",

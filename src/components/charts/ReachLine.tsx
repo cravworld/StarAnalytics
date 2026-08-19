@@ -2,6 +2,7 @@
 
 import "./register";
 import { Line } from "react-chartjs-2";
+import { INK, INK_FILL, LEAF, GRIDLINE, tickFont } from "./theme";
 
 export function ReachLine({ data }: { data: number[] }) {
   const labels = data.map((_, i) => `W${i + 1}`);
@@ -13,13 +14,17 @@ export function ReachLine({ data }: { data: number[] }) {
           datasets: [
             {
               data,
-              borderColor: "#833AB4",
-              backgroundColor: "rgba(131,58,180,.08)",
+              borderColor: INK,
+              backgroundColor: INK_FILL,
               fill: true,
               tension: 0.4,
               pointRadius: 3,
               borderWidth: 2,
-              pointBackgroundColor: "#833AB4",
+              pointBackgroundColor: INK,
+              // A paper-coloured ring keeps each point legible where the line
+              // doubles back over its own fill.
+              pointBorderColor: LEAF,
+              pointBorderWidth: 1,
             },
           ],
         }}
@@ -28,10 +33,11 @@ export function ReachLine({ data }: { data: number[] }) {
           maintainAspectRatio: false,
           plugins: { legend: { display: false } },
           scales: {
-            x: { grid: { display: false }, ticks: { color: "#72728a" } },
+            x: { grid: { display: false }, ticks: { font: tickFont() } },
             y: {
-              grid: { color: "rgba(0,0,0,.05)" },
-              ticks: { color: "#72728a", callback: (v) => `${v}M` },
+              grid: { color: GRIDLINE },
+              border: { display: false },
+              ticks: { font: tickFont(), callback: (v) => `${v}M` },
             },
           },
         }}

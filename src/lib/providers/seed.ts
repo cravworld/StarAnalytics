@@ -1,30 +1,32 @@
+import { IDENTITY_INKS, STREAM_AVATAR_PALETTE } from "@/lib/palette";
+
 // Seed data ported verbatim from staranalytics_prototype.html (AGENCIES, POSTS,
 // heatData, chart series) so Phase 0 renders identically to the prototype.
 
 export const AGENCIES = [
-  { name: "Pixelwave Media", color: "#E1306C", score: 91, perf: 94, auth: 90, eff: 89, reach: "9.4M", flags: 0 },
-  { name: "Reelcraft Agency", color: "#833AB4", score: 86, perf: 88, auth: 87, eff: 83, reach: "8.8M", flags: 1 },
-  { name: "Kochi Digital Co.", color: "#F77737", score: 82, perf: 84, auth: 83, eff: 79, reach: "7.9M", flags: 0 },
-  { name: "SocialSpark IN", color: "#1a7a4a", score: 79, perf: 80, auth: 82, eff: 76, reach: "7.4M", flags: 1 },
-  { name: "TrendTide Media", color: "#558b2f", score: 76, perf: 77, auth: 78, eff: 74, reach: "7.1M", flags: 0 },
-  { name: "CreatorHub", color: "#00838f", score: 74, perf: 75, auth: 76, eff: 71, reach: "6.8M", flags: 0 },
-  { name: "Viralthread MKT", color: "#ad1457", score: 71, perf: 73, auth: 70, eff: 69, reach: "6.4M", flags: 2 },
-  { name: "BuzzBridge", color: "#1565c0", score: 58, perf: 72, auth: 38, eff: 64, reach: "8.1M", flags: 23 },
-  { name: "Influx Kerala", color: "#6a1b9a", score: 52, perf: 65, auth: 32, eff: 60, reach: "9.0M", flags: 18 },
-  { name: "NovaSocial", color: "#4527a0", score: 48, perf: 60, auth: 28, eff: 55, reach: "8.9M", flags: 13 },
+  { name: "Pixelwave Media", color: IDENTITY_INKS[0], score: 91, perf: 94, auth: 90, eff: 89, reach: "9.4M", flags: 0 },
+  { name: "Reelcraft Agency", color: IDENTITY_INKS[1], score: 86, perf: 88, auth: 87, eff: 83, reach: "8.8M", flags: 1 },
+  { name: "Kochi Digital Co.", color: IDENTITY_INKS[2], score: 82, perf: 84, auth: 83, eff: 79, reach: "7.9M", flags: 0 },
+  { name: "SocialSpark IN", color: IDENTITY_INKS[3], score: 79, perf: 80, auth: 82, eff: 76, reach: "7.4M", flags: 1 },
+  { name: "TrendTide Media", color: IDENTITY_INKS[4], score: 76, perf: 77, auth: 78, eff: 74, reach: "7.1M", flags: 0 },
+  { name: "CreatorHub", color: IDENTITY_INKS[5], score: 74, perf: 75, auth: 76, eff: 71, reach: "6.8M", flags: 0 },
+  { name: "Viralthread MKT", color: IDENTITY_INKS[6], score: 71, perf: 73, auth: 70, eff: 69, reach: "6.4M", flags: 2 },
+  { name: "BuzzBridge", color: IDENTITY_INKS[7], score: 58, perf: 72, auth: 38, eff: 64, reach: "8.1M", flags: 23 },
+  { name: "Influx Kerala", color: IDENTITY_INKS[8], score: 52, perf: 65, auth: 32, eff: 60, reach: "9.0M", flags: 18 },
+  { name: "NovaSocial", color: IDENTITY_INKS[9], score: 48, perf: 60, auth: 28, eff: 55, reach: "8.9M", flags: 13 },
 ] as const;
 
 export const POSTS = [
-  { url: "instagram.com/p/Cx1a…", ag: "Pixelwave Media", color: "#E1306C", reach: "284K", likes: "18.4K", comments: "920", saves: "3.2K", eng: "6.5%", auth: 92, score: 94, flags: [] as string[] },
-  { url: "instagram.com/p/Bw2b…", ag: "Reelcraft Agency", color: "#833AB4", reach: "241K", likes: "15.1K", comments: "741", saves: "2.8K", eng: "6.3%", auth: 88, score: 90, flags: [] as string[] },
-  { url: "instagram.com/p/Dq3c…", ag: "Pixelwave Media", color: "#E1306C", reach: "220K", likes: "13.2K", comments: "680", saves: "2.4K", eng: "6.0%", auth: 91, score: 89, flags: [] as string[] },
-  { url: "instagram.com/p/Ar4d…", ag: "Kochi Digital Co.", color: "#F77737", reach: "198K", likes: "11.8K", comments: "590", saves: "1.9K", eng: "5.7%", auth: 84, score: 85, flags: [] as string[] },
-  { url: "instagram.com/p/Zp5e…", ag: "SocialSpark IN", color: "#1a7a4a", reach: "187K", likes: "10.4K", comments: "512", saves: "1.7K", eng: "5.6%", auth: 82, score: 83, flags: [] as string[] },
-  { url: "instagram.com/p/Yq6f…", ag: "BuzzBridge", color: "#1565c0", reach: "310K", likes: "22.1K", comments: "88", saves: "142", eng: "7.2%", auth: 34, score: 58, flags: ["Velocity", "Low saves"] },
-  { url: "instagram.com/p/Xr7g…", ag: "Influx Kerala", color: "#6a1b9a", reach: "298K", likes: "20.8K", comments: "64", saves: "98", eng: "7.0%", auth: 29, score: 51, flags: ["Bot comments", "Velocity"] },
-  { url: "instagram.com/p/Ws8h…", ag: "NovaSocial", color: "#4527a0", reach: "290K", likes: "19.4K", comments: "72", saves: "110", eng: "6.8%", auth: 26, score: 48, flags: ["Off-hours", "Bot comments"] },
-  { url: "instagram.com/p/Vt9i…", ag: "TrendTide Media", color: "#558b2f", reach: "172K", likes: "9.8K", comments: "440", saves: "1.5K", eng: "5.4%", auth: 79, score: 77, flags: [] as string[] },
-  { url: "instagram.com/p/Uj0j…", ag: "CreatorHub", color: "#00838f", reach: "165K", likes: "9.1K", comments: "398", saves: "1.3K", eng: "5.2%", auth: 77, score: 74, flags: [] as string[] },
+  { url: "instagram.com/p/Cx1a…", ag: "Pixelwave Media", color: IDENTITY_INKS[0], reach: "284K", likes: "18.4K", comments: "920", saves: "3.2K", eng: "6.5%", auth: 92, score: 94, flags: [] as string[] },
+  { url: "instagram.com/p/Bw2b…", ag: "Reelcraft Agency", color: IDENTITY_INKS[1], reach: "241K", likes: "15.1K", comments: "741", saves: "2.8K", eng: "6.3%", auth: 88, score: 90, flags: [] as string[] },
+  { url: "instagram.com/p/Dq3c…", ag: "Pixelwave Media", color: IDENTITY_INKS[0], reach: "220K", likes: "13.2K", comments: "680", saves: "2.4K", eng: "6.0%", auth: 91, score: 89, flags: [] as string[] },
+  { url: "instagram.com/p/Ar4d…", ag: "Kochi Digital Co.", color: IDENTITY_INKS[2], reach: "198K", likes: "11.8K", comments: "590", saves: "1.9K", eng: "5.7%", auth: 84, score: 85, flags: [] as string[] },
+  { url: "instagram.com/p/Zp5e…", ag: "SocialSpark IN", color: IDENTITY_INKS[3], reach: "187K", likes: "10.4K", comments: "512", saves: "1.7K", eng: "5.6%", auth: 82, score: 83, flags: [] as string[] },
+  { url: "instagram.com/p/Yq6f…", ag: "BuzzBridge", color: IDENTITY_INKS[7], reach: "310K", likes: "22.1K", comments: "88", saves: "142", eng: "7.2%", auth: 34, score: 58, flags: ["Velocity", "Low saves"] },
+  { url: "instagram.com/p/Xr7g…", ag: "Influx Kerala", color: IDENTITY_INKS[8], reach: "298K", likes: "20.8K", comments: "64", saves: "98", eng: "7.0%", auth: 29, score: 51, flags: ["Bot comments", "Velocity"] },
+  { url: "instagram.com/p/Ws8h…", ag: "NovaSocial", color: IDENTITY_INKS[9], reach: "290K", likes: "19.4K", comments: "72", saves: "110", eng: "6.8%", auth: 26, score: 48, flags: ["Off-hours", "Bot comments"] },
+  { url: "instagram.com/p/Vt9i…", ag: "TrendTide Media", color: IDENTITY_INKS[4], reach: "172K", likes: "9.8K", comments: "440", saves: "1.5K", eng: "5.4%", auth: 79, score: 77, flags: [] as string[] },
+  { url: "instagram.com/p/Uj0j…", ag: "CreatorHub", color: IDENTITY_INKS[5], reach: "165K", likes: "9.1K", comments: "398", saves: "1.3K", eng: "5.2%", auth: 77, score: 74, flags: [] as string[] },
 ];
 
 export const HEAT_DATA: Record<string, number[]> = {
@@ -109,10 +111,10 @@ export const VIJAYAM_DETAIL = {
     { text: "incredible", hot: true },
   ],
   stream: [
-    { av: "NF", bg: "#fde8ef", c: "#E1306C", handle: "@nivin_fanz_official", time: "2 min ago", text: "VIJAYAM IS HERE!! Drop everything and share this. #vijayam #NivinPauly", likes: "6.1K", comments: "441", tag: "Fan page" },
-    { av: "FF", bg: "#e8f5e9", c: "#1a7a4a", handle: "@fanfire_nivin", time: "8 min ago", text: "Finally the announcement! #vijayam #NivinPauly 🔥", likes: "4.2K", comments: "312", tag: "Fan page" },
-    { av: "MK", bg: "#e3f2fd", c: "#1565c0", handle: "@mollywood_king", time: "15 min ago", text: "#vijayam title reveal giving major vibes. Nivin is back in full form!", likes: "2.8K", comments: "189", tag: "Public" },
-    { av: "MC", bg: "#f3e5f5", c: "#6a1b9a", handle: "@malayali_cinema_hub", time: "22 min ago", text: "Title: #vijayam · Nivin Pauly. Hype is already through the roof.", likes: "1.9K", comments: "97", tag: "Media" },
+    { av: "NF", bg: STREAM_AVATAR_PALETTE[0].bg, c: STREAM_AVATAR_PALETTE[0].c, handle: "@nivin_fanz_official", time: "2 min ago", text: "VIJAYAM IS HERE!! Drop everything and share this. #vijayam #NivinPauly", likes: "6.1K", comments: "441", tag: "Fan page" },
+    { av: "FF", bg: STREAM_AVATAR_PALETTE[1].bg, c: STREAM_AVATAR_PALETTE[1].c, handle: "@fanfire_nivin", time: "8 min ago", text: "Finally the announcement! #vijayam #NivinPauly 🔥", likes: "4.2K", comments: "312", tag: "Fan page" },
+    { av: "MK", bg: STREAM_AVATAR_PALETTE[2].bg, c: STREAM_AVATAR_PALETTE[2].c, handle: "@mollywood_king", time: "15 min ago", text: "#vijayam title reveal giving major vibes. Nivin is back in full form!", likes: "2.8K", comments: "189", tag: "Public" },
+    { av: "MC", bg: STREAM_AVATAR_PALETTE[3].bg, c: STREAM_AVATAR_PALETTE[3].c, handle: "@malayali_cinema_hub", time: "22 min ago", text: "Title: #vijayam · Nivin Pauly. Hype is already through the roof.", likes: "1.9K", comments: "97", tag: "Media" },
   ],
 };
 

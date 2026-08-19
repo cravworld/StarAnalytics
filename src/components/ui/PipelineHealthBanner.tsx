@@ -10,9 +10,11 @@
 import { getPipelineHealth } from "@/lib/data/pipelineHealth";
 import { formatAge } from "@/lib/format";
 
+// Tokens, not literals: a component carrying its own hexes survives a re-skin
+// untouched and leaves the previous design showing through.
 const TONE = {
-  stale: { bg: "#fff3cd", border: "#ffe69c", text: "#8a6100", icon: "⏳" },
-  down: { bg: "#fdecec", border: "#f0b4b4", text: "#b3261e", icon: "⚠" },
+  stale: { bg: "rgba(138,90,11,.10)", border: "rgba(138,90,11,.28)", text: "var(--pencil-amber)", icon: "⏳" },
+  down: { bg: "rgba(129,0,31,.07)", border: "rgba(129,0,31,.26)", text: "var(--pencil-red)", icon: "⚠" },
 } as const;
 
 export async function PipelineHealthBanner() {
@@ -53,11 +55,11 @@ export async function PipelineHealthBanner() {
         background: tone.bg,
         border: `1px solid ${tone.border}`,
         color: tone.text,
-        borderRadius: "var(--radius-md, 8px)",
+        borderRadius: "var(--radius)",
         padding: "10px 14px",
         fontSize: 12,
         lineHeight: 1.5,
-        marginBottom: "var(--s4, 16px)",
+        marginBottom: "var(--s4)",
       }}
     >
       <span style={{ fontSize: 14, lineHeight: "18px" }} aria-hidden>

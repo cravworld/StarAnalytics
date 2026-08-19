@@ -9,7 +9,8 @@ export default function LoginPage() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "var(--bg)",
+        // No background of its own: letting the body's graph-paper ground show
+        // through is the point — the login card sits on the pad like every other sheet.
       }}
     >
       <div className="card" style={{ width: 340, textAlign: "center" }}>

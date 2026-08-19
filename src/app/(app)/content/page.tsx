@@ -14,7 +14,18 @@ export default async function ContentPage() {
     <>
       {!isInstagramInsightsLive() && <PendingMetaReviewBanner />}
       <KpiGrid cols={4}>
-        <Kpi label="Best Format" value={insights.bestFormat} delta={`${insights.bestFormatEngagement}% avg eng`} deltaDirection="up" />
+        <Kpi
+          label="Best Format"
+          value={insights.bestFormat}
+          delta={`${insights.bestFormatEngagement}% avg eng`}
+          // Deliberately NO deltaDirection. In this design system a green delta means
+          // "this went up" — but 4.8% is the format's engagement rate, a magnitude,
+          // not a change against anything. Colouring it green would assert an
+          // improvement the data never claimed.
+          // The screen's primary read, so it takes the ring.
+          circled
+          note="headline"
+        />
         <Kpi label="Best Time" value={insights.bestPostTime} delta="Peak engagement" />
         <Kpi label="Posts This Month" value={String(insights.postsThisMonth)} delta={`↑ +${insights.postsThisMonthDelta} vs last`} deltaDirection="up" />
         <Kpi

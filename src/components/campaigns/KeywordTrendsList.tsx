@@ -9,7 +9,7 @@ import type { KeywordTrendsResult } from "@/lib/data/keywords";
 import { useTopbarExport } from "@/components/shell/TopbarExportContext";
 import { toCsv } from "@/lib/csv";
 
-const SENTIMENT_COLOR = { pos: "#1a7a4a", neu: "#bdbdbd", neg: "#c62828" } as const;
+const SENTIMENT_COLOR = { pos: "var(--pencil-green)", neu: "var(--ink-faint)", neg: "var(--pencil-red)" } as const;
 
 function SentimentMixBar({ positivePct, neutralPct, negativePct }: { positivePct: number; neutralPct: number; negativePct: number }) {
   return (

@@ -5,6 +5,7 @@ import { Pill } from "@/components/ui/Pill";
 import type { PlatformId } from "@/lib/providers/types";
 import { useTopbarExport } from "@/components/shell/TopbarExportContext";
 import { toCsv } from "@/lib/csv";
+import { platformInk } from "@/lib/palette";
 
 export interface FanPageRow {
   name: string;
@@ -101,7 +102,7 @@ export function FanPageList({ fanPages }: { fanPages: FanPageRow[] }) {
                   </div>
                   <div className="fan-handle">
                     <span
-                      style={{ fontSize: 9, fontWeight: 700, color: f.platform === "youtube" ? "#c4302b" : "#E1306C", marginRight: 4 }}
+                      style={{ fontSize: 9, fontWeight: 700, color: platformInk(f.platform), marginRight: 4 }}
                     >
                       {f.platform === "youtube" ? "YT" : "IG"}
                     </span>
@@ -115,7 +116,7 @@ export function FanPageList({ fanPages }: { fanPages: FanPageRow[] }) {
                           style={{
                             marginLeft: 4,
                             fontWeight: 700,
-                            color: f.followerTrendDeltaPct >= 0 ? "#1a7a4a" : "#c62828",
+                            color: f.followerTrendDeltaPct >= 0 ? "var(--pencil-green)" : "var(--pencil-red)",
                           }}
                         >
                           {f.followerTrendDeltaPct >= 0 ? "+" : ""}

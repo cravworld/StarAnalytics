@@ -13,9 +13,9 @@ import { Sparkline } from "@/components/ui/Sparkline";
 
 // Green/yellow/red bands so the number reads at a glance without needing the tooltip.
 function bandColor(score: number): string {
-  if (score >= 70) return "#1a7a4a";
-  if (score >= 40) return "#e6a700";
-  return "#c62828";
+  if (score >= 70) return "var(--pencil-green)";
+  if (score >= 40) return "var(--pencil-amber)";
+  return "var(--pencil-red)";
 }
 
 function BuzzScoreBadge({
@@ -59,7 +59,7 @@ function BuzzTrendMini({ values, weekAgoDelta }: { values: number[]; weekAgoDelt
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4, marginTop: 4 }}>
       <Sparkline values={values} width={64} height={14} />
       {weekAgoDelta !== null ? (
-        <span style={{ fontSize: 10, fontWeight: 700, color: weekAgoDelta >= 0 ? "#1a7a4a" : "#c62828" }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: weekAgoDelta >= 0 ? "var(--pencil-green)" : "var(--pencil-red)" }}>
           {weekAgoDelta >= 0 ? "+" : ""}
           {weekAgoDelta}
         </span>

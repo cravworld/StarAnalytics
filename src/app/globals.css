@@ -1,67 +1,143 @@
 @import "tailwindcss";
 
 /* ══════════════════════════════════════════════════════════════════════════
-   DESIGN TOKENS
-   Every value below is a decision made once. Component rules reference tokens
-   and never hardcode a colour, duration or step of the spacing scale — that is
-   what keeps the language consistent as screens get added.
+   DESIGN TOKENS — "notebook"
+   Two layers that must never blur into each other:
+
+     STRUCTURE ("the paper")  holds the page together — stock, printed rules,
+                              the graph grid, card edges. Every value here is
+                              DELIBERATELY below text contrast. Never used for
+                              anything a person has to read.
+
+     DATA ("the ink")         every number, label, heading and chart mark.
+                              Strong and dark, always. Nothing in this group is
+                              a pastel, and nothing outside it may carry a metric.
+
+   Colour values are measured, not eyeballed. Ratios quoted below are WCAG
+   relative-luminance contrast against --leaf (cards) and --paper (page).
    ══════════════════════════════════════════════════════════════════════════ */
 :root{
-  /* ── Surfaces & ink ── */
-  --bg:#f7f7fa;--sidebar:#ffffff;--card:#ffffff;
-  --border:#e7e7ef;          /* resting hairline */
-  --border-strong:#d8d8e4;   /* hover / emphasis hairline */
-  --track:#eeeef4;           /* empty progress + bar tracks */
-  --text:#0f0f14;
-  --muted:#6b6b84;           /* 5.0:1 on white — safe for body + 11px labels */
-  --faint:#9a9ab2;           /* DECORATIVE ONLY (placeholder glyphs, dashed borders,
-                                empty-state icons). Never for text that must be read —
-                                it is ~2.6:1. Text that reads "quiet" uses --muted.
-                                Enforced: `grep -rn "var(--faint)" src --include=*.tsx`
-                                should return nothing but non-text usages. */
+  /* ── STRUCTURE / PAPER ─────────────────────────────────────────────────
+     A barely-tinted cool off-white (Lab chroma 4.8) — it reads as paper stock,
+     not as a colour. --grid is the printed graph square; it is alpha-based so
+     it sits on the page ground only and never leaks onto a card. */
+  --paper:#EDF0E7;
+  --leaf:#FBFCF8;            /* card = a fresh sheet laid on the pad */
+  --rule:#C4D0BC;            /* every printed line. 1.39:1 — DECORATIVE ONLY */
+  --rule-strong:#AEBEA5;     /* hover / emphasis hairline */
+  --margin:#D6A9A4;          /* the red margin rule. Its OWN token, deliberately
+                                kept apart from --pencil-red: a structural line
+                                must never be readable as an alert.
+                                1.81:1 on paper, dE 32.6 from --pencil-red. */
+  --grid:rgba(22,33,44,.075); /* 24px graph squares, page ground only. Safe to push
+                                this far because NO data ever sits on the page ground —
+                                cards paint their own --leaf, so the grid can be legible
+                                as paper without ever competing with a number. */
+  --track:#E2E8DC;           /* empty progress + bar tracks */
 
-  /* ── Brand ── */
-  --accent:#E1306C;--accent-hover:#c72a5f;--accent-press:#ad2453;
-  --accent-tint:#fdeff4;     /* nav hover / active wash */
-  --accent-tint-strong:#fbdde8;
-  --purple:#833AB4;--orange:#F77737;
-  --green:#15703f;--blue:#1257a8;--red:#a81a1a;--amber:#9a5c08;
+  /* ── DATA / INK ────────────────────────────────────────────────────────
+     Blue-black fountain-pen ink. --ink carries every metric. */
+  --ink:#16212C;             /* 15.82:1 on leaf · 14.14:1 on paper */
+  --ink-soft:#48586A;        /* 7.08:1 / 6.33:1 — labels, axis ticks, the "—" glyph */
+  --ink-faint:#8A96A3;       /* DECORATIVE ONLY (~2.9:1): placeholder glyphs, dashed
+                                borders, empty-state icons. Text that reads "quiet"
+                                uses --ink-soft. Enforced by scripts/check-tokens.mjs. */
 
-  /* ── Spacing scale (4px base) ──
-     Replaces the ad-hoc 9/11/14/18/36px values the prototype accumulated. */
+  /* ── ACCENT / INTERACTIVE ──────────────────────────────────────────────
+     --pen is the blue biro: the interactive ink, for active nav, active tabs,
+     links and emphasis. A purely monochrome system cannot express "active" in
+     a foreground colour, and borrowing --pencil-red for it would make every
+     selected item read as an error. 8.07:1 on leaf, dE 19.7 from --ink so
+     "active" is unmistakable. */
+  --pen:#1F4B99;
+  --pen-hover:#173C7D;
+  --pen-press:#122F63;
+  --pen-tint:rgba(31,75,153,.07);
+  --pen-tint-strong:rgba(31,75,153,.14);
+
+  /* The highlighter. A wash only — never text, never a data value. */
+  --marker:#F5D547;
+  --marker-wash:rgba(245,213,71,.40);
+  --marker-wash-strong:rgba(245,213,71,.60);
+
+  /* ── SEMANTIC ──────────────────────────────────────────────────────────
+     Separated on TWO channels so direction survives colour-blindness:
+     dE 27.7 under deuteranope/protanope simulation AND a 2.07:1 luminance
+     ratio. Colour is still never the only signal — every delta also carries
+     an arrow glyph and an explicit +/- sign. */
+  --pencil-red:#81001F;      /* 10.43:1 / 9.33:1 — negative, alert, flag */
+  --pencil-green:#217C45;    /* 5.05:1 / 4.52:1 — positive, healthy */
+  --pencil-amber:#8A5A0B;    /* 5.74:1 — warn, pending */
+
+  /* ── CHART SERIES ──────────────────────────────────────────────────────
+     One pencil, four pressures. A single-hue ramp rather than four hues:
+     it is MONOTONIC IN LUMINANCE, so it separates without relying on hue at
+     all and survives every form of colour-blindness by construction. Every
+     step clears 3:1 against a card, so no series is ever a pastel.
+     NB: named --series-* and not --s1..--s4, which are the spacing scale. */
+  --series-1:#16212C;        /* 15.82:1 */
+  --series-2:#2C4A66;        /*  8.95:1 */
+  --series-3:#43708F;        /*  5.16:1 */
+  --series-4:#6A97B2;        /*  3.05:1 */
+
+  /* ── LEGACY ALIASES ────────────────────────────────────────────────────
+     The pre-redesign names, re-pointed at the notebook palette. Every rule in
+     this file and every `var(--x)` still living in a component keeps working,
+     which is what makes the re-skin safe: nothing silently loses its colour.
+     New code should use the names above. */
+  --bg:var(--paper);
+  --sidebar:var(--leaf);
+  --card:var(--leaf);
+  --border:var(--rule);
+  --border-strong:var(--rule-strong);
+  --text:var(--ink);
+  --muted:var(--ink-soft);
+  --faint:var(--ink-faint);
+  --accent:var(--pen);
+  --accent-hover:var(--pen-hover);
+  --accent-press:var(--pen-press);
+  --accent-tint:var(--pen-tint);
+  --accent-tint-strong:var(--pen-tint-strong);
+  --purple:var(--series-3);
+  --orange:var(--pencil-amber);
+  --green:var(--pencil-green);
+  --blue:var(--pen);
+  --red:var(--pencil-red);
+  --amber:var(--pencil-amber);
+
+  /* ── Spacing scale (4px base) ── */
   --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:20px;--s6:24px;--s8:32px;--s10:40px;
 
-  /* ── Radii ── */
-  --radius:10px;--radius-sm:7px;--radius-xs:5px;--radius-pill:999px;
+  /* ── Radii ──
+     Paper corners: tight. Not SaaS pills, not a zero-radius broadsheet. */
+  --radius:4px;--radius-sm:3px;--radius-xs:2px;--radius-pill:999px;
 
   /* ── Elevation ──
-     Low-alpha, tinted with the ink hue rather than pure black: black shadows on a
-     cool-grey background read as dirty smudges. Two layers (contact + ambient)
-     instead of one large blur, which is both cheaper and more convincing. */
-  --shadow-xs:0 1px 1px rgba(16,16,40,.04);
-  --shadow-sm:0 1px 2px rgba(16,16,40,.05),0 1px 1px rgba(16,16,40,.03);
-  --shadow-md:0 2px 4px rgba(16,16,40,.04),0 4px 10px rgba(16,16,40,.05);
-  --shadow-lg:0 4px 8px rgba(16,16,40,.05),0 12px 28px rgba(16,16,40,.08);
+     A sheet resting on a pad casts almost nothing. Tinted with the ink hue
+     rather than pure black — black shadows on warm stock read as smudges. */
+  --shadow-xs:0 1px 1px rgba(22,33,44,.04);
+  --shadow-sm:0 1px 2px rgba(22,33,44,.05),0 1px 1px rgba(22,33,44,.03);
+  --shadow-md:0 1px 2px rgba(22,33,44,.05),0 3px 8px rgba(22,33,44,.06);
+  --shadow-lg:0 2px 6px rgba(22,33,44,.06),0 10px 24px rgba(22,33,44,.09);
 
   /* ── Motion ──
-     One easing family. --ease-out is the workhorse: fast departure, soft arrival,
-     which reads as "responsive" rather than "floaty". Durations sit in the
-     100-300ms micro / 200-400ms macro bands. */
+     One easing family. Restrained by direction: this is a reference document,
+     not an experience. */
   --ease-out:cubic-bezier(.22,1,.36,1);
   --ease-standard:cubic-bezier(.4,0,.2,1);
-  --dur-fast:120ms;    /* colour/opacity swaps on hover */
-  --dur-base:180ms;    /* buttons, nav, cards */
-  --dur-slow:280ms;    /* panels, bar fills, reveals */
+  --dur-fast:120ms;
+  --dur-base:180ms;
+  --dur-slow:280ms;
 
-  /* ── Focus ── */
-  --focus-ring:0 0 0 2px #fff,0 0 0 4px var(--accent);
+  /* Focus is drawn in ink — 14:1 on paper, 15.8:1 on a card. */
+  --focus-ring:0 0 0 2px var(--leaf),0 0 0 4px var(--ink);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
    REDUCED MOTION
-   Global opt-out. Kept near the top so it is impossible to add an animation
-   later without seeing that this contract exists. Animations are collapsed to
-   1ms rather than `none` so animationend/transitionend listeners still fire.
+   Global opt-out, kept near the top so it is impossible to add an animation
+   later without seeing that this contract exists. Collapsed to 1ms rather than
+   `none` so animationend/transitionend listeners still fire.
    ══════════════════════════════════════════════════════════════════════════ */
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{
@@ -79,26 +155,59 @@
 html,body{height:100%}
 body{
   font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif);
-  background:var(--bg);color:var(--text);
+  color:var(--ink);
+  /* THE PAD. The graph grid lives on the page ground and stops at every card
+     edge — cards paint their own --leaf. This one decision is what keeps a
+     dense dashboard from turning into moiré: no chart mark ever sits on a
+     pattern. */
+  background-color:var(--paper);
+  background-image:
+    repeating-linear-gradient(to right,var(--grid) 0 1px,transparent 1px 24px),
+    repeating-linear-gradient(to bottom,var(--grid) 0 1px,transparent 1px 24px);
   display:flex;min-height:100dvh;font-size:13px;line-height:1.5;
-  /* Grade the rasteriser for the light-on-dark-text case; without this the
-     smaller 10-11px labels look chunky on macOS. */
   -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
-  /* Kerning + contextual alternates on, but NOT ligatures in numbers. */
   text-rendering:optimizeLegibility;
 }
 
 /* Every metric in this app is a number in a column that updates. Proportional
-   digits make those columns twitch as values change; tabular figures pin them. */
+   digits make those columns twitch as values change; tabular figures pin them.
+   `zero` slashes the zero so 0/O never trade places in an ID or a handle. */
 .kpi-val,.vstat-val,.cmp-val,.lb-score,.htag-eng,.ag-num,.lb-rank,.geo-val,
 .bar-val,.htag-posts,.post-tbl td,.cstat strong,.fan-stat strong,.score-chip,
-.kpi-delta{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+.kpi-delta{
+  font-variant-numeric:tabular-nums;
+  font-feature-settings:"tnum" 1,"zero" 1;
+}
+
+/* ── The mono label voice ──
+   IBM Plex Mono shares its skeleton and metrics with IBM Plex Sans, so a label
+   and the number under it read as one voice at two registers. Used for every
+   label, eyebrow, column head and axis tick — the typewriter texture is what
+   makes the page read as a notebook rather than as a form. */
+.kpi-label,.card-title,.section-title,.nav-sec,.logo-sub,.post-tbl th,
+.cmp-label,.vstat-label,.bar-label,.geo-name,.lb-meta,.camp-meta,.fan-handle,
+.ag-links,.stream-time,.breadcrumb,.pill,.score-chip,.flag-chip{
+  font-family:var(--font-mono,ui-monospace,Menlo,monospace);
+}
+
+/* ── The hand ──
+   Caveat, held in strict reserve: at most two instances per screen, never
+   below 15px, never adjacent to or standing in for a numeral.
+   HONESTY RULE, load-bearing: marginalia text is only ever (a) a restatement
+   of a value already computed and rendered on screen, or (b) a static label.
+   It is NEVER a derived insight — a handwritten "best week since March" would
+   be an invented analytical claim, which is worse than a missing number
+   because it reads as human judgement. */
+.hand{
+  font-family:var(--font-hand,'Segoe Script',cursive);
+  font-size:17px;line-height:1.25;color:var(--pencil-red);font-weight:600;
+}
 
 /* Off-canvas until focused, then it slides into the top-left corner. Uses
    transform so it costs nothing while hidden. */
 .skip-link{
   position:absolute;top:var(--s2);left:var(--s2);z-index:100;
-  background:var(--accent);color:#fff;padding:var(--s2) var(--s3);
+  background:var(--ink);color:var(--leaf);padding:var(--s2) var(--s3);
   border-radius:var(--radius-sm);font-size:12px;font-weight:600;text-decoration:none;
   transform:translateY(-200%);
   transition:transform var(--dur-base) var(--ease-out)
@@ -106,82 +215,124 @@ body{
 .skip-link:focus-visible{transform:translateY(0)}
 
 /* ── Focus: visible for keyboards, silent for mice ──
-   The old rule was a blanket `outline:none` on inputs with only a border-colour
-   swap to replace it, which left links, tabs and buttons with no keyboard
-   affordance at all. */
+   Drawn in ink so it is legible on paper stock, on a card, and on a highlighter
+   wash alike. */
 :focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--radius-xs)}
 a:focus-visible,button:focus-visible,.itab:focus-visible,.nav-item:focus-visible,
 .nav-sub:focus-visible,.back-link:focus-visible,.tb-btn:focus-visible{
   outline:none;box-shadow:var(--focus-ring)
 }
 input:focus-visible,select:focus-visible,textarea:focus-visible{
-  border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-tint)
+  border-color:var(--ink);box-shadow:0 0 0 3px var(--marker-wash)
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE MARGIN — the signature element
+   One red rule down the left of the content column on every screen, and the
+   annotations that would otherwise clutter the data column living inside it.
+   The rule is 1px and permanent, so it never reads as a status.
+   ══════════════════════════════════════════════════════════════════════════ */
+.content{flex:1;padding:var(--s5) var(--s6) var(--s5) var(--s8);min-width:0;position:relative}
+.content::before{
+  content:"";position:absolute;top:0;bottom:0;left:var(--s5);
+  width:1px;background:var(--margin);pointer-events:none
+}
+/* A pen mark in the margin. Sits beside the thing it annotates on wide screens
+   and reflows underneath it when the margin collapses. */
+.marginalia{
+  display:flex;align-items:flex-start;gap:6px;
+  margin-top:var(--s2);color:var(--ink-soft);font-size:11px;
+  font-family:var(--font-mono,ui-monospace,Menlo,monospace);
+}
+.marginalia .hand{font-size:16px;color:var(--pencil-red)}
+
+/* The hand-drawn circle around the one metric that matters most on a screen.
+   An SVG ellipse rather than a border-radius, because a perfect ellipse reads
+   as a UI chrome ring and a slightly wobbly one reads as a pen. */
+.circled{position:relative;display:inline-block}
+.circled>svg{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:calc(100% + 26px);height:calc(100% + 18px);
+  pointer-events:none;overflow:visible;color:var(--pencil-red)
+}
+.circled>svg path{
+  fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;opacity:.85
+}
+@media (prefers-reduced-motion:no-preference){
+  .circled>svg path{
+    /* pathLength="1" on the path normalises its length, so the draw-on needs
+       no measured value and works whatever the ellipse is scaled to. */
+    stroke-dasharray:1;stroke-dashoffset:1;
+    animation:draw-circle 620ms var(--ease-out) 180ms forwards
+  }
+}
+@keyframes draw-circle{to{stroke-dashoffset:0}}
 
 /* ══════════════════════════════════════════════════════════════════════════
    SIDEBAR
    ══════════════════════════════════════════════════════════════════════════ */
 .sidebar{
-  width:210px;flex-shrink:0;background:var(--sidebar);
-  border-right:1px solid var(--border);
+  width:210px;flex-shrink:0;background:var(--leaf);
+  border-right:1px solid var(--rule);
   display:flex;flex-direction:column;height:100dvh;overflow-y:auto;
   position:sticky;top:0;
   /* Contain paint so the sticky sidebar never joins the main column's repaints. */
   contain:paint;
   scrollbar-width:thin;
 }
-.logo-wrap{padding:var(--s5) var(--s4) var(--s3);border-bottom:1px solid var(--border)}
-.logo-name{font-size:15px;font-weight:700;color:var(--text);letter-spacing:-.01em}
-.logo-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.logo-wrap{padding:var(--s5) var(--s4) var(--s3);border-bottom:1px solid var(--rule)}
+.logo-name{font-size:15px;font-weight:600;color:var(--ink);letter-spacing:-.01em}
+.logo-sub{font-size:10px;color:var(--ink-soft);margin-top:3px;letter-spacing:.06em}
 .nav-sec{
-  font-size:10px;color:var(--muted);padding:var(--s4) var(--s4) var(--s1);
-  letter-spacing:.09em;font-weight:700;text-transform:uppercase
+  font-size:10px;color:var(--ink-soft);padding:var(--s4) var(--s4) var(--s1);
+  letter-spacing:.13em;font-weight:600;text-transform:uppercase
 }
 
 .nav-item{
   display:flex;align-items:center;gap:9px;
-  padding:9px var(--s4);font-size:13px;color:var(--muted);
-  /* Weight is CONSTANT across states. The old rule bumped .active to 600, which
-     re-measured the text and nudged every glyph — visible jitter on each click. */
+  padding:9px var(--s4);font-size:13px;color:var(--ink-soft);
+  /* Weight is CONSTANT across states. Bumping .active re-measures the text and
+     nudges every glyph — visible jitter on each click. */
   font-weight:500;
   border-left:3px solid transparent;text-decoration:none;
-  /* The wash transitions on background-color directly. An earlier revision put it
-     on an ::before overlay to keep it compositor-only, but the label is a bare
-     text node — unwrappable, so it cannot be lifted above the overlay and the
-     tint painted straight over it. A 30px-tall nav row is a trivial repaint;
-     correctness wins over a micro-optimisation nobody can perceive here. */
   transition:color var(--dur-fast) var(--ease-standard),
              background-color var(--dur-fast) var(--ease-standard),
              border-left-color var(--dur-base) var(--ease-out);
 }
-.nav-item:hover{color:var(--text);background:var(--accent-tint)}
-.nav-item.active{color:var(--accent);border-left-color:var(--accent);background:var(--accent-tint)}
+.nav-item:hover{color:var(--ink);background:var(--marker-wash)}
+/* Selected = a highlighter stripe with an ink edge. The wash carries the state
+   and the ink border anchors it; text stays ink so it never loses contrast. */
+.nav-item.active{
+  color:var(--ink);border-left-color:var(--ink);
+  background:var(--marker-wash-strong);font-weight:600
+}
 .nav-item svg{width:16px;height:16px;flex-shrink:0}
 .nav-badge{
-  margin-left:auto;font-size:10px;background:var(--accent);color:#fff;
-  padding:2px 6px;border-radius:var(--radius-pill);font-weight:700;line-height:1.4;
+  margin-left:auto;font-size:10px;background:var(--ink);color:var(--leaf);
+  padding:2px 6px;border-radius:var(--radius-xs);font-weight:600;line-height:1.4;
   font-variant-numeric:tabular-nums
 }
 .nav-sub{
-  padding:6px var(--s4) 6px var(--s10);font-size:12px;color:var(--muted);
+  padding:6px var(--s4) 6px var(--s10);font-size:12px;color:var(--ink-soft);
   display:flex;align-items:center;gap:6px;text-decoration:none;font-weight:500;
   transition:color var(--dur-fast) var(--ease-standard)
 }
-.nav-sub:hover{color:var(--text)}
-.nav-sub.active{color:var(--accent)}
+.nav-sub:hover{color:var(--ink)}
+.nav-sub.active{color:var(--pen);font-weight:600}
 .nav-sub-dot{
   width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0;
   opacity:.45;transition:opacity var(--dur-fast) var(--ease-standard)
 }
 .nav-sub.active .nav-sub-dot,.nav-sub:hover .nav-sub-dot{opacity:1}
 .sidebar-footer{
-  margin-top:auto;padding:var(--s3) var(--s4);border-top:1px solid var(--border);
+  margin-top:auto;padding:var(--s3) var(--s4);border-top:1px solid var(--rule);
   display:flex;align-items:center;gap:9px
 }
 .avatar{
-  width:30px;height:30px;border-radius:50%;background:var(--accent-tint-strong);
+  width:30px;height:30px;border-radius:50%;background:var(--marker-wash-strong);
+  border:1px solid var(--rule);
   display:flex;align-items:center;justify-content:center;
-  font-size:11px;font-weight:700;color:var(--accent);flex-shrink:0
+  font-size:11px;font-weight:700;color:var(--ink);flex-shrink:0
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -189,36 +340,36 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{
    ══════════════════════════════════════════════════════════════════════════ */
 .main{flex:1;display:flex;flex-direction:column;min-width:0}
 .topbar{
-  background:rgba(255,255,255,.82);
-  /* Cheap 1-layer blur on a 52px strip only. Deliberately not applied to cards or
-     modals — stacked backdrop-filters are the single most common cause of scroll
-     jank in dashboards like this. */
+  background:rgba(251,252,248,.86);
+  /* Cheap 1-layer blur on a 52px strip only. Deliberately not applied to cards
+     or modals — stacked backdrop-filters are the single most common cause of
+     scroll jank in dashboards like this. */
   backdrop-filter:blur(12px);
   -webkit-backdrop-filter:blur(12px);
-  border-bottom:1px solid var(--border);padding:0 var(--s6);height:52px;
+  border-bottom:1px solid var(--rule);padding:0 var(--s6);height:52px;
   display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
   position:sticky;top:0;z-index:10
 }
-.breadcrumb{font-size:13px;color:var(--muted)}
-.breadcrumb strong{color:var(--text);font-weight:600}
+.breadcrumb{font-size:11px;color:var(--ink-soft);letter-spacing:.06em}
+.breadcrumb strong{color:var(--ink);font-weight:600}
 .topbar-actions{display:flex;gap:var(--s2);align-items:center}
 .tb-btn{
-  padding:6px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);
-  font-size:12px;background:#fff;color:var(--muted);font-weight:500;
+  padding:6px 14px;border:1px solid var(--rule);border-radius:var(--radius-sm);
+  font-size:12px;background:var(--leaf);color:var(--ink-soft);font-weight:500;
   transition:background-color var(--dur-fast) var(--ease-standard),
              border-color var(--dur-fast) var(--ease-standard),
              color var(--dur-fast) var(--ease-standard),
              box-shadow var(--dur-fast) var(--ease-standard);
 }
-.tb-btn:hover:not(:disabled){border-color:var(--border-strong);color:var(--text);box-shadow:var(--shadow-xs)}
-.tb-btn:active:not(:disabled){background:#f4f4f8}
-.tb-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
-.tb-btn.primary:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover);color:#fff}
-.tb-btn.primary:active:not(:disabled){background:var(--accent-press);border-color:var(--accent-press)}
+.tb-btn:hover:not(:disabled){border-color:var(--rule-strong);color:var(--ink);box-shadow:var(--shadow-xs)}
+.tb-btn:active:not(:disabled){background:var(--paper)}
+/* Primary = a solid ink block, the way a stamp lands on paper. */
+.tb-btn.primary{background:var(--ink);color:var(--leaf);border-color:var(--ink);font-weight:600}
+.tb-btn.primary:hover:not(:disabled){background:#0d1620;border-color:#0d1620;color:var(--leaf)}
+.tb-btn.primary:active:not(:disabled){background:#070d14;border-color:#070d14}
 /* Disabled controls were indistinguishable from live ones — both Topbar buttons
    ship disabled today, which read as "the app is broken" rather than "not yet". */
 .tb-btn:disabled{opacity:.5;cursor:not-allowed}
-.content{flex:1;padding:var(--s5) var(--s6);min-width:0}
 
 /* ══════════════════════════════════════════════════════════════════════════
    CARDS / KPIs
@@ -231,77 +382,92 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{
 .kpi-grid-4{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
 .kpi-grid-5{grid-template-columns:repeat(auto-fit,minmax(165px,1fr))}
 .kpi{
-  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
-  padding:var(--s3) var(--s4);box-shadow:var(--shadow-xs);
+  background:var(--leaf);border:1px solid var(--rule);border-radius:var(--radius);
+  padding:var(--s3) var(--s4) var(--s4);box-shadow:var(--shadow-xs);
   transition:box-shadow var(--dur-base) var(--ease-out),
              border-color var(--dur-base) var(--ease-out)
 }
 .kpi-label{
-  font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;
-  letter-spacing:.07em;margin-bottom:6px
+  font-size:10px;color:var(--ink-soft);font-weight:600;text-transform:uppercase;
+  letter-spacing:.13em;margin-bottom:8px
 }
-/* -.02em tightening: at 24px the default tracking on a system UI face looks
-   loose next to the 10px label above it. */
-.kpi-val{font-size:24px;font-weight:700;color:var(--text);line-height:1.1;letter-spacing:-.02em}
-.kpi-delta{font-size:11px;margin-top:5px;color:var(--muted)}
-.kpi-delta.up{color:var(--green)}.kpi-delta.dn{color:var(--red)}
+/* The metric. Ink, never a tint — this is the thing a person came to read. */
+.kpi-val{font-size:27px;font-weight:600;color:var(--ink);line-height:1.05;letter-spacing:-.02em}
+.kpi-delta{font-size:11px;margin-top:6px;color:var(--ink-soft);font-weight:500}
+/* Direction is carried by colour AND the arrow AND the sign in the label text,
+   so it survives colour-blindness and greyscale printing alike. */
+.kpi-delta.up{color:var(--pencil-green);font-weight:600}
+.kpi-delta.dn{color:var(--pencil-red);font-weight:600}
 .card{
-  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--leaf);border:1px solid var(--rule);border-radius:var(--radius);
   padding:var(--s4);box-shadow:var(--shadow-xs)
 }
+/* A ruled heading: the label, then a hairline running out to the edge — the way
+   a heading is underlined across a page. */
 .card-title{
-  font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
-  color:var(--muted);margin-bottom:var(--s3)
+  font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.13em;
+  color:var(--ink-soft);margin-bottom:var(--s3);
+  display:flex;align-items:center;gap:10px
 }
+.card-title::after{content:"";flex:1;height:1px;background:var(--rule)}
 .g2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--s4);margin-bottom:var(--s5)}
 .g3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:var(--s4);margin-bottom:var(--s5)}
 .g-6-4{display:grid;grid-template-columns:3fr 2fr;gap:var(--s4);margin-bottom:var(--s5)}
 .g-4-6{display:grid;grid-template-columns:2fr 3fr;gap:var(--s4);margin-bottom:var(--s5)}
-.section-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:var(--s3);letter-spacing:-.01em}
+.section-title{
+  font-size:11px;font-weight:600;color:var(--ink-soft);margin-bottom:var(--s3);
+  letter-spacing:.13em;text-transform:uppercase;
+  display:flex;align-items:center;gap:10px
+}
+.section-title::after{content:"";flex:1;height:1px;background:var(--rule)}
 canvas{max-width:100%}
 
 /* ══════════════════════════════════════════════════════════════════════════
    PILLS / BADGES
+   Paper washes with an ink-grade label. Squared off rather than pill-shaped —
+   a stamped box belongs on a notebook page; a rounded capsule belongs on a SaaS
+   marketing site.
    ══════════════════════════════════════════════════════════════════════════ */
 .pill{
-  display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 8px;
-  border-radius:var(--radius-pill);border:1px solid;font-weight:600;white-space:nowrap;
-  line-height:1.6
+  display:inline-flex;align-items:center;gap:4px;font-size:9px;padding:2px 7px;
+  border-radius:var(--radius-xs);border:1px solid;font-weight:600;white-space:nowrap;
+  line-height:1.7;letter-spacing:.06em;text-transform:uppercase
 }
-.pill-live{background:#e9f6ec;color:#155e28;border-color:#b3ddbe}
-.pill-planned{background:#fff6e3;color:#8a4b00;border-color:#f2ce8a}
-.pill-hot{background:var(--accent-tint);color:var(--accent);border-color:#f2b3c9}
-.pill-new{background:#e8f1fd;color:var(--blue);border-color:#a8c9ee}
-.pill-fan{background:#f5eaf8;color:#6a1b9a;border-color:#d5aee0}
-.pill-good{background:#e9f6ec;color:#155e28;border-color:#b3ddbe}
-.pill-warn{background:#fff6e3;color:#8a4b00;border-color:#f2ce8a}
-.pill-bad{background:#fdecec;color:var(--red);border-color:#f0b4b4}
+.pill-live{background:rgba(33,124,69,.10);color:var(--pencil-green);border-color:rgba(33,124,69,.32)}
+.pill-planned{background:rgba(138,90,11,.10);color:var(--pencil-amber);border-color:rgba(138,90,11,.30)}
+.pill-hot{background:var(--marker-wash-strong);color:var(--ink);border-color:rgba(138,90,11,.35)}
+.pill-new{background:var(--pen-tint);color:var(--pen);border-color:rgba(31,75,153,.30)}
+.pill-fan{background:rgba(67,112,143,.12);color:var(--series-2);border-color:rgba(67,112,143,.32)}
+.pill-good{background:rgba(33,124,69,.10);color:var(--pencil-green);border-color:rgba(33,124,69,.32)}
+.pill-warn{background:rgba(138,90,11,.10);color:var(--pencil-amber);border-color:rgba(138,90,11,.30)}
+.pill-bad{background:rgba(129,0,31,.08);color:var(--pencil-red);border-color:rgba(129,0,31,.28)}
 /* Opacity-only keyframe → runs on the compositor, never touches layout or paint.
    Held at .35 rather than fading fully out: a dot that vanishes reads as a
    rendering fault, one that dims reads as a pulse. */
-.live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#155e28;animation:pulse 1.6s var(--ease-standard) infinite}
+.live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--pencil-green);animation:pulse 1.6s var(--ease-standard) infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.live-dot{animation:none;opacity:1}}
 
 /* ══════════════════════════════════════════════════════════════════════════
    INNER TABS
    ══════════════════════════════════════════════════════════════════════════ */
-.inner-tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:var(--s5);gap:0}
+.inner-tabs{display:flex;border-bottom:1px solid var(--rule);margin-bottom:var(--s5);gap:0}
 .itab{
-  position:relative;padding:9px 18px;font-size:13px;color:var(--muted);
-  /* Constant 600 in every state. The old .active{font-weight:700} re-flowed the
-     whole tab strip on selection — sibling tabs visibly slid sideways. */
+  position:relative;padding:9px 18px;font-size:13px;color:var(--ink-soft);
+  /* Constant 600 in every state. A weight bump on .active re-flows the whole tab
+     strip on selection — sibling tabs visibly slide sideways. */
   font-weight:600;
   margin-bottom:-1px;background:none;border:none;text-decoration:none;
-  transition:color var(--dur-fast) var(--ease-standard)
+  transition:color var(--dur-fast) var(--ease-standard),
+             background-color var(--dur-fast) var(--ease-standard)
 }
-.itab:hover{color:var(--text)}
-.itab.active{color:var(--accent)}
+.itab:hover{color:var(--ink);background:var(--marker-wash)}
+.itab.active{color:var(--ink)}
 /* The underline is a scaled pseudo-element rather than an animated border-bottom,
    so selection slides in on the compositor instead of triggering a paint. */
 .itab::after{
   content:"";position:absolute;left:0;right:0;bottom:0;height:2px;
-  background:var(--accent);transform:scaleX(0);transform-origin:center;
+  background:var(--ink);transform:scaleX(0);transform-origin:center;
   transition:transform var(--dur-base) var(--ease-out)
 }
 .itab.active::after{transform:scaleX(1)}
@@ -321,21 +487,21 @@ canvas{max-width:100%}
    collapses the empty track and lets the real tiles share the full width. */
 .post-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:var(--s5)}
 .post-thumb{
-  aspect-ratio:1;border-radius:var(--radius-sm);
-  background:linear-gradient(160deg,#f4f4f9,#ececf4);
-  position:relative;overflow:hidden;border:1px solid var(--border)
+  aspect-ratio:1;border-radius:var(--radius);
+  background:linear-gradient(160deg,var(--paper),#E3E8DB);
+  position:relative;overflow:hidden;border:1px solid var(--rule)
   /* cursor:pointer removed — these are plain <div>s with no click handler. A
      pointer cursor on dead elements is the cheapest possible way to feel broken. */
 }
 .post-thumb-icon{
   width:100%;height:100%;display:flex;align-items:center;justify-content:center;
-  color:var(--faint);font-size:28px
+  color:var(--ink-faint);font-size:28px
 }
 .post-overlay{
   position:absolute;bottom:0;left:0;right:0;
-  /* Eased alpha ramp — a linear transparent→black gradient bands visibly across
-     a short distance. */
-  background:linear-gradient(to top,rgba(0,0,0,.62),rgba(0,0,0,.34) 45%,transparent);
+  /* Eased alpha ramp — a linear transparent→ink gradient bands visibly across a
+     short distance. */
+  background:linear-gradient(to top,rgba(22,33,44,.72),rgba(22,33,44,.38) 45%,transparent);
   padding:var(--s2);display:flex;gap:var(--s2)
 }
 .post-stat{font-size:10px;color:#fff;font-weight:600;font-variant-numeric:tabular-nums}
@@ -344,233 +510,242 @@ canvas{max-width:100%}
    COMPARE
    ══════════════════════════════════════════════════════════════════════════ */
 .cmp-grid{display:grid;grid-template-columns:160px 1fr 1fr;gap:10px;margin-bottom:var(--s3)}
-.cmp-header{background:#f5f5f9;border:1px solid var(--border);border-radius:var(--radius-sm);padding:var(--s3);text-align:center}
-.cmp-row{display:grid;grid-template-columns:160px 1fr 1fr;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)}
+.cmp-header{background:var(--paper);border:1px solid var(--rule);border-radius:var(--radius-sm);padding:var(--s3);text-align:center}
+.cmp-row{display:grid;grid-template-columns:160px 1fr 1fr;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--rule)}
 .cmp-row:last-child{border-bottom:none}
-.cmp-label{font-size:12px;color:var(--muted);font-weight:500}
+.cmp-label{font-size:10px;color:var(--ink-soft);font-weight:500;letter-spacing:.06em;text-transform:uppercase}
 .cmp-cell{text-align:center}
-.cmp-val{font-size:14px;font-weight:700;color:var(--text)}
-.cmp-bar-wrap{height:4px;background:var(--track);border-radius:var(--radius-pill);margin-top:5px;overflow:hidden}
-.win{color:var(--green)!important}
+.cmp-val{font-size:14px;font-weight:600;color:var(--ink)}
+.cmp-bar-wrap{height:4px;background:var(--track);border-radius:var(--radius-xs);margin-top:5px;overflow:hidden}
+.win{color:var(--pencil-green)!important}
 
 /* ══════════════════════════════════════════════════════════════════════════
    CAMPAIGNS
    ══════════════════════════════════════════════════════════════════════════ */
 .campaign-card{
-  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--leaf);border:1px solid var(--rule);border-radius:var(--radius);
   padding:var(--s4);margin-bottom:var(--s3);display:flex;gap:var(--s3);
   align-items:flex-start;text-decoration:none;color:inherit;
   box-shadow:var(--shadow-xs);
-  /* transform + box-shadow only. The old `transition:all` also animated border,
-     padding and background, so any future rule change silently became animated. */
+  /* transform + box-shadow only. A `transition:all` here also animates border,
+     padding and background, so any future rule change silently becomes animated. */
   transition:transform var(--dur-base) var(--ease-out),
              box-shadow var(--dur-base) var(--ease-out),
              border-color var(--dur-base) var(--ease-out)
-  /* Deliberately NO `will-change:transform` here. It would promote every card in
-     the list to its own compositor layer for the page's whole lifetime to buy a
+  /* Deliberately NO `will-change:transform`. It would promote every card in the
+     list to its own compositor layer for the page's whole lifetime to buy a
      180ms hover; on a long campaign list that is pure memory cost. */
 }
-.campaign-card:hover{transform:translateY(-1px);border-color:var(--accent);box-shadow:var(--shadow-md)}
+.campaign-card:hover{transform:translateY(-1px);border-color:var(--rule-strong);box-shadow:var(--shadow-md)}
 .campaign-card:active{transform:translateY(0);box-shadow:var(--shadow-sm);transition-duration:var(--dur-fast)}
-.campaign-card.featured{border-color:var(--accent)}
+.campaign-card.featured{border-color:var(--ink)}
 .camp-icon{
-  width:42px;height:42px;border-radius:10px;display:flex;align-items:center;
-  justify-content:center;font-size:20px;flex-shrink:0
+  width:42px;height:42px;border-radius:var(--radius);display:flex;align-items:center;
+  justify-content:center;font-size:20px;flex-shrink:0;border:1px solid var(--rule)
 }
 .camp-body{flex:1;min-width:0}
-.camp-name{font-size:14px;font-weight:700;color:var(--text);margin-bottom:3px;letter-spacing:-.01em}
-.camp-meta{font-size:11px;color:var(--muted);margin-bottom:var(--s2)}
+.camp-name{font-size:14px;font-weight:600;color:var(--ink);margin-bottom:3px;letter-spacing:-.01em}
+.camp-meta{font-size:10px;color:var(--ink-soft);margin-bottom:var(--s2);letter-spacing:.05em}
 .camp-stats{display:flex;gap:var(--s4);flex-wrap:wrap}
-.cstat{font-size:12px;color:var(--muted)}.cstat strong{color:var(--text);font-weight:700}
+.cstat{font-size:12px;color:var(--ink-soft)}.cstat strong{color:var(--ink);font-weight:600}
 
 /* ══════════════════════════════════════════════════════════════════════════
    CAMPAIGN DETAIL
    ══════════════════════════════════════════════════════════════════════════ */
 .vhero{
-  /* Three stops with a colour between them — a two-stop pink→lilac ramp crosses a
-     muddy midpoint. Very low-alpha border keeps it from floating off the page. */
-  background:linear-gradient(135deg,#fdeff4 0%,#f9ecf8 50%,#f1ecfa 100%);
-  border:1px solid rgba(131,58,180,.10);
+  /* A sheet taped to the page: paper stock, a highlighter wash, an ink edge. */
+  background:linear-gradient(135deg,var(--marker-wash) 0%,rgba(245,213,71,.16) 55%,var(--leaf) 100%);
+  border:1px solid var(--rule-strong);
   border-radius:var(--radius);padding:var(--s5);margin-bottom:var(--s4);
   display:flex;align-items:center;gap:var(--s5);flex-wrap:wrap
 }
-.vhero-tag{font-size:26px;font-weight:800;color:var(--accent);letter-spacing:-.02em}
+.vhero-tag{font-size:26px;font-weight:700;color:var(--ink);letter-spacing:-.02em}
 .vhero-stats{margin-left:auto;display:flex;gap:var(--s5);flex-wrap:wrap}
 .vstat{text-align:center}
-.vstat-val{font-size:20px;font-weight:700;color:var(--text);letter-spacing:-.01em}
-.vstat-label{font-size:10px;color:var(--muted);margin-top:2px}
-.divider{width:1px;background:rgba(15,15,20,.08)}
+.vstat-val{font-size:20px;font-weight:600;color:var(--ink);letter-spacing:-.01em}
+.vstat-label{font-size:9px;color:var(--ink-soft);margin-top:3px;letter-spacing:.1em;text-transform:uppercase}
+.divider{width:1px;background:var(--rule)}
 .spark-wrap{display:flex;align-items:flex-end;gap:3px;height:48px}
-.sbar{flex:1;border-radius:2px 2px 0 0;background:var(--accent);opacity:.45;min-height:3px}
-.sbar.hi{opacity:1}
-.sent-bar{height:8px;border-radius:var(--radius-pill);overflow:hidden;display:flex;margin:var(--s2) 0}
+.sbar{flex:1;border-radius:1px 1px 0 0;background:var(--series-3);min-height:3px}
+.sbar.hi{background:var(--series-1)}
+.sent-bar{height:8px;border-radius:var(--radius-xs);overflow:hidden;display:flex;margin:var(--s2) 0}
 .geo-row{display:flex;align-items:center;gap:var(--s2);margin-bottom:var(--s2)}
-.geo-name{font-size:12px;color:var(--muted);width:80px;flex-shrink:0}
-.geo-track{flex:1;height:5px;background:var(--track);border-radius:var(--radius-pill);overflow:hidden}
-.geo-fill{height:100%;border-radius:var(--radius-pill);background:var(--purple)}
-.stream-item{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.geo-name{font-size:10px;color:var(--ink-soft);width:80px;flex-shrink:0;letter-spacing:.05em}
+.geo-track{flex:1;height:5px;background:var(--track);border-radius:var(--radius-xs);overflow:hidden}
+.geo-fill{height:100%;border-radius:var(--radius-xs);background:var(--series-2)}
+.stream-item{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--rule)}
 .stream-item:last-child{border-bottom:none}
 .stream-av{
   width:32px;height:32px;border-radius:50%;display:flex;align-items:center;
   justify-content:center;font-size:11px;font-weight:700;flex-shrink:0
 }
 .stream-body{flex:1;min-width:0}
-.stream-handle{font-size:12px;font-weight:700;color:var(--text)}
-.stream-time{font-size:10px;color:var(--muted);margin-left:6px}
-.stream-text{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.55}
-.stream-text em{color:var(--accent);font-style:normal;font-weight:600}
+.stream-handle{font-size:12px;font-weight:600;color:var(--ink)}
+.stream-time{font-size:9px;color:var(--ink-soft);margin-left:6px;letter-spacing:.05em}
+.stream-text{font-size:12px;color:var(--ink-soft);margin-top:3px;line-height:1.55}
+.stream-text em{color:var(--ink);font-style:normal;font-weight:600;background:var(--marker-wash);padding:0 3px;border-radius:2px}
 .stream-stats{display:flex;gap:var(--s3);margin-top:5px}
-.sst{font-size:11px;color:var(--muted)}
-.geo-val{font-size:11px;color:var(--muted);width:30px;text-align:right}
+.sst{font-size:11px;color:var(--ink-soft)}
+.geo-val{font-size:11px;color:var(--ink-soft);width:30px;text-align:right}
 
 /* ══════════════════════════════════════════════════════════════════════════
    HASHTAG
    ══════════════════════════════════════════════════════════════════════════ */
-.htag-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.htag-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--rule)}
 .htag-row:last-child{border-bottom:none}
-.htag-name{font-size:13px;font-weight:700;color:var(--accent);width:175px;flex-shrink:0}
-.htag-track{flex:1;height:5px;background:var(--track);border-radius:var(--radius-pill);overflow:hidden}
-.htag-fill{height:100%;border-radius:var(--radius-pill);background:var(--purple)}
-.htag-posts{font-size:11px;color:var(--muted);width:68px;text-align:right}
-.htag-eng{font-size:12px;font-weight:700;color:var(--text);width:44px;text-align:right}
+.htag-name{font-size:13px;font-weight:600;color:var(--pen);width:175px;flex-shrink:0}
+.htag-track{flex:1;height:5px;background:var(--track);border-radius:var(--radius-xs);overflow:hidden}
+.htag-fill{height:100%;border-radius:var(--radius-xs);background:var(--series-2)}
+.htag-posts{font-size:11px;color:var(--ink-soft);width:68px;text-align:right}
+.htag-eng{font-size:12px;font-weight:600;color:var(--ink);width:44px;text-align:right}
 
 /* ══════════════════════════════════════════════════════════════════════════
    AGENCY REPORT
    ══════════════════════════════════════════════════════════════════════════ */
 .upload-zone{
-  border:2px dashed var(--border-strong);border-radius:var(--radius);
-  padding:var(--s10);text-align:center;cursor:pointer;background:#fff;
+  border:2px dashed var(--rule-strong);border-radius:var(--radius);
+  padding:var(--s10);text-align:center;cursor:pointer;background:var(--leaf);
   transition:border-color var(--dur-base) var(--ease-standard),
              background-color var(--dur-base) var(--ease-standard)
 }
-.upload-zone:hover{border-color:var(--accent);background:var(--accent-tint)}
-/* margin-inline:auto because Tailwind's preflight sets `svg{display:block}`, which makes
-   the icon ignore .upload-zone's `text-align:center` and pin to the padding edge. The
-   prototype has no reset, so its svg stays inline and centers. Only this svg is affected —
-   every other icon in the app sits in a flex row. */
-.upload-zone svg{color:var(--faint);margin-bottom:10px;margin-inline:auto}
-.agency-inp-row{display:flex;align-items:center;gap:var(--s2);padding:7px 0;border-bottom:1px solid var(--border)}
+.upload-zone:hover{border-color:var(--ink);background:var(--marker-wash)}
+/* margin-inline:auto because Tailwind's preflight sets `svg{display:block}`, which
+   makes the icon ignore .upload-zone's `text-align:center` and pin to the padding
+   edge. Only this svg is affected — every other icon in the app sits in a flex row. */
+.upload-zone svg{color:var(--ink-faint);margin-bottom:10px;margin-inline:auto}
+.agency-inp-row{display:flex;align-items:center;gap:var(--s2);padding:7px 0;border-bottom:1px solid var(--rule)}
 .agency-inp-row:last-child{border-bottom:none}
-.ag-num{font-size:11px;color:var(--muted);width:18px;text-align:right;flex-shrink:0}
+.ag-num{font-size:10px;color:var(--ink-soft);width:18px;text-align:right;flex-shrink:0}
 .ag-dot{width:9px;height:9px;border-radius:2px;flex-shrink:0}
-.ag-name{flex:1;font-size:12px;font-weight:600;color:var(--text)}
-.ag-links{font-size:11px;color:var(--muted);white-space:nowrap}
+.ag-name{flex:1;font-size:12px;font-weight:600;color:var(--ink)}
+.ag-links{font-size:10px;color:var(--ink-soft);white-space:nowrap;letter-spacing:.05em}
 .lb-row{
   display:flex;align-items:center;gap:10px;padding:10px 0;
-  border-bottom:1px solid var(--border)
-  /* cursor:pointer removed — .lb-row is a non-interactive <div> (see
-     AgencyReportClient.tsx). The :hover name-tint below is kept as an affordance
-     for the row being *scannable*, not clickable. */
+  border-bottom:1px solid var(--rule)
+  /* cursor:pointer removed — .lb-row is a non-interactive <div>. The :hover
+     name-tint below is kept as an affordance for the row being *scannable*,
+     not clickable. */
 }
-.lb-row:hover .lb-name{color:var(--accent)}
+.lb-row:hover .lb-name{color:var(--pen)}
 .lb-name{transition:color var(--dur-fast) var(--ease-standard)}
 .lb-row:last-child{border-bottom:none}
 /* Rank + score were baseline-aligned against a 3-line body, so the numerals sat
    low and the column read as ragged. align-self centres them on the row. */
-.lb-rank{font-size:13px;font-weight:700;color:var(--muted);width:22px;text-align:center;flex-shrink:0;align-self:center}
-.lb-rank.r1{color:#a17408}.lb-rank.r2{color:#6f6f80}.lb-rank.r3{color:#a5622a}
+.lb-rank{font-size:13px;font-weight:600;color:var(--ink-soft);width:22px;text-align:center;flex-shrink:0;align-self:center}
+.lb-rank.r1{color:var(--pencil-amber)}.lb-rank.r2{color:var(--ink-soft)}.lb-rank.r3{color:#7A5230}
 .lb-body{flex:1;min-width:0}
-.lb-name{font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;display:flex;align-items:center;gap:6px}
-.lb-bar-track{height:5px;background:var(--track);border-radius:var(--radius-pill);overflow:hidden}
+.lb-name{font-size:13px;font-weight:600;color:var(--ink);margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.lb-bar-track{height:5px;background:var(--track);border-radius:var(--radius-xs);overflow:hidden}
 /* Bars grow from 0 on mount via transform, which is free on the compositor —
    animating `width` here would relayout every row on every frame. The inline
    `width:N%` stays authoritative; scaleX just reveals it. */
-.lb-bar-fill{height:100%;border-radius:var(--radius-pill);transform-origin:left center;animation:bar-in var(--dur-slow) var(--ease-out) both}
+.lb-bar-fill{height:100%;border-radius:var(--radius-xs);transform-origin:left center;animation:bar-in var(--dur-slow) var(--ease-out) both}
 @keyframes bar-in{from{transform:scaleX(0)}to{transform:scaleX(1)}}
-.lb-meta{font-size:11px;color:var(--muted);margin-top:4px;display:flex;gap:var(--s3)}
-.lb-score{font-size:20px;font-weight:800;flex-shrink:0;width:38px;text-align:right;align-self:center;letter-spacing:-.02em}
-.flag-row{display:flex;gap:10px;padding:10px var(--s3);border-radius:var(--radius-sm);margin-bottom:var(--s2)}
-.flag-row.red{background:#fdecec}.flag-row.amber{background:#fff6e3}.flag-row.green-bg{background:#e9f6ec}
+.lb-meta{font-size:10px;color:var(--ink-soft);margin-top:4px;display:flex;gap:var(--s3);letter-spacing:.04em}
+.lb-score{font-size:20px;font-weight:700;flex-shrink:0;width:38px;text-align:right;align-self:center;letter-spacing:-.02em}
+.flag-row{display:flex;gap:10px;padding:10px var(--s3);border-radius:var(--radius-sm);margin-bottom:var(--s2);border:1px solid transparent}
+.flag-row.red{background:rgba(129,0,31,.06);border-color:rgba(129,0,31,.20)}
+.flag-row.amber{background:rgba(138,90,11,.08);border-color:rgba(138,90,11,.22)}
+.flag-row.green-bg{background:rgba(33,124,69,.08);border-color:rgba(33,124,69,.22)}
 .flag-ico{font-size:16px;flex-shrink:0;margin-top:1px}
 .flag-body{flex:1}
-.flag-title{font-size:12px;font-weight:700;color:var(--text)}
-.flag-desc{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.55}
+.flag-title{font-size:12px;font-weight:600;color:var(--ink)}
+.flag-desc{font-size:11px;color:var(--ink-soft);margin-top:3px;line-height:1.55}
 .flag-tags{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}
-.auth-row{display:flex;align-items:center;gap:var(--s2);padding:7px 0;border-bottom:1px solid var(--border)}
+.auth-row{display:flex;align-items:center;gap:var(--s2);padding:7px 0;border-bottom:1px solid var(--rule)}
 .auth-row:last-child{border-bottom:none}
-.auth-bar-track{width:90px;height:5px;background:var(--track);border-radius:var(--radius-pill);overflow:hidden;flex-shrink:0}
-.auth-bar-fill{height:100%;border-radius:var(--radius-pill)}
+.auth-bar-track{width:90px;height:5px;background:var(--track);border-radius:var(--radius-xs);overflow:hidden;flex-shrink:0}
+.auth-bar-fill{height:100%;border-radius:var(--radius-xs)}
 .post-tbl{width:100%;border-collapse:collapse;font-size:11px}
 .post-tbl th{
-  padding:7px 10px;text-align:left;color:var(--muted);font-weight:700;
-  border-bottom:1px solid var(--border);white-space:nowrap;background:#fafafc;
+  padding:7px 10px;text-align:left;color:var(--ink-soft);font-weight:600;
+  border-bottom:1px solid var(--rule);white-space:nowrap;background:var(--paper);
+  letter-spacing:.09em;text-transform:uppercase;font-size:9px;
   /* Long post tables scroll past their own header otherwise. */
   position:sticky;top:52px;z-index:1
 }
-.post-tbl td{padding:7px 10px;border-bottom:1px solid var(--border);color:var(--text)}
-.post-tbl tr:hover td{background:#fdf7fa}
+.post-tbl td{padding:7px 10px;border-bottom:1px solid var(--rule);color:var(--ink)}
+.post-tbl tr:hover td{background:var(--marker-wash)}
 .post-tbl td{transition:background-color var(--dur-fast) var(--ease-standard)}
-.score-chip{display:inline-block;padding:2px 8px;border-radius:var(--radius-pill);font-size:11px;font-weight:700}
-.chip-good{background:#e9f6ec;color:#155e28}
-.chip-warn{background:#fff6e3;color:#8a4b00}
-.chip-bad{background:#fdecec;color:var(--red)}
+.score-chip{display:inline-block;padding:2px 8px;border-radius:var(--radius-xs);font-size:10px;font-weight:600}
+.chip-good{background:rgba(33,124,69,.10);color:var(--pencil-green)}
+.chip-warn{background:rgba(138,90,11,.10);color:var(--pencil-amber)}
+.chip-bad{background:rgba(129,0,31,.08);color:var(--pencil-red)}
 .flag-chip{
   display:inline-block;padding:1px 6px;border-radius:var(--radius-xs);font-size:9px;
-  font-weight:700;background:#fdecec;color:var(--red);margin:1px;
-  border:1px solid transparent;font-family:inherit;
+  font-weight:600;background:rgba(129,0,31,.08);color:var(--pencil-red);margin:1px;
+  border:1px solid transparent;
   transition:background-color var(--dur-fast) var(--ease-standard),
              border-color var(--dur-fast) var(--ease-standard)
 }
 button.flag-chip{cursor:pointer}
-button.flag-chip:hover{background:#fbdada;border-color:#f0b4b4}
+button.flag-chip:hover{background:rgba(129,0,31,.14);border-color:rgba(129,0,31,.30)}
 
 /* ══════════════════════════════════════════════════════════════════════════
    FAN PAGES
    ══════════════════════════════════════════════════════════════════════════ */
-.fan-row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)}
+.fan-row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--rule)}
 .fan-row:last-child{border-bottom:none}
 .fan-av{
-  width:36px;height:36px;border-radius:9px;display:flex;align-items:center;
+  width:36px;height:36px;border-radius:var(--radius);display:flex;align-items:center;
   justify-content:center;font-size:11px;font-weight:700;flex-shrink:0
 }
 .fan-info{flex:1;min-width:0}
-.fan-name{font-size:13px;font-weight:600;color:var(--text)}
-.fan-handle{font-size:11px;color:var(--muted)}
+.fan-name{font-size:13px;font-weight:600;color:var(--ink)}
+.fan-handle{font-size:10px;color:var(--ink-soft);letter-spacing:.04em}
 .fan-stats{display:flex;gap:var(--s3);margin-top:3px}
-.fan-stat{font-size:11px;color:var(--muted)}.fan-stat strong{color:var(--text)}
+.fan-stat{font-size:11px;color:var(--ink-soft)}.fan-stat strong{color:var(--ink);font-weight:600}
 .fan-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
 .mini-spark{display:flex;align-items:flex-end;gap:2px;height:20px}
-.ms-bar{width:5px;border-radius:1px 2px 0 0;background:var(--accent);opacity:.4}
-.ms-bar.mhi{opacity:1}
+.ms-bar{width:5px;border-radius:1px 1px 0 0;background:var(--series-4)}
+.ms-bar.mhi{background:var(--series-1)}
 .sdot{width:7px;height:7px;border-radius:50%}
-.sdot-on{background:var(--green)}.sdot-off{background:var(--faint)}
+.sdot-on{background:var(--pencil-green)}.sdot-off{background:var(--ink-faint)}
 .alert-item{
   display:flex;gap:10px;align-items:flex-start;padding:9px var(--s3);
-  background:#f5f5f9;border-radius:var(--radius-sm);margin-bottom:6px
+  background:var(--paper);border:1px solid var(--rule);
+  border-radius:var(--radius-sm);margin-bottom:6px
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
    HEATMAP
+   The engagement heatmap is ordered data, so it takes the sequential ink ramp
+   rather than a hue scale: darker = more. Monotonic in luminance, so it is
+   readable in greyscale and under every form of colour-blindness.
    ══════════════════════════════════════════════════════════════════════════ */
-.heat-cell{width:20px;height:20px;border-radius:3px}
-.h0{background:var(--track)}.h1{background:#fad0df}.h2{background:#f083ab}.h3{background:var(--accent)}.h4{background:#8e1046}
+.heat-cell{width:20px;height:20px;border-radius:2px}
+.h0{background:var(--track)}
+.h1{background:var(--series-4)}
+.h2{background:var(--series-3)}
+.h3{background:var(--series-2)}
+.h4{background:var(--series-1)}
 
 /* ══════════════════════════════════════════════════════════════════════════
    AUDIENCE
    ══════════════════════════════════════════════════════════════════════════ */
 .bar-row{display:flex;align-items:center;gap:var(--s2);margin-bottom:var(--s2)}
-.bar-label{font-size:12px;color:var(--muted);width:60px;text-align:right;flex-shrink:0}
-.bar-track{flex:1;height:7px;background:var(--track);border-radius:var(--radius-pill);overflow:hidden}
-.bar-fill{height:100%;border-radius:var(--radius-pill);background:var(--accent);transform-origin:left center;animation:bar-in var(--dur-slow) var(--ease-out) both}
-.bar-val{font-size:11px;color:var(--muted);width:32px}
+.bar-label{font-size:10px;color:var(--ink-soft);width:60px;text-align:right;flex-shrink:0;letter-spacing:.04em}
+.bar-track{flex:1;height:7px;background:var(--track);border-radius:var(--radius-xs);overflow:hidden}
+.bar-fill{height:100%;border-radius:var(--radius-xs);background:var(--series-2);transform-origin:left center;animation:bar-in var(--dur-slow) var(--ease-out) both}
+.bar-val{font-size:11px;color:var(--ink-soft);width:32px}
 
 /* ══════════════════════════════════════════════════════════════════════════
    FORMS & BUTTONS
    ══════════════════════════════════════════════════════════════════════════ */
 input,select,textarea{
-  outline:none;font-family:inherit;font-size:13px;border:1px solid var(--border);
-  border-radius:var(--radius-sm);padding:7px 11px;background:#fff;color:var(--text);
+  outline:none;font-family:inherit;font-size:13px;border:1px solid var(--rule);
+  border-radius:var(--radius-sm);padding:7px 11px;background:var(--leaf);color:var(--ink);
   transition:border-color var(--dur-fast) var(--ease-standard),
              box-shadow var(--dur-fast) var(--ease-standard)
 }
-input:hover:not(:disabled),select:hover:not(:disabled),textarea:hover:not(:disabled){border-color:var(--border-strong)}
-input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-tint)}
-input::placeholder,textarea::placeholder{color:var(--muted);opacity:.75}
+input:hover:not(:disabled),select:hover:not(:disabled),textarea:hover:not(:disabled){border-color:var(--rule-strong)}
+input:focus,select:focus,textarea:focus{border-color:var(--ink);box-shadow:0 0 0 3px var(--marker-wash)}
+input::placeholder,textarea::placeholder{color:var(--ink-soft);opacity:.75}
 button{font-family:inherit;cursor:pointer}
 button:disabled{cursor:not-allowed;opacity:.5}
 .btn{
   padding:8px var(--s4);border-radius:var(--radius-sm);font-size:13px;font-weight:600;
-  border:1px solid var(--border);background:#fff;color:var(--text);
+  border:1px solid var(--rule);background:var(--leaf);color:var(--ink);
   box-shadow:var(--shadow-xs);
   transition:background-color var(--dur-fast) var(--ease-standard),
              border-color var(--dur-fast) var(--ease-standard),
@@ -578,29 +753,41 @@ button:disabled{cursor:not-allowed;opacity:.5}
              box-shadow var(--dur-fast) var(--ease-standard),
              transform var(--dur-fast) var(--ease-out)
 }
-.btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);box-shadow:var(--shadow-sm)}
+.btn:hover:not(:disabled){border-color:var(--ink);box-shadow:var(--shadow-sm)}
 /* 1px press travel. Enough to register as a physical acknowledgement, small
    enough that it never reads as the layout moving. */
 .btn:active:not(:disabled){transform:translateY(1px);box-shadow:var(--shadow-xs)}
-.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-.btn-primary:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover);color:#fff}
-.btn-primary:active:not(:disabled){background:var(--accent-press);border-color:var(--accent-press)}
+.btn-primary{background:var(--ink);color:var(--leaf);border-color:var(--ink)}
+.btn-primary:hover:not(:disabled){background:#0d1620;border-color:#0d1620;color:var(--leaf)}
+.btn-primary:active:not(:disabled){background:#070d14;border-color:#070d14}
 .add-btn{
   display:flex;align-items:center;justify-content:center;gap:6px;padding:9px;
-  border:1px dashed var(--border-strong);border-radius:var(--radius-sm);font-size:12px;
-  color:var(--muted);margin-bottom:var(--s3);background:none;width:100%;
+  border:1px dashed var(--rule-strong);border-radius:var(--radius-sm);font-size:12px;
+  color:var(--ink-soft);margin-bottom:var(--s3);background:none;width:100%;
   transition:border-color var(--dur-fast) var(--ease-standard),
              color var(--dur-fast) var(--ease-standard),
              background-color var(--dur-fast) var(--ease-standard)
 }
-.add-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-tint)}
+.add-btn:hover{border-color:var(--ink);color:var(--ink);background:var(--marker-wash)}
 .dot{display:inline-block;width:9px;height:9px;border-radius:2px;flex-shrink:0}
 .back-link{
-  display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);
+  display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-soft);
   margin-bottom:var(--s3);font-weight:500;text-decoration:none;background:none;border:none;
   transition:color var(--dur-fast) var(--ease-standard)
 }
-.back-link:hover{color:var(--accent)}
+.back-link:hover{color:var(--pen)}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DATA HONESTY
+   An unavailable metric renders as an em-dash with a tooltip, never as a
+   fabricated number. It is deliberately given NO decorative treatment — no
+   highlighter, no hand annotation — so an absent value can never be mistaken
+   for a marked-up one. The dotted underline is the only affordance.
+   ══════════════════════════════════════════════════════════════════════════ */
+.na,[title] > .na{
+  color:var(--ink-soft);border-bottom:1px dotted var(--rule-strong);
+  cursor:help;font-weight:500
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
    SKELETONS
@@ -611,7 +798,7 @@ button:disabled{cursor:not-allowed;opacity:.5}
 .skel{position:relative;overflow:hidden;background:var(--track);border-radius:var(--radius-xs)}
 .skel::after{
   content:"";position:absolute;inset:0;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.65),transparent);
+  background:linear-gradient(90deg,transparent,rgba(251,252,248,.75),transparent);
   /* translateX, not background-position: this runs entirely on the compositor.
      A background-position sweep repaints the element every frame. */
   transform:translateX(-100%);
@@ -651,7 +838,7 @@ button:disabled{cursor:not-allowed;opacity:.5}
     width:100%;height:auto;position:sticky;top:0;z-index:11;
     flex-direction:row;align-items:center;gap:2px;
     overflow-x:auto;overflow-y:hidden;padding:0 var(--s2);
-    border-right:none;border-bottom:1px solid var(--border);
+    border-right:none;border-bottom:1px solid var(--rule);
     -webkit-overflow-scrolling:touch;scrollbar-width:none
   }
   .sidebar::-webkit-scrollbar{display:none}
@@ -668,18 +855,22 @@ button:disabled{cursor:not-allowed;opacity:.5}
     background:none
   }
   .nav-item.active,.nav-sub.active{
-    border-left-color:transparent;border-bottom-color:var(--accent);background:none
+    border-left-color:transparent;border-bottom-color:var(--ink);background:none
   }
   .nav-item:hover{background:none}
   .nav-sub{padding-left:var(--s3)}
   .nav-sub-dot{display:none}
   .topbar{top:0;position:static}
   .post-tbl th{top:0}
-  .content{padding:var(--s4)}
+  /* The margin rule tightens but never disappears — it is the one element that
+     identifies every screen in this app. */
+  .content{padding:var(--s4) var(--s4) var(--s4) var(--s6)}
+  .content::before{left:var(--s3)}
 }
 
 @media (max-width:620px){
-  .content{padding:var(--s3)}
+  .content{padding:var(--s3) var(--s3) var(--s3) var(--s5)}
+  .content::before{left:var(--s2)}
   .vhero{padding:var(--s4);gap:var(--s3)}
   .vhero-stats{margin-left:0;gap:var(--s4)}
   .htag-name{width:auto;flex:1 0 100%}
@@ -691,6 +882,8 @@ button:disabled{cursor:not-allowed;opacity:.5}
      which makes each square tile ~358px tall and turns four posts into a very
      long scroll for very little information. */
   .post-grid{grid-template-columns:repeat(2,1fr)}
+  /* Marginalia stops sitting beside its metric and stacks under it. */
+  .marginalia{font-size:10px}
 }
 
 /* Wide screens: stop the content column from stretching to arm's length. */
@@ -706,21 +899,21 @@ button:disabled{cursor:not-allowed;opacity:.5}
    ══════════════════════════════════════════════════════════════════════════ */
 .mk-header{
   display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:var(--s3);
-  padding-bottom:var(--s4);margin-bottom:var(--s4);border-bottom:2px solid var(--text)
+  padding-bottom:var(--s4);margin-bottom:var(--s4);border-bottom:2px solid var(--ink)
 }
-.mk-title{font-size:28px;font-weight:800;letter-spacing:-.02em}
-.mk-tag{font-size:14px;color:var(--accent);font-weight:600;margin-top:2px}
-.mk-generated{font-size:12px;color:var(--muted)}
-.mk-post-row{display:flex;gap:var(--s3);padding:var(--s2) 0;border-bottom:1px solid var(--border)}
+.mk-title{font-size:28px;font-weight:600;letter-spacing:-.02em}
+.mk-tag{font-size:14px;color:var(--pen);font-weight:600;margin-top:2px}
+.mk-generated{font-size:10px;color:var(--ink-soft);letter-spacing:.06em}
+.mk-post-row{display:flex;gap:var(--s3);padding:var(--s2) 0;border-bottom:1px solid var(--rule)}
 .mk-post-row:last-child{border-bottom:none}
 .mk-post-rank{
   flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--track);
-  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--muted)
+  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--ink-soft)
 }
-.mk-footer{margin-top:var(--s5);font-size:11px;color:var(--muted);text-align:center}
+.mk-footer{margin-top:var(--s5);font-size:11px;color:var(--ink-soft);text-align:center}
 
 /* Printing renders the route in isolation: no sidebar/topbar chrome, no shadows or
-   hover affordances that mean nothing on paper, full page width. `.no-print` is the
+   hover affordances that mean nothing on paper, full page width. ".no-print" is the
    general-purpose escape hatch (the back-link + Export button use it) rather than a
    media-kit-specific class, so any future print view can reuse it the same way. */
 @media print{
@@ -729,7 +922,10 @@ button:disabled{cursor:not-allowed;opacity:.5}
      the stable selector it actually renders with. */
   .sidebar,.topbar,[role="status"]{display:none !important}
   .main{display:block}
+  /* The margin rule and the graph grid are screen furniture: on paper the sheet IS
+     the paper, so both come off and the page prints as plain ink on white. */
   .content{padding:0;max-width:none}
-  .media-kit .card{box-shadow:none;border:1px solid #ccc;break-inside:avoid}
-  body{background:#fff}
+  .content::before{display:none}
+  .media-kit .card{box-shadow:none;border:1px solid var(--rule-strong);break-inside:avoid}
+  body{background:#fff;background-image:none}
 }

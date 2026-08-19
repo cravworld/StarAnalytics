@@ -4,6 +4,7 @@ import { AddCompetitorForm, RemoveCompetitorButton } from "@/components/compare/
 import { Sparkline } from "@/components/ui/Sparkline";
 import { PendingMetaReviewBadge } from "@/components/ui/PendingMetaReview";
 import { CsvExportRegistrar } from "@/components/shell/CsvExportRegistrar";
+import { platformInk } from "@/lib/palette";
 
 // Nothing meaningful to show until an account has been scraped at least twice — a single
 // point isn't a trend. Self never has any (Phase 7 self-account pipeline has never gone
@@ -14,7 +15,7 @@ function FollowerTrendMini({ trend, deltaPct }: { trend: number[]; deltaPct: num
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
       <Sparkline values={trend} width={60} height={16} />
       {deltaPct !== null ? (
-        <span style={{ fontSize: 10, fontWeight: 700, color: deltaPct >= 0 ? "#1a7a4a" : "#c62828" }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: deltaPct >= 0 ? "var(--pencil-green)" : "var(--pencil-red)" }}>
           {deltaPct >= 0 ? "+" : ""}
           {deltaPct}%
         </span>
@@ -57,7 +58,7 @@ export default async function ComparePage() {
             <div
               key={col.id}
               className="cmp-header"
-              style={{ position: "relative", background: i === 0 ? undefined : "#f0f4ff" }}
+              style={{ position: "relative", background: i === 0 ? undefined : "var(--paper)" }}
             >
               {i > 0 ? <RemoveCompetitorButton id={col.id} /> : null}
               {i === 0 && !selfIsLive ? (
@@ -65,7 +66,7 @@ export default async function ComparePage() {
                   <PendingMetaReviewBadge />
                 </div>
               ) : null}
-              <div className="avatar" style={{ margin: "0 auto 6px", background: i === 0 ? undefined : "#e3f2fd", color: i === 0 ? undefined : "var(--blue)" }}>
+              <div className="avatar" style={{ margin: "0 auto 6px", background: i === 0 ? undefined : "var(--pen-tint)", color: i === 0 ? undefined : "var(--blue)" }}>
                 {initialsFor(col.displayName)}
               </div>
               <div style={{ fontSize: 13, fontWeight: 700 }}>{col.displayName}</div>
@@ -74,7 +75,7 @@ export default async function ComparePage() {
                   style={{
                     fontSize: 9,
                     fontWeight: 700,
-                    color: col.platform === "youtube" ? "#c4302b" : "#E1306C",
+                    color: platformInk(col.platform),
                     marginRight: 4,
                   }}
                 >
