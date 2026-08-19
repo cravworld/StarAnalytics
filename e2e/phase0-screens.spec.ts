@@ -50,6 +50,27 @@ async function waitForChartsSettled(page: Page) {
   );
 }
 
+/**
+ * The agency screen starts empty. Its "Agencies in This Upload" card is derived from rows
+ * parsed in the browser, so nothing appears until a sheet is dropped or a list is pasted —
+ * this view was asserting on that populated state without ever producing it, which is why
+ * it failed on strings that could never have rendered.
+ *
+ * Goes through the real textarea + parsePastedText path rather than stubbing component
+ * state, so the parser's own two-column contract is exercised too. Purely client-side:
+ * no server action and no Apify call happens until "Analyse All Posts" is clicked.
+ */
+const pasteAgencyLinks = async (page: Page, agency = "Pixelwave Media", count = 50) => {
+  const lines = Array.from(
+    { length: count },
+    (_, i) => `${agency},https://instagram.com/p/Seed${String(i).padStart(3, "0")}Abc`,
+  ).join("\n");
+  const box = page.locator("textarea").first();
+  await box.fill(lines);
+  await box.blur(); // parsing is wired to onBlur, not onChange
+  await expect(page.getByText(`${count} links`)).toBeVisible();
+};
+
 const analyse = async (page: Page) => {
   await page.getByRole("button", { name: /Analyse All Posts/ }).click();
   await expect(page.getByText("Agency Leaderboard — Overall Score")).toBeVisible();
@@ -89,7 +110,11 @@ const VIEWS: View[] = [
   {
     name: "07-agency-upload",
     path: "/campaigns/agency",
-    text: ["Upload Agency Post Links", "Agencies in This Campaign", "Pixelwave Media", "50 links"],
+    setup: (page) => pasteAgencyLinks(page),
+    // "Agencies in This Upload", not "…in This Campaign": the card was renamed in the
+    // component and this assertion was never updated, so the test had been failing on a
+    // string that no longer exists rather than on anything actually broken.
+    text: ["Upload Agency Post Links", "Agencies in This Upload", "Pixelwave Media", "50 links"],
     extra: async (page) => {
       // The dropzone icon must sit centred over "Drop your sheet here". Tailwind's
       // preflight sets svg{display:block}, which silently defeats .upload-zone's
