@@ -2,34 +2,30 @@
 
 import { usePathname } from "next/navigation";
 import { downloadCsv } from "@/lib/csv";
+import { CAMPAIGN_SUBROUTES, isCampaignDetailRoute } from "@/lib/campaignRoutes";
 import { useTopbarExportConfig } from "./TopbarExportContext";
 
+// Campaign subroute crumbs are derived from the shared route list rather than restated
+// here, so adding a page can't leave this map behind (it did, for /campaigns/keywords).
+// /campaigns/new keeps an explicit three-level entry — it sits under Own Campaigns, not
+// beside it — and overrides the derived one.
 const BREADCRUMBS: Record<string, string[]> = {
   "/": ["Dashboard"],
   "/content": ["Content"],
   "/audience": ["Audience"],
   "/compare": ["Compare Pages"],
   "/campaigns": ["Campaigns", "Own Campaigns"],
-  "/campaigns/hashtag": ["Campaigns", "Hashtag Search"],
-  "/campaigns/keywords": ["Campaigns", "Keyword Trends"],
-  "/campaigns/compare-own": ["Campaigns", "Compare Campaigns"],
-  "/campaigns/agency": ["Campaigns", "Agency Report"],
+  ...Object.fromEntries(CAMPAIGN_SUBROUTES.map((r) => [r.href, ["Campaigns", r.label]])),
   "/campaigns/new": ["Campaigns", "Own Campaigns", "New Campaign"],
   "/fan-pages": ["Fan Pages"],
 };
-
-const KNOWN_CAMPAIGN_SUBROUTES = ["/campaigns/hashtag", "/campaigns/keywords", "/campaigns/compare-own", "/campaigns/agency", "/campaigns/new"];
 
 export function Topbar() {
   const pathname = usePathname();
   const { config } = useTopbarExportConfig();
   // Campaign detail routes are /campaigns/[id] — id is a DB-generated uuid, not a
   // fixed slug, so it can't live in the static BREADCRUMBS map above.
-  const isCampaignDetail =
-    pathname !== "/campaigns" &&
-    pathname.startsWith("/campaigns/") &&
-    !KNOWN_CAMPAIGN_SUBROUTES.some((r) => pathname.startsWith(r));
-  const crumbs = isCampaignDetail
+  const crumbs = isCampaignDetailRoute(pathname)
     ? ["Campaigns", "Own Campaigns", "Campaign Detail"]
     : (BREADCRUMBS[pathname] ?? [pathname]);
 

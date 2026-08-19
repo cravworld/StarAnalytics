@@ -76,6 +76,14 @@ model Post {
 
   raw Json?
 
+  // When a comment scrape was last ATTEMPTED for this post — not when comments were last
+  // found. The distinction is the whole point: a private, deleted, or comments-disabled
+  // post stores zero post_comments rows no matter how often it's scraped, so a filter
+  // keyed on "has no stored comments" re-qualified it every staleness cycle and paid for
+  // the same empty scrape forever (see APIFY-USAGE-AUDIT.md finding C). This column is
+  // what makes "we already tried this one" representable. Null means never attempted.
+  commentsScrapedAt DateTime? @map("comments_scraped_at")
+
   sentiment          Sentiment?
   agencyPostScores   AgencyPostScore[]
   postComments       PostComment[]

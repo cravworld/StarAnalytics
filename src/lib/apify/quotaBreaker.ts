@@ -14,6 +14,7 @@
 // The breaker's job is narrow: stop paying the latency (and any per-call cost) of
 // requests that cannot succeed, while still probing often enough that raising the
 // cap brings the pipeline back on its own.
+import { readAccountUsage } from "@/lib/apify/client";
 import { prisma } from "@/lib/prisma";
 
 // The stable, machine-readable half of Apify's payload.
@@ -38,6 +39,19 @@ export class ApifyQuotaExhaustedError extends Error {
     super(`Apify quota circuit is open — skipped ${actorId} without calling Apify.`);
     this.name = "ApifyQuotaExhaustedError";
   }
+}
+
+/**
+ * "Did this failure mean the account can't spend right now?" — the question every loop
+ * that scrapes more than one thing needs to ask before trying the next one.
+ *
+ * Covers both shapes it can arrive in: the pre-emptive skip this module throws, and a real
+ * Apify rejection whose message carries the marker. The spend cap is account-wide, so one
+ * of these means the rest of the loop cannot succeed either.
+ */
+export function isApifyQuotaFailure(err: unknown): boolean {
+  if (err instanceof ApifyQuotaExhaustedError) return true;
+  return isApifyQuotaError(err instanceof Error ? err.message : null);
 }
 
 /**
@@ -119,7 +133,49 @@ export async function readQuotaCircuit(): Promise<{
 }
 
 /**
- * Throws ApifyQuotaExhaustedError if the circuit is open.
+ * Headroom we refuse to spend into, so the account never reaches the hard cap.
+ *
+ * The 403 breaker above is reactive by construction: it needs a rejection to have
+ * happened. This is the proactive half — the cap gets *approached* by a run that was
+ * legal when it started, and Apify aborts that run partway through with a generic
+ * ABORTED status carrying no quota marker anywhere in it (see the mid-run detection in
+ * trackedRun). Stopping half a run costs the money already spent on it and stores
+ * nothing usable, so it's cheaper to not start it.
+ */
+export const BUDGET_RESERVE_USD = Number(process.env.APIFY_MONTHLY_RESERVE_USD) || 1;
+
+// Account usage barely moves between two runs a few seconds apart, and this is an
+// unmetered platform call rather than an actor run — but it is still a network round
+// trip in front of every scrape, so hold the answer briefly. Per-instance and
+// deliberately short: long enough to cover one cron tick's burst of runs, short enough
+// that adding credits takes effect within a minute rather than at the next cold start.
+const USAGE_CACHE_MS = 60 * 1000;
+let usageCache: { checkedAt: number; exhausted: boolean } | null = null;
+
+/**
+ * True when the account has less than BUDGET_RESERVE_USD of monthly headroom left.
+ *
+ * Fails *open* (returns false) when the usage endpoint is unreachable — an Apify API
+ * blip must not be able to halt ingestion on its own, and the 403 breaker still covers
+ * the start-time rejection independently.
+ */
+export async function isAccountBudgetExhausted(): Promise<boolean> {
+  if (usageCache && Date.now() - usageCache.checkedAt < USAGE_CACHE_MS) return usageCache.exhausted;
+  const usage = await readAccountUsage();
+  if (!usage) return false;
+  const exhausted = usage.maxMonthlyUsageUsd - usage.monthlyUsageUsd <= BUDGET_RESERVE_USD;
+  usageCache = { checkedAt: Date.now(), exhausted };
+  return exhausted;
+}
+
+/** Test seam — the cache is module state, so it has to be clearable. */
+export function resetAccountBudgetCache(): void {
+  usageCache = null;
+}
+
+/**
+ * Throws ApifyQuotaExhaustedError if the circuit is open, or if the account has no
+ * meaningful budget left.
  *
  * Callers must not record a scrape_runs row for a skip. Two reasons: the run never
  * happened so the audit trail would be fiction, and a synthetic error row would push
@@ -129,6 +185,9 @@ export async function readQuotaCircuit(): Promise<{
 export async function assertQuotaCircuitClosed(actorId: string): Promise<void> {
   const state = await readQuotaCircuit();
   if (isQuotaCircuitOpen({ ...state, now: Date.now() })) {
+    throw new ApifyQuotaExhaustedError(actorId);
+  }
+  if (await isAccountBudgetExhausted()) {
     throw new ApifyQuotaExhaustedError(actorId);
   }
 }

@@ -114,8 +114,29 @@ export async function runAgencyBatchJob(runId: string, rows: AgencyUrlRow[]): Pr
     }
 
     const provider = getPublicContentProvider();
-    const urls = rows.map((r) => r.url);
+    // De-duplicated by shortcode, not by raw URL string: the same post can legitimately
+    // appear twice in an uploaded sheet (listed under two agencies, or just a copy-paste),
+    // and it can appear twice in two different URL shapes (/p/ vs /reel/, trailing slash,
+    // an ?igsh= tracking param). Every duplicate that reaches the actor is a dataset item
+    // we pay for twice and then upsert onto the same row.
+    const seenShortcodes = new Set<string>();
+    const urls: string[] = [];
+    for (const row of rows) {
+      const shortcode = extractShortcode(row.url);
+      const key = shortcode ?? row.url.trim().toLowerCase();
+      if (seenShortcodes.has(key)) continue;
+      seenShortcodes.add(key);
+      urls.push(row.url);
+    }
+    if (urls.length < rows.length) {
+      console.log(`agency batch ${runId}: ${rows.length - urls.length} duplicate URL(s) dropped before scraping`);
+    }
+
     for (const batch of chunk(urls, AGENCY_SCRAPE_BATCH_SIZE)) {
+      // The spend cap is account-wide: once one batch is rejected on quota, the remaining
+      // batches cannot succeed either. Rethrown rather than swallowed so the run is recorded
+      // as an error the operator can see, instead of silently scoring a partial batch as if
+      // it were complete.
       const posts = await provider.scrapeByUrls(batch);
       await storeAgencyPosts(posts, shortcodeToAgencyId);
     }

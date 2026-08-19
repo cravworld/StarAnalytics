@@ -30,7 +30,13 @@ const BATCH_CONCURRENCY = Number(process.env.SENTIMENT_BATCH_CONCURRENCY) || 5;
 // gets there first; the loser just skips its own comment scrape for this pass (posts fall back
 // to caption-only, same as any other transient comment-scrape failure) rather than racing.
 const COMMENT_SCRAPE_LOCK = "comment-scrape-pipeline";
-const COMMENT_SCRAPE_LOCK_TTL_SECONDS = 20 * 60 + 60; // matches waitForRun's 20-minute ceiling
+// Sized off the real ceiling of one scrapeCommentsForPosts call: at most
+// APIFY_COMMENT_POSTS_PER_INVOCATION / APIFY_COMMENT_POSTS_PER_RUN runs (3 by default), each
+// waiting at most DEFAULT_WAIT_MS (5 min), plus a buffer. Was 21 minutes against waitForRun's
+// old 20-minute ceiling — but no caller could ever wait that long (Vercel killed them first),
+// so a killed invocation held this lock long after its work had stopped, blocking the next
+// tick's comment scrape for nothing.
+const COMMENT_SCRAPE_LOCK_TTL_SECONDS = 16 * 60 + 60;
 
 function chunk<T>(xs: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -88,8 +94,8 @@ export async function classifyPostsForSentiment(postIds: string[]): Promise<void
   });
 
   // 2. Comment scrape only for survivors lacking captured comments. Isolated in its own
-  // try/catch: a single post with a very large comment thread (COMMENTS_PER_POST_LIMIT is
-  // now uncapped) can make the whole batched Apify run time out — without this, that one
+  // try/catch: a single post with a very large comment thread can make the whole batched
+  // Apify run time out — without this, that one
   // slow post used to abort classification for the *entire* batch, including posts that
   // already had comments or needed no scraping at all. Since the same CHUNK_SIZE selection
   // is deterministic, that repeatedly re-picked the same poisoned batch and classification
@@ -103,7 +109,17 @@ export async function classifyPostsForSentiment(postIds: string[]): Promise<void
   // because they genuinely have none, yet kept re-entering this filter and paying for a fresh
   // Apify comment-scrape every time their Sentiment row went stale (~daily). null (comments
   // count unknown, e.g. agency-ingested posts) still passes through and gets a real attempt.
-  const needComments = posts.filter((p) => p.postComments.length === 0 && p.externalUrl && p.comments !== 0);
+  //
+  // commentsScrapedAt === null is the other half of that same leak, and the larger one: a
+  // post whose reported count is nonzero but which yields nothing (private, deleted, comments
+  // since disabled, or an attribution miss in the actor's URL echo) also stores zero rows,
+  // so "no stored comments" alone re-qualified it every single cycle, forever, at full price.
+  // The column records that we already spent money finding out. One attempt per post, ever —
+  // which matches the previous *intent* ("comments aren't re-scraped once captured"), it just
+  // now also holds for the posts where capturing produced nothing.
+  const needComments = posts.filter(
+    (p) => p.postComments.length === 0 && p.externalUrl && p.comments !== 0 && p.commentsScrapedAt === null,
+  );
   if (needComments.length > 0) {
     // See COMMENT_SCRAPE_LOCK above — this is what stops poll-hashtags and backfill-sentiment
     // from both paying Apify to scrape the same post at once. Losing the lock isn't an error:

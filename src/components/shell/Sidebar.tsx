@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { CAMPAIGN_NAV_SUBROUTES } from "@/lib/campaignRoutes";
 
 const NAV_ICONS: Record<string, React.ReactNode> = {
   dashboard: (
@@ -55,12 +56,12 @@ const MY_PAGE = [
   { href: "/compare", key: "compare", label: "Compare Pages" },
 ];
 
-const CAMPAIGN_SUBS = [
+// "Own Campaigns" is the /campaigns index itself, not a subroute, so it's prepended here
+// rather than living in the shared list (which exists to answer "is this pathname a
+// campaign *detail* view", a question the index isn't part of).
+const CAMPAIGN_SUBS: { href: string; label: string; badge?: string }[] = [
   { href: "/campaigns", label: "Own Campaigns" },
-  { href: "/campaigns/hashtag", label: "Hashtag Search" },
-  { href: "/campaigns/keywords", label: "Keyword Trends" },
-  { href: "/campaigns/compare-own", label: "Compare Campaigns" },
-  { href: "/campaigns/agency", label: "Agency Report", badge: "New" },
+  ...CAMPAIGN_NAV_SUBROUTES,
 ];
 
 export function Sidebar({ fanPageCount }: { fanPageCount: number }) {

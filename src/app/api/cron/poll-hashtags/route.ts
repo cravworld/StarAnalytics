@@ -3,12 +3,18 @@
 // real-time push, for hashtag volume. The live post *stream* on a campaign detail
 // page is separate — that's Supabase Realtime on `posts` inserts.
 //
-// Designed for a 15-min cadence; was scheduled once/day because Vercel's Hobby plan
-// caps crons at once/day (every production deploy had been silently failing —
-// deploy_failed — as a result, production stuck 9 commits behind main until found and
-// fixed). Now on Vercel Pro (confirmed 2026-07-31 by a production deploy accepting this
-// exact schedule, which Hobby would reject at deploy time) — restored to */15 in
-// vercel.json.
+// Was scheduled once/day because Vercel's Hobby plan caps crons at once/day (every
+// production deploy had been silently failing — deploy_failed — as a result, production
+// stuck 9 commits behind main until found and fixed). Now on Vercel Pro (confirmed
+// 2026-07-31 by a production deploy accepting a sub-daily schedule, which Hobby would
+// reject at deploy time).
+//
+// The actual schedule is HOURLY (`0 * * * *`, see vercel.json) — earlier comments here
+// claimed */15 and */5, neither of which was ever deployed. The distinction matters for
+// money, not just accuracy: at APIFY_HASHTAG_RESULTS_LIMIT=150 and $0.0023/result, each
+// tracked hashtag costs $0.345 per tick, so hourly is ~$248/month per hashtag against a
+// $29 plan. QUOTA_COOLDOWN_MS (55 min) is also tuned to this exact cadence — changing one
+// without the other silently halves the breaker's probe rate. See APIFY-USAGE-AUDIT.md §I.
 import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { trackHashtag } from "@/lib/data/campaigns";
@@ -16,7 +22,7 @@ import { queueSentimentClassification } from "@/lib/data/sentiment";
 import { refreshStaleCompetitors } from "@/lib/data/compare";
 import { refreshStaleFanPages } from "@/lib/data/fanpages";
 import { tryAcquireCronLock, releaseCronLock } from "@/lib/cronLock";
-import { ApifyQuotaExhaustedError, isApifyQuotaError } from "@/lib/apify/quotaBreaker";
+import { isApifyQuotaFailure } from "@/lib/apify/quotaBreaker";
 
 const LOCK_NAME = "poll-hashtags";
 
@@ -43,8 +49,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // Cadence is now short enough (*/5, see vercel.json) that a slow tick can still be running
-  // when the next one fires. Skip rather than overlap — a duplicate poll of the same
+  // A slow tick can still be running when the next one fires (an hour is not much when a
+  // tick scrapes several hashtags and then comment-scrapes what it touched). Skip rather
+  // than overlap — a duplicate poll of the same
   // hashtag mid-run wastes an Apify call for zero extra freshness, not a correctness issue,
   // but it's still pure waste. TTL matches maxDuration + a buffer so a killed invocation
   // self-recovers instead of wedging every future tick.
@@ -88,7 +95,7 @@ export async function GET(request: Request) {
         touchedPostIds.push(...(await trackHashtag(hashtag)));
         results.push({ hashtag, ok: true });
       } catch (err) {
-        if (err instanceof ApifyQuotaExhaustedError || isApifyQuotaError(err instanceof Error ? err.message : null)) {
+        if (isApifyQuotaFailure(err)) {
           quotaExhausted = true;
         }
         // One hashtag failing (rate limit, actor error) shouldn't block the rest of
@@ -111,7 +118,12 @@ export async function GET(request: Request) {
     // outside a campaign still get their aggregate/count stats from trackHashtag itself; they
     // just don't get comment-scraped + per-comment classified until/unless a campaign picks
     // them up (a later poll will catch them once backfillCampaignLink sets campaignId).
-    if (touchedPostIds.length > 0) {
+    //
+    // Skipped entirely on a quota-exhausted tick: the comment scrape is the expensive leg
+    // and it cannot succeed while the cap is hit, so queueing it would only burn the
+    // comment-scrape cron lock and log failures. The posts stay unclassified and are picked
+    // up by the first tick after credits are restored.
+    if (touchedPostIds.length > 0 && !quotaExhausted) {
       const campaignPosts = await prisma.post.findMany({
         where: { id: { in: touchedPostIds }, campaignId: { not: null } },
         select: { id: true },
@@ -124,12 +136,19 @@ export async function GET(request: Request) {
 
     // Same heartbeat also refreshes any tracked /compare competitor whose data has aged
     // past its TTL — this is the only background refresh path (see src/lib/data/compare.ts),
-    // so it stays TTL-gated rather than re-scraping every cycle.
-    const competitorResults = await refreshStaleCompetitors();
+    // so it stays TTL-gated rather than re-scraping every cycle. Both refreshes are skipped
+    // outright once the account-wide cap has been hit this tick: they'd each walk their full
+    // stale list to fail on every entry.
+    const competitorResults = quotaExhausted ? [] : await refreshStaleCompetitors();
 
     // And any YouTube fan channel past its TTL — Instagram fan pages don't need this (they
     // update passively via the hashtag scrape above), but YouTube has no such pipeline to
     // piggyback on (see fanpages.ts's refreshStaleFanPages).
+    //
+    // Deliberately NOT gated on quotaExhausted, unlike the competitor refresh above: these
+    // channels go through the YouTube Data API, which has its own separate quota. Skipping
+    // them during an Apify outage would stop YouTube fan-channel data updating and save
+    // exactly zero Apify credit.
     const fanPageResults = await refreshStaleFanPages();
 
     return NextResponse.json({

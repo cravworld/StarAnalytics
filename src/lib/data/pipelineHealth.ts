@@ -6,7 +6,12 @@
 // them as stale. Someone reading /campaigns on 2026-08-07 saw seven-day-old figures
 // presented exactly like live ones. This is the signal that was missing.
 import { prisma } from "@/lib/prisma";
-import { isQuotaCircuitOpen, readQuotaCircuit, QUOTA_ERROR_MARKER } from "@/lib/apify/quotaBreaker";
+import {
+  isAccountBudgetExhausted,
+  isQuotaCircuitOpen,
+  readQuotaCircuit,
+  QUOTA_ERROR_MARKER,
+} from "@/lib/apify/quotaBreaker";
 
 export type PipelineStatus = "ok" | "stale" | "down";
 
@@ -56,16 +61,23 @@ export function classifyPipelineHealth({
 
 export async function getPipelineHealth(): Promise<PipelineHealth> {
   const since24h = new Date(Date.now() - 24 * 3_600_000);
-  const [circuit, newestPost, failuresLast24h] = await Promise.all([
+  const [circuit, newestPost, failuresLast24h, budgetExhausted] = await Promise.all([
     readQuotaCircuit(),
     prisma.post.findFirst({ orderBy: { scrapedAt: "desc" }, select: { scrapedAt: true } }),
     // finishedAt, not startedAt: a run rejected at the quota never starts, so its
     // startedAt stays null and a startedAt-based window silently reports zero failures
     // during exactly the outage it is meant to catch.
     prisma.scrapeRun.count({ where: { status: "error", finishedAt: { gte: since24h } } }),
+    // Asked directly, not inferred from the scrape_runs trail, and this is now the primary
+    // signal rather than a supplement. The trail only records a quota *rejection*, and the
+    // budget preflight (see assertQuotaCircuitClosed) exists precisely to stop those calls
+    // from being made — so once it engages, no new error rows appear and the DB-derived
+    // circuit reads "closed" throughout an outage it is actively preventing. Unmetered and
+    // cached inside the breaker, so this does not put a live API call on every render.
+    process.env.DATA_MODE_APIFY === "live" ? isAccountBudgetExhausted() : Promise.resolve(false),
   ]);
 
-  const quotaExhausted = isQuotaCircuitOpen({ ...circuit, now: Date.now() });
+  const quotaExhausted = budgetExhausted || isQuotaCircuitOpen({ ...circuit, now: Date.now() });
 
   return {
     status: classifyPipelineHealth({

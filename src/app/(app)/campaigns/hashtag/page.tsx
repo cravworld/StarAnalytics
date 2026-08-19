@@ -5,8 +5,10 @@ import { TrackHashtagForm } from "@/components/campaigns/TrackHashtagForm";
 
 // trackHashtagAction's after()-queued comment-scrape + sentiment classification can
 // take well past the default serverless timeout for a hashtag with many posts — same
-// fix as the agency page's maxDuration export, needed here for the same reason.
-export const maxDuration = 300;
+// fix as the agency page's maxDuration export, needed here for the same reason — including
+// the raise from 300s to Pro's 800s ceiling, so the after() work can no longer be killed
+// mid-wait while the Apify runs it started keep billing. See that page for the full note.
+export const maxDuration = 800;
 
 const TAG_KIND: Record<string, "new" | "hot" | "live" | "default"> = {
   New: "new",
