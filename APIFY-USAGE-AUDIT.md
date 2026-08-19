@@ -396,3 +396,18 @@ Scope the window before running it — every row this clears buys another paid s
 | `APIFY_MAX_CHARGE_USD_PER_RUN` | 6 | Runaway guard. Lowering below $5.72 starts clamping full comment batches — see the note in `apify-public-content.ts` on why that loses data. |
 | `APIFY_MONTHLY_RESERVE_USD` | 1 | Headroom left unspent so the plan cap is never actually reached. |
 
+
+## Disabled cron jobs
+
+These entries were removed from `vercel.json`'s `crons` array rather than deleted outright,
+so the reason survives. Restore an entry to `crons` to re-enable it.
+
+They were previously parked in a `_disabledCrons` key inside `vercel.json`. That key is not
+part of Vercel's configuration schema, and Vercel rejects unknown top-level properties at
+config-validation time — the deployment fails before the build even starts. The rationale
+lives here instead, where nothing validates it.
+
+| Path | Schedule | Why it is off |
+| --- | --- | --- |
+| `/api/cron/poll-hashtags` | `0 * * * *` | Spends Apify credit (hashtag + comment scraping). Disabled 2026-08-17 ahead of the Scale plan top-up so it doesn't start eating credits the moment they land. Restore this entry to re-enable. |
+| `/api/cron/backfill-sentiment` | `0 * * * *` | Calls scrapeCommentsForPosts (Apify) per APIFY-USAGE-AUDIT.md finding A. Disabled 2026-08-17 for the same reason as poll-hashtags. Restore this entry to re-enable. |
