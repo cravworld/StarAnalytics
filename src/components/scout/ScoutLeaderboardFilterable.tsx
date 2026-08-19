@@ -8,7 +8,7 @@ import type { ScoutLeaderboardRow, ScoutRawRow } from "@/lib/data/scout";
 import type { ScoutPlatform } from "@prisma/client";
 
 const rankClass = (i: number) => (i === 0 ? "r1" : i === 1 ? "r2" : i === 2 ? "r3" : "");
-const scoreColor = (s: number) => (s >= 70 ? "#1a7a4a" : s >= 40 ? "#b45309" : "#b71c1c");
+const scoreColor = (s: number) => (s >= 70 ? "var(--pencil-green)" : s >= 40 ? "var(--pencil-amber)" : "var(--pencil-red)");
 const profileUrl = (platform: ScoutPlatform, handle: string) =>
   platform === "facebook" ? `https://www.facebook.com/${handle}/` : `https://www.instagram.com/${handle}/`;
 
@@ -119,7 +119,7 @@ export function ScoutLeaderboardFilterable({ rows, rawRows }: { rows: ScoutLeade
                                 </span>
                               ) : null}
                               {r.buzzFactorDelta !== null ? (
-                                <span style={{ color: r.buzzFactorDelta > 0 ? "#1a7a4a" : r.buzzFactorDelta < 0 ? "#b71c1c" : "var(--muted)" }}>
+                                <span style={{ color: r.buzzFactorDelta > 0 ? "var(--pencil-green)" : r.buzzFactorDelta < 0 ? "var(--pencil-red)" : "var(--muted)" }}>
                                   {r.buzzFactorDelta > 0 ? `▲${r.buzzFactorDelta}` : r.buzzFactorDelta < 0 ? `▼${Math.abs(r.buzzFactorDelta)}` : "no change"}
                                   {" "}
                                   since last scan
@@ -137,7 +137,7 @@ export function ScoutLeaderboardFilterable({ rows, rawRows }: { rows: ScoutLeade
                         <div style={{ textAlign: "right" }}>
                           <div className="lb-score" style={{ color: scoreColor(r.buzzFactor) }}>{r.buzzFactor}</div>
                           {r.buzzFactorDelta !== null && r.buzzFactorDelta !== 0 ? (
-                            <div style={{ fontSize: 11, color: r.buzzFactorDelta > 0 ? "#1a7a4a" : "#b71c1c" }}>
+                            <div style={{ fontSize: 11, color: r.buzzFactorDelta > 0 ? "var(--pencil-green)" : "var(--pencil-red)" }}>
                               {r.buzzFactorDelta > 0 ? `▲${r.buzzFactorDelta}` : `▼${Math.abs(r.buzzFactorDelta)}`}
                             </div>
                           ) : null}

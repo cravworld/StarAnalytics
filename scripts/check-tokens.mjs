@@ -51,6 +51,7 @@ const MODULES = {
   campaigns: [join("src", "app", "(app)", "campaigns"), join("src", "components", "campaigns"), join("src", "components", "agency")],
   fanpages: [join("src", "app", "(app)", "fan-pages"), join("src", "components", "fanpages")],
   shell: [join("src", "lib", "palette.ts"), join("src", "components", "shell"), join("src", "components", "ui"), join("src", "components", "charts"), join("src", "app", "layout.tsx"), join("src", "app", "globals.css")],
+  scout: [join("src", "app", "(app)", "scout"), join("src", "components", "scout")],
   login: [join("src", "app", "login")],
 };
 

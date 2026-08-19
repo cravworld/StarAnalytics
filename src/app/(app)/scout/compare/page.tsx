@@ -22,7 +22,7 @@ export default async function ScoutComparePage({ searchParams }: { searchParams:
     <Card title="Compare Batches">
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${comparisons.length}, 1fr)`, gap: 16, overflowX: "auto" }}>
         {comparisons.map((c) => (
-          <div key={c.batch.id} style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 14 }}>
+          <div key={c.batch.id} style={{ border: "1px solid var(--rule)", borderRadius: "var(--radius)", padding: 14 }}>
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
               <Link href={`/scout/${c.batch.id}`}>{c.batch.fileName}</Link>
             </div>
@@ -41,7 +41,11 @@ export default async function ScoutComparePage({ searchParams }: { searchParams:
               </div>
               <div className="kpi">
                 <div className="kpi-label">Avg Buzz</div>
-                <div className="kpi-val">{c.avgBuzzFactor ?? "–"}</div>
+                <div className="kpi-val">
+                  {c.avgBuzzFactor ?? (
+                    <span className="na" title="No accounts in this batch have been scored yet, so there is no average to show.">—</span>
+                  )}
+                </div>
               </div>
             </div>
 

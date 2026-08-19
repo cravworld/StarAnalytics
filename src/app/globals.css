@@ -599,6 +599,16 @@ canvas{max-width:100%}
 .htag-posts{font-size:11px;color:var(--ink-soft);width:68px;text-align:right}
 .htag-eng{font-size:12px;font-weight:600;color:var(--ink);width:44px;text-align:right}
 
+/* Scoutline reuses .htag-row for its batch list, but a filename is not a hashtag:
+   it can be long and often contains no natural break opportunity, so the fixed
+   175px .htag-name column overflowed and painted straight over the account count
+   beside it. Here the name flexes and truncates instead. The full string stays in
+   the DOM (and in title=) so screen readers and hover both still get it. */
+.scout-batch-name{
+  flex:1 1 auto;width:auto;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    AGENCY REPORT
    ══════════════════════════════════════════════════════════════════════════ */

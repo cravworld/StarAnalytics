@@ -90,8 +90,18 @@ export function ScoutUploadForm() {
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <input ref={inputRef} type="file" accept=".pdf,.xlsx,.xls,.csv" disabled={pending} />
+      {/* wrap + maxWidth because a native file input carries a large intrinsic width
+          and refuses to shrink below it, which pushed the button off the right edge
+          of a 390px screen (20px of horizontal page scroll). Wrapping puts the button
+          on its own line instead of widening the document. */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".pdf,.xlsx,.xls,.csv"
+          disabled={pending}
+          style={{ maxWidth: "100%" }}
+        />
         <button className="btn btn-primary" onClick={onUpload} disabled={pending}>
           {pending ? "Checking accounts…" : "Scan Accounts"}
         </button>

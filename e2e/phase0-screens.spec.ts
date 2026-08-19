@@ -141,6 +141,15 @@ const VIEWS: View[] = [
       await expect(page.locator(".itab.active")).toHaveText("All (24)");
     },
   },
+  // Scoutline arrived after this suite was written and had no sign-off screenshot at
+  // all. Its assertions are deliberately on static page furniture rather than batch
+  // names or counts: unlike the other views this screen reads live DB rows, so
+  // asserting on data would make the suite fail the moment someone runs a real scan.
+  {
+    name: "13-scoutline",
+    path: "/scout",
+    text: ["Quick Scan", "Scan Batches", "Select 2-4 batches to compare"],
+  },
 ];
 
 test.describe("Phase 0 — authenticated screens render seeded mock data", () => {
