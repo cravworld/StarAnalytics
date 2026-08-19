@@ -45,9 +45,34 @@ const prefersReducedMotion =
 
 // 320ms ≈ --dur-slow. easeOutQuart is the closest built-in to the app's
 // --ease-out curve: quick departure, soft settle.
-defaults.animation = prefersReducedMotion
-  ? false
-  : { duration: 320, easing: "easeOutQuart" };
+//
+// MERGED, never replaced — and that is load-bearing, not style. Chart.js builds every
+// animation's config in Animations.configure like this:
+//
+//   const animationOptions = Object.keys(defaults.animation);
+//   for (const option of animationOptions) resolved[option] = cfg[option];
+//
+// It copies ONLY the keys that exist on defaults.animation. Stock, that object carries
+// eight: delay, duration, easing, fn, from, loop, to, type. Assigning a fresh
+// `{ duration, easing }` over it drops `type` and `fn` from that list, so they stop
+// being copied into any animation — including the built-in `type: 'color'` that colour
+// properties rely on.
+//
+// Animation then falls back to `interpolators[cfg.type || typeof from]`, and Chart.js
+// ships interpolators for exactly three types: boolean, color, number. A colour is a
+// string, `interpolators['string']` is undefined, and the next frame throws
+//   TypeError: this._fn is not a function   (Animation.tick -> Animator._update)
+// from inside requestAnimationFrame — so it surfaces on whatever route the user has
+// navigated to by then, including ones with no charts at all.
+// Captured before the branch so TypeScript can narrow it: defaults.animation is typed
+// `false | AnimationSpec`, and `false` is exactly what the reduced-motion path assigns.
+const baseAnimation = defaults.animation;
+if (prefersReducedMotion) {
+  defaults.animation = false;
+} else if (baseAnimation !== false) {
+  baseAnimation.duration = 320;
+  baseAnimation.easing = "easeOutQuart";
+}
 
 // Chart.js re-runs the entry animation on every resize by default, so dragging a
 // window edge makes all charts replay. Resizes should be instantaneous.
