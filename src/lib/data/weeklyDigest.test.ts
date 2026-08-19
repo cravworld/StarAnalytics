@@ -5,13 +5,18 @@ import {
   sortCampaignsByBuzz,
   type WeeklyDigestCampaignSummary,
 } from "./weeklyDigest";
+// Asserted against the palette rather than pinned hexes, so this keeps testing what it
+// is actually for -- that the email and the app agree -- instead of failing every time
+// the palette legitimately changes.
+import { TOKEN } from "@/lib/palette";
 
 const GENERATED_AT = new Date("2026-08-10T09:00:00Z");
-// Same hex values as SENTIMENT_COLOR in weeklyDigest.ts (module-private, not exported) —
-// duplicated here rather than exported-just-for-tests, matching how buzzBandColor's colors
-// are asserted directly by value elsewhere in this file.
-const SENTIMENT_UP_COLOR = "#1a7a4a";
-const SENTIMENT_DOWN_COLOR = "#c62828";
+// The same values SENTIMENT_COLOR uses in weeklyDigest.ts (module-private, not exported).
+// Both sides now read them from the palette rather than repeating literals, so these
+// assertions still prove the email and the app agree — which is the point of the test —
+// without breaking every time the palette changes.
+const SENTIMENT_UP_COLOR = TOKEN.pencilGreen;
+const SENTIMENT_DOWN_COLOR = TOKEN.pencilRed;
 
 const CAMPAIGN: WeeklyDigestCampaignSummary = {
   name: "Pluto Movie",
@@ -119,9 +124,9 @@ describe("formatWeeklyDigestHtml", () => {
     const green = formatWeeklyDigestHtml([{ ...CAMPAIGN, buzzScore: 81 }], GENERATED_AT);
     const yellow = formatWeeklyDigestHtml([{ ...CAMPAIGN, buzzScore: 55 }], GENERATED_AT);
     const red = formatWeeklyDigestHtml([{ ...CAMPAIGN, buzzScore: 20 }], GENERATED_AT);
-    expect(green).toContain("#1a7a4a");
-    expect(yellow).toContain("#e6a700");
-    expect(red).toContain("#c62828");
+    expect(green).toContain(TOKEN.pencilGreen);
+    expect(yellow).toContain(TOKEN.pencilAmber);
+    expect(red).toContain(TOKEN.pencilRed);
   });
 
   it("renders a 3-segment sentiment bar using the same colors as the in-app SentimentBar", () => {
@@ -129,7 +134,7 @@ describe("formatWeeklyDigestHtml", () => {
     expect(html).toContain('width="60%"');
     expect(html).toContain('width="32%"');
     expect(html).toContain('width="8%"');
-    expect(html).toContain("#bdbdbd"); // neutral segment color
+    expect(html).toContain(TOKEN.inkFaint); // neutral segment colour
   });
 
   it("omits a zero-width sentiment segment rather than emitting a pointless width=\"0%\" cell", () => {

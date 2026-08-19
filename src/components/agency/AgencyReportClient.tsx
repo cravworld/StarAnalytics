@@ -340,8 +340,20 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
               delta={`${result.summary.flaggedAgencies} agencies flagged`}
             />
             {result.summary.topAgency ? (
-              <Kpi label="Top Agency" value={result.summary.topAgency.name} delta={`Score ${result.summary.topAgency.score}/100`} deltaDirection="up" compact />
+              // The answer this whole screen exists to give, so it takes the ring.
+              // No deltaDirection: "Score 91/100" is a standing value, not a change,
+              // and a green delta in this system means "this went up".
+              <Kpi
+                label="Top Agency"
+                value={result.summary.topAgency.name}
+                delta={`Score ${result.summary.topAgency.score}/100`}
+                compact
+                circled
+                note="headline"
+              />
             ) : (
+              // Deliberately NOT circled. Ringing a "—" would draw the eye to an absent
+              // value and dress a gap up as the headline finding.
               <Kpi label="Top Agency" value="—" delta="No scores yet" compact />
             )}
           </KpiGrid>
@@ -404,8 +416,8 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
                       <span style={{ color: "var(--muted)" }}>{row.label}</span>
                       <span style={{ fontWeight: 700, color: row.color }}>{row.value}/100</span>
                     </div>
-                    <div style={{ height: 6, background: "var(--track)", borderRadius: 3, overflow: "hidden" }}>
-                      <div style={{ width: `${row.value}%`, height: "100%", background: row.color, borderRadius: 3 }} />
+                    <div style={{ height: 6, background: "var(--track)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
+                      <div style={{ width: `${row.value}%`, height: "100%", background: row.color, borderRadius: "var(--radius-sm)" }} />
                     </div>
                   </div>
                 ))}

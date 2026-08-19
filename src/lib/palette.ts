@@ -100,3 +100,48 @@ const PLATFORM_PENCIL: Record<string, Pencil> = {
 export function platformInk(platform: string | null | undefined): string {
   return PLATFORM_PENCIL[(platform ?? "").toLowerCase()]?.ink ?? "var(--ink-soft)";
 }
+
+/**
+ * Literal token values, for the surfaces that CANNOT resolve a CSS custom property.
+ *
+ * Three of them exist: the weekly digest (an HTML email — mail clients strip or
+ * ignore `var()`, and many strip <style> entirely, so every colour must be an inline
+ * literal), and the generated icon / OpenGraph images (rendered by satori into a PNG,
+ * with no document and no cascade to resolve against).
+ *
+ * These are the same values globals.css defines. They are duplicated here rather than
+ * imported because there is no runtime that can read the stylesheet — but they live in
+ * this file, next to the rest of the palette, so there is exactly one place to change
+ * and `scripts/check-tokens.mjs` has exactly one file to whitelist. Left as raw hexes
+ * in their own modules, these are precisely the colours that survive a redesign and
+ * turn up months later in somebody's inbox.
+ */
+export const TOKEN = {
+  paper: "#EDF0E7",
+  leaf: "#FBFCF8",
+  rule: "#C4D0BC",
+  margin: "#D6A9A4",
+  ink: "#16212C",
+  inkSoft: "#48586A",
+  inkFaint: "#8A96A3",
+  pen: "#1F4B99",
+  marker: "#F5D547",
+  pencilRed: "#81001F",
+  pencilGreen: "#217C45",
+  pencilAmber: "#8A5A0B",
+} as const;
+
+/**
+ * The app mark: a star in highlighter yellow on an ink ground.
+ *
+ * Replaces the Instagram purple→pink→orange gradient the icons used to carry. That
+ * gradient made sense when the accent was Instagram pink; under the notebook system
+ * it is the loudest surviving piece of the old identity, and it appears in the browser
+ * tab, on an iOS home screen, and in every link preview.
+ */
+export const BRAND = {
+  ground: TOKEN.ink,
+  mark: TOKEN.marker,
+  onGround: TOKEN.leaf,
+  muted: TOKEN.inkFaint,
+} as const;

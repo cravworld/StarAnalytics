@@ -90,7 +90,7 @@ export function CampaignCompareClient({
               fontSize: 12,
               padding: "6px 10px",
               border: "1px solid var(--border)",
-              borderRadius: 6,
+              borderRadius: "var(--radius)",
               cursor: "pointer",
               background: selectedIds.includes(o.id) ? "var(--accent-tint)" : "transparent",
             }}
@@ -173,7 +173,7 @@ export function CampaignCompareClient({
                   <div className="cmp-cell" key={cell.columnId}>
                     <div className={`cmp-val${cell.isWin ? " win" : ""}`}>{cell.display}</div>
                     <div className="cmp-bar-wrap">
-                      <div style={{ width: `${cell.pct}%`, height: "100%", background: "var(--accent)", borderRadius: 2 }} />
+                      <div style={{ width: `${cell.pct}%`, height: "100%", background: "var(--accent)", borderRadius: "var(--radius-xs)" }} />
                     </div>
                   </div>
                 ))}

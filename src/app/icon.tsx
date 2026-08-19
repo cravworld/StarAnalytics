@@ -1,10 +1,11 @@
 import { ImageResponse } from "next/og";
 import { StarMark } from "@/lib/ogImage";
+import { BRAND } from "@/lib/palette";
 
-// Reuses the app's own brand tokens (globals.css: --text near-black ground, the
-// purple->pink->orange trio that's already the accent-gradient family here since this whole
-// dashboard is Instagram-focused) rather than inventing a new palette — a star for "Star"
-// Analytics, not a decorative shape.
+// The app mark, drawn from the shared palette rather than a locally-invented one:
+// a highlighter-yellow star on an ink ground. A star for "Star" Analytics, not a
+// decorative shape. It used to be the Instagram purple->pink->orange gradient, which
+// made sense while the accent was Instagram pink and made none once it wasn't.
 export const size = { width: 32, height: 32 };
 export const contentType = "image/png";
 
@@ -18,11 +19,11 @@ export default function Icon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#0f0f14",
-          borderRadius: 7,
+          background: BRAND.ground,
+          borderRadius: 6,
         }}
       >
-        <StarMark size={20} color="#E1306C" />
+        <StarMark size={20} color={BRAND.mark} />
       </div>
     ),
     { ...size },

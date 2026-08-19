@@ -27,7 +27,7 @@ function ItemList({ items }: { items: CampaignSentimentItem[] }) {
       {items.map((item) => (
         <div
           key={item.id}
-          style={{ padding: "8px 10px", background: "var(--track)", borderRadius: 6, fontSize: 12 }}
+          style={{ padding: "8px 10px", background: "var(--track)", borderRadius: "var(--radius)", fontSize: 12 }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
             {item.externalUrl ? (
@@ -75,7 +75,7 @@ export function SentimentBar({
 
   return (
     <div style={{ padding: "8px 0" }}>
-      <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", background: "var(--track)" }}>
+      <div style={{ display: "flex", height: 8, borderRadius: "var(--radius)", overflow: "hidden", background: "var(--track)" }}>
         {(Object.keys(LABEL_META) as Label[]).map((label) => (
           <button
             key={label}

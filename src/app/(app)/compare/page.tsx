@@ -131,7 +131,7 @@ export default async function ComparePage() {
                             height: "100%",
                             background: cell.isEstimate ? "var(--muted)" : ci === 0 ? "var(--accent)" : "var(--blue)",
                             opacity: cell.isEstimate ? 0.6 : 1,
-                            borderRadius: 2,
+                            borderRadius: "var(--radius-xs)",
                           }}
                         />
                       </div>

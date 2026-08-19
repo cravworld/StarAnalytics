@@ -6,6 +6,12 @@
 // environment: it tried to fetch a dynamic font for it and failed ("Failed to download
 // dynamic font. Status: 400"), silently rendering a tofu/missing-glyph box instead of a
 // star. An SVG path has no font dependency at all, so it can't fail that way.
+//
+// Colours come from BRAND in lib/palette.ts: satori renders to a PNG with no document
+// and no cascade, so a CSS custom property cannot resolve here and every value has to
+// be a literal that still lives in one place.
+import { BRAND } from "@/lib/palette";
+
 export function StarMark({ size, color }: { size: number; color: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 100 100">
@@ -29,7 +35,7 @@ export function OgImageContent() {
         flexDirection: "column",
         justifyContent: "center",
         padding: "0 96px",
-        background: "#0f0f14",
+        background: BRAND.ground,
         fontFamily: "sans-serif",
       }}
     >
@@ -41,17 +47,20 @@ export function OgImageContent() {
             justifyContent: "center",
             width: 64,
             height: 64,
-            borderRadius: 16,
-            backgroundImage: "linear-gradient(135deg, #833AB4, #E1306C, #F77737)",
+            borderRadius: 12,
+            // A flat highlighter tile rather than the old Instagram purple->pink->orange
+            // gradient: the mark reads as a marker swipe, which is this system's brand
+            // signal. The star sits on it in ink.
+            background: BRAND.mark,
           }}
         >
-          <StarMark size={34} color="#fff" />
+          <StarMark size={34} color={BRAND.ground} />
         </div>
-        <div style={{ display: "flex", fontSize: 40, fontWeight: 700, color: "#fff", letterSpacing: -1 }}>
+        <div style={{ display: "flex", fontSize: 40, fontWeight: 700, color: BRAND.onGround, letterSpacing: -1 }}>
           StarAnalytics
         </div>
       </div>
-      <div style={{ display: "flex", fontSize: 26, color: "#9a9ab2", maxWidth: 820 }}>
+      <div style={{ display: "flex", fontSize: 26, color: BRAND.muted, maxWidth: 820 }}>
         Social media intelligence — engagement scoring, campaign buzz tracking, and
         talent-scouting analytics for Instagram.
       </div>

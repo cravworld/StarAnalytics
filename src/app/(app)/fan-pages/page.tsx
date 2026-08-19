@@ -9,7 +9,8 @@ export default async function FanPagesPage() {
   return (
     <>
       <KpiGrid cols={3}>
-        <Kpi label="Total Fan Reach" value={kpis.totalReach} delta="Combined followers" />
+        {/* What the whole screen exists to answer: how big is the fan network. */}
+        <Kpi label="Total Fan Reach" value={kpis.totalReach} delta="Combined followers" circled note="headline" />
         <Kpi label="Active Today" value={kpis.activeToday} delta="posted in last 24h" />
         <Kpi label="Posting Campaign Tags" value={kpis.postingCampaignTags} delta="linked to a live campaign" />
       </KpiGrid>
