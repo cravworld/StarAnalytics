@@ -2,25 +2,34 @@
 
 import { usePathname } from "next/navigation";
 import { downloadCsv } from "@/lib/csv";
+import { CAMPAIGN_SUBROUTES, isCampaignDetailRoute } from "@/lib/campaignRoutes";
 import { useTopbarExportConfig } from "./TopbarExportContext";
 
+// Campaign subroute crumbs are derived from the shared route list rather than restated
+// here, so adding a page can't leave this map behind (it did, for /campaigns/keywords).
+// /campaigns/new keeps an explicit three-level entry — it sits under Own Campaigns, not
+// beside it — and overrides the derived one.
 const BREADCRUMBS: Record<string, string[]> = {
   "/": ["Dashboard"],
   "/content": ["Content"],
   "/audience": ["Audience"],
   "/compare": ["Compare Pages"],
   "/campaigns": ["Campaigns", "Own Campaigns"],
-  "/campaigns/hashtag": ["Campaigns", "Hashtag Search"],
-  "/campaigns/keywords": ["Campaigns", "Keyword Trends"],
-  "/campaigns/compare-own": ["Campaigns", "Compare Campaigns"],
-  "/campaigns/agency": ["Campaigns", "Agency Report"],
+  ...Object.fromEntries(CAMPAIGN_SUBROUTES.map((r) => [r.href, ["Campaigns", r.label]])),
   "/campaigns/new": ["Campaigns", "Own Campaigns", "New Campaign"],
   "/fan-pages": ["Fan Pages"],
   "/scout": ["Scoutline"],
   "/scout/compare": ["Scoutline", "Compare Batches"],
 };
 
-const KNOWN_CAMPAIGN_SUBROUTES = ["/campaigns/hashtag", "/campaigns/keywords", "/campaigns/compare-own", "/campaigns/agency", "/campaigns/new"];
+// KNOWN_CAMPAIGN_SUBROUTES used to sit beside this one. It is gone deliberately: the
+// campaign list now lives in lib/campaignRoutes.ts as the single source of truth, and
+// the copy that used to be here had already fallen behind — it was missing
+// /campaigns/comments, which would have misclassified that page as a campaign *detail*
+// view and rendered "Campaigns › Own Campaigns › Campaign Detail" on it. That drift is
+// exactly what campaignRoutes.ts was written to stop.
+//
+// Scout has no equivalent shared list yet, so its one subroute stays inlined here.
 const KNOWN_SCOUT_SUBROUTES = ["/scout/compare"];
 
 export function Topbar() {
@@ -28,10 +37,7 @@ export function Topbar() {
   const { config } = useTopbarExportConfig();
   // Campaign detail routes are /campaigns/[id] — id is a DB-generated uuid, not a
   // fixed slug, so it can't live in the static BREADCRUMBS map above.
-  const isCampaignDetail =
-    pathname !== "/campaigns" &&
-    pathname.startsWith("/campaigns/") &&
-    !KNOWN_CAMPAIGN_SUBROUTES.some((r) => pathname.startsWith(r));
+  const isCampaignDetail = isCampaignDetailRoute(pathname);
   // /scout/[batchId] — same "detail route with a DB-generated id" shape as campaign detail.
   const isScoutBatchDetail =
     pathname !== "/scout" &&

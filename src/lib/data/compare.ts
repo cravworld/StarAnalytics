@@ -1,3 +1,4 @@
+import { isApifyQuotaFailure } from "@/lib/apify/quotaBreaker";
 import { prisma } from "@/lib/prisma";
 import { getInstagramInsightsProvider } from "@/lib/providers";
 import { PLATFORM_HANDLE_VALIDATORS as HANDLE_VALIDATORS, contentProviderFor } from "@/lib/providers/platform-utils";
@@ -112,12 +113,22 @@ export async function removeCompetitor(id: string): Promise<void> {
 export async function refreshStaleCompetitors(): Promise<{ handle: string; ok: boolean; error?: string }[]> {
   const all = await prisma.competitorAccount.findMany();
   const results: { handle: string; ok: boolean; error?: string }[] = [];
+  let quotaExhausted = false;
   for (const c of all) {
     if (!isStale(c.lastScrapedAt)) continue;
+    // The Apify spend cap is account-wide, not per-actor: once one competitor's scrape has
+    // been rejected on quota, none of the rest can succeed either. Same short-circuit the
+    // hashtag loop in poll-hashtags does — this loop runs immediately after it and was
+    // missing it, so a quota-exhausted tick still walked every stale competitor one by one.
+    if (quotaExhausted) {
+      results.push({ handle: c.igHandle, ok: false, error: "Apify quota exhausted — not attempted" });
+      continue;
+    }
     try {
       await scrapeCompetitor(c.igHandle, c.platform);
       results.push({ handle: c.igHandle, ok: true });
     } catch (err) {
+      if (isApifyQuotaFailure(err)) quotaExhausted = true;
       results.push({ handle: c.igHandle, ok: false, error: err instanceof Error ? err.message : String(err) });
     }
   }

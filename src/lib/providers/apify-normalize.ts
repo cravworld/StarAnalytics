@@ -91,6 +91,24 @@ export interface NormalizedComment {
   raw: Record<string, unknown>;
 }
 
+/**
+ * Attribution key for an Instagram post URL, resilient to URL-shape differences.
+ *
+ * A batched comment run is attributed back to posts by matching the item's `postUrl`
+ * against the URLs we sent in. "Echoes the input" is not a guarantee of byte-equality:
+ * a trailing slash, `/reels/` vs `/reel/`, a stripped `?igsh=` tracking parameter, or
+ * `www.` appearing or disappearing would all miss on a raw string lookup — and a miss
+ * drops that item silently, so the run is paid for in full and stores nothing. The
+ * shortcode is the one part of the URL that cannot vary.
+ *
+ * Falls back to a normalized whole-URL comparison for anything that isn't a recognisable
+ * post/reel URL, so a non-Instagram or unexpected shape still matches itself.
+ */
+export function postUrlKey(url: string): string {
+  const shortcode = url.match(/instagram\.com\/(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/i);
+  return shortcode ? shortcode[1] : url.trim().replace(/\/+$/, "").toLowerCase();
+}
+
 export function normalizeCommentItem(item: ActorItem, postId: string): NormalizedComment {
   return {
     postId,
