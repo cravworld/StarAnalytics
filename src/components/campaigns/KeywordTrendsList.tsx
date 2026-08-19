@@ -9,11 +9,11 @@ import type { KeywordTrendsResult } from "@/lib/data/keywords";
 import { useTopbarExport } from "@/components/shell/TopbarExportContext";
 import { toCsv } from "@/lib/csv";
 
-const SENTIMENT_COLOR = { pos: "#1a7a4a", neu: "#bdbdbd", neg: "#c62828" } as const;
+const SENTIMENT_COLOR = { pos: "var(--pencil-green)", neu: "var(--ink-faint)", neg: "var(--pencil-red)" } as const;
 
 function SentimentMixBar({ positivePct, neutralPct, negativePct }: { positivePct: number; neutralPct: number; negativePct: number }) {
   return (
-    <div style={{ display: "flex", width: 90, height: 6, borderRadius: 3, overflow: "hidden", background: "var(--track)" }}>
+    <div style={{ display: "flex", width: 90, height: 6, borderRadius: "var(--radius-sm)", overflow: "hidden", background: "var(--track)" }}>
       <div style={{ width: `${positivePct}%`, background: SENTIMENT_COLOR.pos }} />
       <div style={{ width: `${neutralPct}%`, background: SENTIMENT_COLOR.neu }} />
       <div style={{ width: `${negativePct}%`, background: SENTIMENT_COLOR.neg }} />
@@ -70,7 +70,7 @@ export function KeywordTrendsList({ data }: { data: KeywordTrendsResult }) {
       <KpiGrid cols={3}>
         <Kpi label="Classified Posts" value={String(data.totalClassifiedPosts)} delta="In this view" />
         <Kpi label="Keywords Tracked" value={String(data.keywords.length)} delta="Top 30 shown" />
-        <Kpi label="Top Keyword" value={data.keywords[0]?.keyword ?? "—"} compact />
+        <Kpi label="Top Keyword" value={data.keywords[0]?.keyword ?? "—"} compact circled note="headline" />
       </KpiGrid>
 
       <Card title="Trending Topics">

@@ -75,7 +75,7 @@ export function ScoutBatchList({ batches }: { batches: ScoutBatchSummary[] }) {
                 onClick={(e) => e.stopPropagation()}
                 style={{ marginRight: 4 }}
               />
-              <div className="htag-name">{b.fileName}</div>
+              <div className="htag-name scout-batch-name" title={b.fileName}>{b.fileName}</div>
               <div style={{ color: "var(--muted)", fontSize: 12 }}>
                 {b.parsedCount} accounts · {new Date(b.createdAt).toLocaleDateString()}
               </div>

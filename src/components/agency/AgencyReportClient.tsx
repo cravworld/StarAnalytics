@@ -12,21 +12,14 @@ import { FlagEvidencePanel } from "@/components/agency/FlagEvidencePanel";
 import type { AgencyRunResults } from "@/lib/data/agency";
 import { toCsv } from "@/lib/csv";
 import { useTopbarExport } from "@/components/shell/TopbarExportContext";
+import { IDENTITY_INKS } from "@/lib/palette";
 
 type ViewState = "upload" | "progress" | "error" | "results";
 
-const PREVIEW_PALETTE = [
-  "#E1306C",
-  "#833AB4",
-  "#F77737",
-  "#1a7a4a",
-  "#558b2f",
-  "#00838f",
-  "#ad1457",
-  "#1565c0",
-  "#6a1b9a",
-  "#4527a0",
-];
+// Was a verbatim copy of lib/data/agency.ts's palette, free to drift from it.
+// Both now read the same source, so a preview cannot show one colour and the
+// scored result another.
+const PREVIEW_PALETTE = IDENTITY_INKS;
 
 const FLAG_META: Record<FlagType, { icon: string; title: string; shortLabel: string }> = {
   engagement_velocity_anomaly: { icon: "⚠️", title: "Engagement velocity anomaly", shortLabel: "Velocity" },
@@ -35,7 +28,8 @@ const FLAG_META: Record<FlagType, { icon: string; title: string; shortLabel: str
   generic_comment_pattern: { icon: "🤖", title: "Generic comment patterns", shortLabel: "Comments" },
 };
 
-const scoreColor = (s: number) => (s >= 80 ? "#1a7a4a" : s >= 60 ? "#b45309" : "#b71c1c");
+const scoreColor = (s: number) =>
+  s >= 80 ? "var(--pencil-green)" : s >= 60 ? "var(--pencil-amber)" : "var(--pencil-red)";
 const scoreChipClass = (s: number) => (s >= 80 ? "chip-good" : s >= 65 ? "chip-warn" : "chip-bad");
 const rankClass = (i: number) => (i === 0 ? "r1" : i === 1 ? "r2" : i === 2 ? "r3" : "");
 const severityClass = (s: Flag["severity"]) => (s === "high" ? "red" : "amber");
@@ -346,8 +340,20 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
               delta={`${result.summary.flaggedAgencies} agencies flagged`}
             />
             {result.summary.topAgency ? (
-              <Kpi label="Top Agency" value={result.summary.topAgency.name} delta={`Score ${result.summary.topAgency.score}/100`} deltaDirection="up" compact />
+              // The answer this whole screen exists to give, so it takes the ring.
+              // No deltaDirection: "Score 91/100" is a standing value, not a change,
+              // and a green delta in this system means "this went up".
+              <Kpi
+                label="Top Agency"
+                value={result.summary.topAgency.name}
+                delta={`Score ${result.summary.topAgency.score}/100`}
+                compact
+                circled
+                note="headline"
+              />
             ) : (
+              // Deliberately NOT circled. Ringing a "—" would draw the eye to an absent
+              // value and dress a gap up as the headline finding.
               <Kpi label="Top Agency" value="—" delta="No scores yet" compact />
             )}
           </KpiGrid>
@@ -410,8 +416,8 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
                       <span style={{ color: "var(--muted)" }}>{row.label}</span>
                       <span style={{ fontWeight: 700, color: row.color }}>{row.value}/100</span>
                     </div>
-                    <div style={{ height: 6, background: "#f0f0f5", borderRadius: 3, overflow: "hidden" }}>
-                      <div style={{ width: `${row.value}%`, height: "100%", background: row.color, borderRadius: 3 }} />
+                    <div style={{ height: 6, background: "var(--track)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
+                      <div style={{ width: `${row.value}%`, height: "100%", background: row.color, borderRadius: "var(--radius-sm)" }} />
                     </div>
                   </div>
                 ))}
@@ -455,7 +461,7 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
                 <div className="card-title" style={{ marginBottom: 8 }}>Not Evaluated This Phase</div>
                 {notEvaluated.map((f) => (
-                  <div className="flag-row" style={{ background: "#f0f0f0", marginTop: 6 }} key={f.type}>
+                  <div className="flag-row" style={{ background: "var(--track)", marginTop: 6 }} key={f.type}>
                     <div className="flag-ico">{FLAG_META[f.type].icon}</div>
                     <div className="flag-body">
                       <div className="flag-title" style={{ color: "var(--muted)" }}>{FLAG_META[f.type].title}</div>
@@ -547,7 +553,7 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
                         <span
                           key={f.type}
                           className="flag-chip"
-                          style={{ background: "#eee", color: "var(--muted)" }}
+                          style={{ background: "var(--track)", color: "var(--muted)" }}
                           title={f.reason}
                         >
                           {FLAG_META[f.type].shortLabel}: N/A

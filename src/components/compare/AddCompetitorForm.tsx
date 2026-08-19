@@ -37,7 +37,11 @@ export function AddCompetitorForm() {
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", gap: 10 }}>
+      {/* wrap + minWidth:0 because the button's label has no shrink in it, and a flex
+          item defaults to min-width:auto — so `flex:1` on the input could not shrink
+          below its placeholder either. Together those pushed the button past the right
+          edge of a 390px screen (15px of horizontal page scroll). */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <select
           value={platform}
           onChange={(e) => setPlatform(e.target.value as PlatformId)}
@@ -49,7 +53,7 @@ export function AddCompetitorForm() {
         </select>
         <input
           placeholder={PLACEHOLDERS[platform]}
-          style={{ flex: 1 }}
+          style={{ flex: "1 1 180px", minWidth: 0 }}
           value={handle}
           onChange={(e) => setHandle(e.target.value)}
           disabled={pending}

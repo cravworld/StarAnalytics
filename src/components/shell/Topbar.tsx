@@ -37,7 +37,13 @@ export function Topbar() {
     pathname !== "/scout" &&
     pathname.startsWith("/scout/") &&
     !KNOWN_SCOUT_SUBROUTES.some((r) => pathname.startsWith(r));
-  const crumbs = isCampaignDetail
+  // /campaigns/[id]/media-kit sits under the detail route, so it matched the branch
+  // below and announced itself as "Campaign Detail" — the one screen in the app whose
+  // breadcrumb named a different page than the one being looked at.
+  const isMediaKit = isCampaignDetail && pathname.endsWith("/media-kit");
+  const crumbs = isMediaKit
+    ? ["Campaigns", "Own Campaigns", "Campaign Detail", "Media Kit"]
+    : isCampaignDetail
     ? ["Campaigns", "Own Campaigns", "Campaign Detail"]
     : isScoutBatchDetail
       ? ["Scoutline", "Batch"]

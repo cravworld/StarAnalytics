@@ -59,7 +59,7 @@ export function OwnCampaignsList({ campaigns, kpis }: { campaigns: Campaign[]; k
 
       <KpiGrid cols={3}>
         <Kpi label="Active Campaigns" value={String(kpis.active)} delta="Live now" />
-        <Kpi label="Total Engagement" value={kpis.totalHashtagReach} delta="All campaigns" />
+        <Kpi label="Total Engagement" value={kpis.totalHashtagReach} delta="All campaigns" circled note="headline" />
         <Kpi label="Hashtags Tracked" value={String(kpis.hashtagsTracked)} delta="Across campaigns" />
       </KpiGrid>
 

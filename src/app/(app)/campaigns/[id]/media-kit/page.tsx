@@ -74,7 +74,7 @@ export default async function CampaignMediaKitPage({ params }: { params: Promise
               <div className="bar-track">
                 <div className="bar-fill" style={{ width: `${(h.totalEngagement / maxHashtagEng) * 100}%` }} />
               </div>
-              <div className="bar-val">
+              <div className="bar-val mk-bar-val">
                 {h.postCount} post{h.postCount === 1 ? "" : "s"} · {h.totalEngagement.toLocaleString()} eng
               </div>
             </div>

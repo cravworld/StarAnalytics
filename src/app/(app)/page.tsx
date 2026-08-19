@@ -19,6 +19,11 @@ export default async function DashboardPage() {
           value={formatCompactNumber(insights.followers)}
           delta={`↑ +${(insights.followersDeltaWeek / 1000).toFixed(1)}K this week`}
           deltaDirection="up"
+          // The screen's primary read gets the ring — exactly one per screen.
+          circled
+          // A static label about the layout, not a claim about the data. See the
+          // honesty rule on Kpi's `note` prop: marginalia never asserts an insight.
+          note="headline"
         />
         <Kpi
           label="Engagement Rate"

@@ -3,6 +3,7 @@ import type { Campaign } from "@prisma/client";
 import { computeBuzzScore, type BuzzScoreResult } from "@/lib/scoring/buzzScore";
 import { getCampaignEvents, type CampaignEventRow } from "@/lib/data/campaignEvents";
 import { getBuzzTrend, getBuzzWeekAgoDelta, type BuzzTrend } from "@/lib/data/campaignBuzzSnapshots";
+import { TILE_WASHES, STREAM_AVATAR_PALETTE as SHARED_STREAM_PALETTE } from "@/lib/palette";
 
 function fmtCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -10,13 +11,9 @@ function fmtCompact(n: number): string {
   return String(Math.round(n));
 }
 
-const ICON_PALETTE = [
-  { bg: "#fde8ef", icon: "🎬" },
-  { bg: "#e8f5e9", icon: "📣" },
-  { bg: "#e3f2fd", icon: "🎯" },
-  { bg: "#f3e5f5", icon: "✨" },
-  { bg: "#fff8e1", icon: "🔥" },
-];
+// Only the backgrounds moved to lib/palette.ts; the icons are content and are
+// unchanged. Length preserved so hash-based assignment is stable.
+const ICON_PALETTE = ["🎬", "📣", "🎯", "✨", "🔥"].map((icon, i) => ({ bg: TILE_WASHES[i], icon }));
 
 function iconFor(id: string) {
   let hash = 0;
@@ -100,12 +97,7 @@ export async function createCampaign(input: {
   });
 }
 
-const STREAM_PALETTE = [
-  { bg: "#fde8ef", c: "#E1306C" },
-  { bg: "#e8f5e9", c: "#1a7a4a" },
-  { bg: "#e3f2fd", c: "#1565c0" },
-  { bg: "#f3e5f5", c: "#6a1b9a" },
-];
+const STREAM_PALETTE = SHARED_STREAM_PALETTE;
 
 export interface StreamItem {
   id: string;

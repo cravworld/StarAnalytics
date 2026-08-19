@@ -15,7 +15,10 @@ export default async function AudiencePage() {
     <>
       {!isInstagramInsightsLive() && <PendingMetaReviewBanner />}
       <KpiGrid cols={3}>
-        <Kpi label="Top City" value={demo.topCity} delta={`${demo.topCityPct}% of audience`} />
+        {/* The screen's primary read — where this audience actually is. No
+            deltaDirection: "31% of audience" is a share, not a change, and a green
+            delta in this system asserts an increase. */}
+        <Kpi label="Top City" value={demo.topCity} delta={`${demo.topCityPct}% of audience`} circled note="headline" />
         <Kpi label="Dominant Age" value={demo.dominantAge} delta={`${demo.dominantAgePct}% of followers`} />
         <Kpi label="Gender Split" value={`${demo.genderSplit.male}M / ${demo.genderSplit.female}F`} delta="Male-leaning" />
       </KpiGrid>

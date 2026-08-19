@@ -3,6 +3,7 @@ import { fetchProfileSnapshot, backfillFanPageLink } from "@/lib/providers/apify
 import { PLATFORM_HANDLE_VALIDATORS, contentProviderFor } from "@/lib/providers/platform-utils";
 import type { PlatformId, RawPost } from "@/lib/providers/types";
 import { getFollowerTrends, lookupTrend, recordAccountSnapshot } from "@/lib/data/accountSnapshots";
+import { AVATAR_PALETTE as SHARED_AVATAR_PALETTE } from "@/lib/palette";
 
 function fmtCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -12,13 +13,9 @@ function fmtCompact(n: number): string {
 
 // Same hash-based deterministic assignment pattern as campaigns.ts's ICON_PALETTE —
 // stable across renders/requests without persisting a colour choice anywhere.
-const AVATAR_PALETTE = [
-  { bg: "#fde8ef", c: "#E1306C" },
-  { bg: "#e8f5e9", c: "#1a7a4a" },
-  { bg: "#f3e5f5", c: "#6a1b9a" },
-  { bg: "#e3f2fd", c: "#1565c0" },
-  { bg: "#fff8e1", c: "#e65100" },
-];
+// Colours come from lib/palette.ts; the length is unchanged so the hash-based
+// assignment below still gives every page the same slot it had before.
+const AVATAR_PALETTE = SHARED_AVATAR_PALETTE;
 
 function avatarFor(id: string) {
   let hash = 0;

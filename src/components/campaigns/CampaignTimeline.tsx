@@ -47,10 +47,14 @@ export function CampaignTimeline({ campaignId, events }: { campaignId: string; e
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+      {/* wrap + minWidth:0 for the same reason as the other add-forms in this app: a
+          flex item defaults to min-width:auto, so `flex:1` on the text input could not
+          shrink below its own content, and the date input plus button then pushed past
+          the right edge of a 390px screen (38px of horizontal page scroll). */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <input
           placeholder="e.g. Trailer Drop"
-          style={{ flex: 1 }}
+          style={{ flex: "1 1 180px", minWidth: 0 }}
           value={label}
           maxLength={80}
           onChange={(e) => setLabel(e.target.value)}

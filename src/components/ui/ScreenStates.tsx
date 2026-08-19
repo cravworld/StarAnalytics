@@ -81,11 +81,11 @@ export function ScreenError({
   message?: string;
 }) {
   return (
-    <div className="card" role="alert" style={{ borderColor: "#f0b4b4", background: "#fdecec" }}>
-      <div className="card-title" style={{ color: "var(--red)" }}>
+    <div className="card" role="alert" style={{ borderColor: "rgba(129,0,31,.26)", background: "rgba(129,0,31,.07)" }}>
+      <div className="card-title" style={{ color: "var(--pencil-red)" }}>
         Error
       </div>
-      <div style={{ fontSize: 12, color: "var(--text)" }}>{message}</div>
+      <div style={{ fontSize: 12, color: "var(--ink)" }}>{message}</div>
     </div>
   );
 }

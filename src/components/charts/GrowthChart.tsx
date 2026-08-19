@@ -2,6 +2,7 @@
 
 import "./register";
 import { Line } from "react-chartjs-2";
+import { INK, INK_FILL, GRIDLINE, tickFont } from "./theme";
 
 export function GrowthChart({ data }: { data: number[] }) {
   const labels = data.map((_, i) => `W${i + 1}`);
@@ -13,8 +14,11 @@ export function GrowthChart({ data }: { data: number[] }) {
           datasets: [
             {
               data,
-              borderColor: "#E1306C",
-              backgroundColor: "rgba(225,48,108,.08)",
+              // A single series is drawn with the single pen. Ink, not a tint —
+              // this line IS the data, and the design system reserves pale tones
+              // for structure.
+              borderColor: INK,
+              backgroundColor: INK_FILL,
               fill: true,
               tension: 0.4,
               pointRadius: 0,
@@ -27,14 +31,18 @@ export function GrowthChart({ data }: { data: number[] }) {
           maintainAspectRatio: false,
           plugins: { legend: { display: false } },
           scales: {
-            // Tick colour/size now come from the shared Chart.js defaults in
+            // Tick colour/size come from the shared Chart.js defaults in
             // ./register — the old #b0b0c8 was ~2.1:1 on white and unreadable.
-            x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 16 } },
+            x: {
+              grid: { display: false },
+              ticks: { maxRotation: 0, autoSkipPadding: 16, font: tickFont() },
+            },
             y: {
-              grid: { color: "rgba(15,15,20,.05)" },
+              grid: { color: GRIDLINE },
               border: { display: false },
               ticks: {
                 maxTicksLimit: 5,
+                font: tickFont(),
                 // Values arrive in thousands. Past 1000 the old `${v}K` callback
                 // rendered follower counts as "7450K"; nobody reads a dashboard in
                 // thousands-of-thousands.

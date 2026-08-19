@@ -4,6 +4,7 @@ import "./register";
 import { Line } from "react-chartjs-2";
 import type { SentimentTrendPoint } from "@/lib/data/campaigns";
 import type { CampaignEventRow } from "@/lib/data/campaignEvents";
+import { PENCIL_GREEN, GREEN_FILL, INK, LEAF, GRIDLINE, tickFont } from "./theme";
 
 // events is optional and defaults to [] — every existing caller of this component predates
 // the timeline feature and shouldn't have to change to keep compiling.
@@ -22,7 +23,10 @@ export function SentimentTrendLine({ data, events = [] }: { data: SentimentTrend
     eventsByDate.set(e.eventDate, list);
   }
   const pointRadius = data.map((d) => (eventsByDate.has(d.date) ? 6 : 3));
-  const pointBackgroundColor = data.map((d) => (eventsByDate.has(d.date) ? "#E1306C" : "#1a7a4a"));
+  // An event marker is an annotation, not a judgement, so it is drawn in plain INK
+  // rather than the alert red it used to use — a red dot on a sentiment line reads as
+  // "something went wrong here", which is not what logging an event means.
+  const pointBackgroundColor = data.map((d) => (eventsByDate.has(d.date) ? INK : PENCIL_GREEN));
 
   return (
     <div className="chart-wrap">
@@ -32,13 +36,19 @@ export function SentimentTrendLine({ data, events = [] }: { data: SentimentTrend
           datasets: [
             {
               data: data.map((d) => d.positivePct),
-              borderColor: "#1a7a4a",
-              backgroundColor: "rgba(26,122,74,.08)",
+              // The one chart that keeps a semantic colour rather than the neutral ink:
+              // the quantity plotted IS positive sentiment, so green carries meaning here.
+              borderColor: PENCIL_GREEN,
+              backgroundColor: GREEN_FILL,
               fill: true,
               tension: 0.4,
               pointRadius,
               borderWidth: 2,
               pointBackgroundColor,
+              // A paper-coloured ring keeps each point legible where the line doubles
+              // back over its own fill, and separates the larger event markers cleanly.
+              pointBorderColor: LEAF,
+              pointBorderWidth: 1,
             },
           ],
         }}
@@ -59,12 +69,13 @@ export function SentimentTrendLine({ data, events = [] }: { data: SentimentTrend
             },
           },
           scales: {
-            x: { grid: { display: false }, ticks: { color: "#72728a" } },
+            x: { grid: { display: false }, ticks: { font: tickFont() } },
             y: {
               min: 0,
               max: 100,
-              grid: { color: "rgba(0,0,0,.05)" },
-              ticks: { color: "#72728a", callback: (v) => `${v}%` },
+              grid: { color: GRIDLINE },
+              border: { display: false },
+              ticks: { font: tickFont(), callback: (v) => `${v}%` },
             },
           },
         }}

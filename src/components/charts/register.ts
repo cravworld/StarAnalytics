@@ -11,6 +11,7 @@ import {
   Tooltip,
   defaults,
 } from "chart.js";
+import { INK, INK_SOFT, GRIDLINE, RULE, monoFamily } from "./theme";
 
 ChartJS.register(
   CategoryScale,
@@ -44,9 +45,34 @@ const prefersReducedMotion =
 
 // 320ms ≈ --dur-slow. easeOutQuart is the closest built-in to the app's
 // --ease-out curve: quick departure, soft settle.
-defaults.animation = prefersReducedMotion
-  ? false
-  : { duration: 320, easing: "easeOutQuart" };
+//
+// MERGED, never replaced — and that is load-bearing, not style. Chart.js builds every
+// animation's config in Animations.configure like this:
+//
+//   const animationOptions = Object.keys(defaults.animation);
+//   for (const option of animationOptions) resolved[option] = cfg[option];
+//
+// It copies ONLY the keys that exist on defaults.animation. Stock, that object carries
+// eight: delay, duration, easing, fn, from, loop, to, type. Assigning a fresh
+// `{ duration, easing }` over it drops `type` and `fn` from that list, so they stop
+// being copied into any animation — including the built-in `type: 'color'` that colour
+// properties rely on.
+//
+// Animation then falls back to `interpolators[cfg.type || typeof from]`, and Chart.js
+// ships interpolators for exactly three types: boolean, color, number. A colour is a
+// string, `interpolators['string']` is undefined, and the next frame throws
+//   TypeError: this._fn is not a function   (Animation.tick -> Animator._update)
+// from inside requestAnimationFrame — so it surfaces on whatever route the user has
+// navigated to by then, including ones with no charts at all.
+// Captured before the branch so TypeScript can narrow it: defaults.animation is typed
+// `false | AnimationSpec`, and `false` is exactly what the reduced-motion path assigns.
+const baseAnimation = defaults.animation;
+if (prefersReducedMotion) {
+  defaults.animation = false;
+} else if (baseAnimation !== false) {
+  baseAnimation.duration = 320;
+  baseAnimation.easing = "easeOutQuart";
+}
 
 // Chart.js re-runs the entry animation on every resize by default, so dragging a
 // window edge makes all charts replay. Resizes should be instantaneous.
@@ -82,8 +108,8 @@ Object.defineProperty(defaults.font, "family", {
   },
 });
 defaults.font.size = 11;
-defaults.color = "#6b6b84";
-defaults.borderColor = "rgba(15,15,20,.06)";
+defaults.color = INK_SOFT;
+defaults.borderColor = GRIDLINE;
 
 // Hovering anywhere in the plot area resolves to the nearest point rather than
 // requiring a direct hit on a 3px dot.
@@ -93,20 +119,22 @@ defaults.interaction.intersect = false;
 // A light tooltip consistent with the app's cards, instead of Chart.js's stock
 // dark bubble which reads as a foreign element on these screens.
 Object.assign(defaults.plugins.tooltip, {
-  backgroundColor: "rgba(255,255,255,.97)",
-  titleColor: "#0f0f14",
-  bodyColor: "#6b6b84",
-  borderColor: "#e7e7ef",
+  backgroundColor: "rgba(251,252,248,.97)",
+  titleColor: INK,
+  bodyColor: INK_SOFT,
+  borderColor: RULE,
   borderWidth: 1,
-  cornerRadius: 7,
+  cornerRadius: 4,
   padding: 10,
   displayColors: true,
   boxPadding: 4,
   titleFont: { size: 12, weight: 600 as const },
+  // The tooltip is a label surface, so it takes the label voice.
+  footerFont: { family: monoFamily(), size: 10 },
   bodyFont: { size: 11 },
 });
 
 defaults.plugins.legend.labels.usePointStyle = true;
-defaults.plugins.legend.labels.pointStyle = "circle";
+defaults.plugins.legend.labels.pointStyle = "rectRounded";
 defaults.plugins.legend.labels.boxWidth = 8;
 defaults.plugins.legend.labels.padding = 12;

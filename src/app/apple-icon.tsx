@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og";
 import { StarMark } from "@/lib/ogImage";
+import { BRAND } from "@/lib/palette";
 
 export const size = { width: 180, height: 180 };
 export const contentType = "image/png";
@@ -14,10 +15,10 @@ export default function AppleIcon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          backgroundImage: "linear-gradient(135deg, #833AB4, #E1306C, #F77737)",
+          background: BRAND.ground,
         }}
       >
-        <StarMark size={108} color="#fff" />
+        <StarMark size={108} color={BRAND.mark} />
       </div>
     ),
     { ...size },

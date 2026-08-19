@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getCampaignDetail, type CampaignDetail } from "@/lib/data/campaigns";
 import { getNotifierChannel, getNotifierProvider } from "@/lib/providers";
+import { TOKEN } from "@/lib/palette";
 
 export const WEEKLY_DIGEST_ALERT_TYPE = "weekly_digest";
 
@@ -8,7 +9,7 @@ export const WEEKLY_DIGEST_ALERT_TYPE = "weekly_digest";
 // a "use client" component, not meant to be pulled into server-only data code, and it's
 // three hex values; if they ever drift apart, that's a signal to extract a shared token
 // file, not evidence this copy was a mistake.
-const SENTIMENT_COLOR = { pos: "#1a7a4a", neu: "#bdbdbd", neg: "#c62828" } as const;
+const SENTIMENT_COLOR = { pos: TOKEN.pencilGreen, neu: TOKEN.inkFaint, neg: TOKEN.pencilRed } as const;
 
 // Deliberately a small summary type, not the full ~20-field CampaignDetail — keeps the
 // formatters' test surface to only what they actually read, same reasoning
@@ -83,9 +84,9 @@ function escapeHtml(s: string): string {
 // this is three lines; if the bands ever drift apart, that's a signal to extract a shared
 // helper, not evidence this copy was a mistake.
 function buzzBandColor(score: number): string {
-  if (score >= 70) return "#1a7a4a";
-  if (score >= 40) return "#e6a700";
-  return "#c62828";
+  if (score >= 70) return TOKEN.pencilGreen;
+  if (score >= 40) return TOKEN.pencilAmber;
+  return TOKEN.pencilRed;
 }
 
 // A thin colored proportional bar, table-cell-width based (not CSS width) so it survives
@@ -113,7 +114,7 @@ export function formatWeeklyDigestHtml(campaigns: WeeklyDigestCampaignSummary[],
 
   const body =
     campaigns.length === 0
-      ? `<p style="font-size:14px;color:#6b6b84;margin:0;">No live campaigns this week.</p>`
+      ? `<p style="font-size:14px;color:${TOKEN.inkSoft};margin:0;">No live campaigns this week.</p>`
       : campaigns
           .map((c, i) => {
             const buzzColor = buzzBandColor(c.buzzScore);
@@ -124,26 +125,26 @@ export function formatWeeklyDigestHtml(campaigns: WeeklyDigestCampaignSummary[],
             const sentimentBlock = c.sentiment
               ? `<tr><td colspan="2" style="padding:5px 0 0;">
                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-                     <td style="font-size:13px;color:#6b6b84;">Sentiment</td>
-                     <td style="font-size:13px;text-align:right;font-weight:600;color:${SENTIMENT_COLOR.pos};">${c.sentiment.positivePct}% positive <span style="color:#9a9ab2;font-weight:400;">(${c.sentiment.classifiedCount}/${c.sentiment.totalCount})</span></td>
+                     <td style="font-size:13px;color:${TOKEN.inkSoft};">Sentiment</td>
+                     <td style="font-size:13px;text-align:right;font-weight:600;color:${SENTIMENT_COLOR.pos};">${c.sentiment.positivePct}% positive <span style="color:${TOKEN.inkFaint};font-weight:400;">(${c.sentiment.classifiedCount}/${c.sentiment.totalCount})</span></td>
                    </tr></table>
                    ${sentimentBarHtml(c.sentiment)}
                  </td></tr>`
-              : `<tr><td style="padding:5px 0;font-size:13px;color:#6b6b84;">Sentiment</td><td style="padding:5px 0;font-size:13px;text-align:right;color:#9a9ab2;">pending</td></tr>`;
+              : `<tr><td style="padding:5px 0;font-size:13px;color:${TOKEN.inkSoft};">Sentiment</td><td style="padding:5px 0;font-size:13px;text-align:right;color:${TOKEN.inkFaint};">pending</td></tr>`;
             const hashtagRow = c.topHashtag
-              ? `<tr><td style="padding:8px 0 0;font-size:13px;color:#6b6b84;">Top hashtag</td><td style="padding:8px 0 0;font-size:13px;text-align:right;font-weight:600;">#${escapeHtml(c.topHashtag.hashtag)} <span style="color:#9a9ab2;font-weight:400;">(${c.topHashtag.postCount} posts)</span></td></tr>`
-              : `<tr><td style="padding:8px 0 0;font-size:13px;color:#6b6b84;">Top hashtag</td><td style="padding:8px 0 0;font-size:13px;text-align:right;color:#9a9ab2;">none tracked</td></tr>`;
+              ? `<tr><td style="padding:8px 0 0;font-size:13px;color:${TOKEN.inkSoft};">Top hashtag</td><td style="padding:8px 0 0;font-size:13px;text-align:right;font-weight:600;">#${escapeHtml(c.topHashtag.hashtag)} <span style="color:${TOKEN.inkFaint};font-weight:400;">(${c.topHashtag.postCount} posts)</span></td></tr>`
+              : `<tr><td style="padding:8px 0 0;font-size:13px;color:${TOKEN.inkSoft};">Top hashtag</td><td style="padding:8px 0 0;font-size:13px;text-align:right;color:${TOKEN.inkFaint};">none tracked</td></tr>`;
 
             return `
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e7e7ef;border-left:4px solid ${buzzColor};border-radius:10px;margin-bottom:16px;overflow:hidden;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${TOKEN.rule};border-left:4px solid ${buzzColor};border-radius:4px;margin-bottom:16px;overflow:hidden;">
   <tr>
-    <td style="padding:14px 16px;background:#fafafa;border-bottom:1px solid #e7e7ef;">
+    <td style="padding:14px 16px;background:${TOKEN.paper};border-bottom:1px solid ${TOKEN.rule};">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-        <td style="font-size:15px;font-weight:700;color:#0f0f14;">
+        <td style="font-size:15px;font-weight:700;color:${TOKEN.ink};">
           ${escapeHtml(c.name)}${isTopPerformer ? ` <span style="font-size:11px;font-weight:700;color:${buzzColor};">🔥 TOP PERFORMER</span>` : ""}
         </td>
         <td style="text-align:right;white-space:nowrap;">
-          <span style="display:inline-block;background:${buzzColor};color:#ffffff;padding:4px 12px;border-radius:14px;font-size:13px;font-weight:800;">${c.buzzScore}</span>
+          <span style="display:inline-block;background:${buzzColor};color:${TOKEN.leaf};padding:4px 12px;border-radius:3px;font-size:13px;font-weight:800;">${c.buzzScore}</span>
           ${
             c.buzzWeekAgoDelta === null
               ? ""
@@ -156,8 +157,8 @@ export function formatWeeklyDigestHtml(campaigns: WeeklyDigestCampaignSummary[],
   <tr>
     <td style="padding:12px 16px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-        <tr><td style="padding:5px 0;font-size:13px;color:#6b6b84;">Posts tracked</td><td style="padding:5px 0;font-size:13px;text-align:right;font-weight:600;">${c.postCount}</td></tr>
-        <tr><td style="padding:5px 0;font-size:13px;color:#6b6b84;">Engagement</td><td style="padding:5px 0;font-size:13px;text-align:right;font-weight:600;">${escapeHtml(c.engagementDisplay)}</td></tr>
+        <tr><td style="padding:5px 0;font-size:13px;color:${TOKEN.inkSoft};">Posts tracked</td><td style="padding:5px 0;font-size:13px;text-align:right;font-weight:600;">${c.postCount}</td></tr>
+        <tr><td style="padding:5px 0;font-size:13px;color:${TOKEN.inkSoft};">Engagement</td><td style="padding:5px 0;font-size:13px;text-align:right;font-weight:600;">${escapeHtml(c.engagementDisplay)}</td></tr>
         ${sentimentBlock}
         ${hashtagRow}
       </table>
@@ -169,17 +170,17 @@ export function formatWeeklyDigestHtml(campaigns: WeeklyDigestCampaignSummary[],
 
   const summaryLine =
     campaigns.length > 0
-      ? `<div style="font-size:13px;color:#6b6b84;margin-top:6px;">${campaigns.length} live campaign${campaigns.length === 1 ? "" : "s"} this week</div>`
+      ? `<div style="font-size:13px;color:${TOKEN.inkSoft};margin-top:6px;">${campaigns.length} live campaign${campaigns.length === 1 ? "" : "s"} this week</div>`
       : "";
 
-  return `<div style="font-family:${FONT};max-width:600px;margin:0 auto;color:#0f0f14;">
-  <div style="padding:0 0 16px;margin-bottom:16px;border-bottom:3px solid #E1306C;">
-    <div style="font-size:19px;font-weight:800;color:#E1306C;">StarAnalytics Weekly Digest</div>
-    <div style="font-size:12px;color:#6b6b84;margin-top:2px;">${dateLabel}</div>
+  return `<div style="font-family:${FONT};max-width:600px;margin:0 auto;color:${TOKEN.ink};">
+  <div style="padding:0 0 16px;margin-bottom:16px;border-bottom:3px solid ${TOKEN.margin};">
+    <div style="font-size:19px;font-weight:700;color:${TOKEN.ink};">StarAnalytics Weekly Digest</div>
+    <div style="font-size:12px;color:${TOKEN.inkSoft};margin-top:2px;">${dateLabel}</div>
     ${summaryLine}
   </div>
   ${body}
-  <div style="padding-top:12px;margin-top:8px;border-top:1px solid #e7e7ef;font-size:11px;color:#9a9ab2;">
+  <div style="padding-top:12px;margin-top:8px;border-top:1px solid ${TOKEN.rule};font-size:11px;color:${TOKEN.inkFaint};">
     Generated automatically by StarAnalytics.
   </div>
 </div>`;
