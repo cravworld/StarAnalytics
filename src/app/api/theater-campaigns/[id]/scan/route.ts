@@ -6,7 +6,7 @@
 // constraint.
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { runCampaignScan } from "@/lib/data/theaterCampaigns";
+import { markLatestRunFailed, runCampaignScan } from "@/lib/data/theaterCampaigns";
 import { bookMyShowConfigError } from "@/lib/bookmyshow/providers";
 import { tryAcquireCronLock, releaseCronLock } from "@/lib/cronLock";
 import { isApifyQuotaFailure } from "@/lib/apify/quotaBreaker";
@@ -46,6 +46,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json(result, { status: result.status === "error" ? 502 : 200 });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    // Land the failure on the run row before returning — every path out of here, quota
+    // included. Without this an unexpected throw leaves the run in `running` forever, and
+    // the panel this response points the user at shows a scan still in progress with
+    // nothing wrong, which is exactly what happened on 2026-08-20. Best-effort: if the
+    // database is what failed, this fails too.
+    await markLatestRunFailed(id, message);
     if (isApifyQuotaFailure(err)) {
       return NextResponse.json(
         { error: "Apify's monthly spend limit has been reached — scans are paused until it resets or is raised." },
