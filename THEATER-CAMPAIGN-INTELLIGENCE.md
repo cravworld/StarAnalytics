@@ -317,7 +317,7 @@ Established 2026-08-20; recheck before scaling up.
 ## 10. Tests
 
 ```
-npm run test:unit        # 221 tests; the live integration test skips unless opted in
+npm run test:unit        # 236 tests; both opt-in tests skip unless enabled
 npx tsc --noEmit         # npm run lint is broken project-wide, pre-existing
 npx next build
 ```
@@ -330,6 +330,37 @@ exported Server Action calls `requireSession()`. Guard tests assert no user-faci
 uses sales or occupancy wording.
 
 Apify is never called in the default suite.
+
+### The opt-in database test
+
+```
+RUN_BMS_DB_TEST=true npx vitest run src/lib/data/theaterCampaignIngest.live.test.ts
+```
+
+Writes to whatever `DATABASE_URL` points at, using the mock provider — no BookMyShow
+traffic, no Apify spend — and deletes the campaign it creates.
+
+It runs the same scan **twice**, and that is the point. The two worst bugs this pipeline
+has had were both invisible to a single run:
+
+- Per-row writes inside one transaction took the *first* city past Prisma's 5s
+  interactive-transaction limit. The transaction rolled back, the throw escaped the scan
+  loop, and a 30-city scan wrote nothing while its run row sat in `running` forever.
+- If `lastSeenAt` ever stops being refreshed, scan #1 still looks perfect and scan #2 marks
+  the entire slate as disappeared — which reads downstream as every theater in Kerala
+  pulling the film.
+
+**Ingest must stay bulk.** The number of statements per city has to be fixed, not
+proportional to the number of shows on the page. A Kerala city page carries ~180 shows;
+written one row at a time that is ~390 sequential round trips to a pooled connection, which
+does not fit in a transaction. If a city ever needs more than the 20s backstop in
+`ingestCityResult`, the shape of the writes is wrong again — do not raise the timeout.
+
+**Mock data must never be left in a real campaign.** Mock venue codes are synthetic, so
+they never merge with real BookMyShow venues, and the detail page reads snapshots across
+all runs — so a campaign holding both would rank on a blend of fabricated and real
+readings while badging itself live. Scan a throwaway campaign, or delete the mock runs
+afterwards.
 
 ## 11. Known gaps
 
