@@ -60,6 +60,9 @@ See `.env.example` for the full annotated list. Highlights:
 - `COMMENT_SCRAPE` — global kill switch for *fetching new comments*. Off unless set to
   exactly `"on"` (`"true"`/`"1"`/`"yes"` all mean off, deliberately). See **The comment
   pipeline** below, because "off" does not mean sentiment stopped.
+- `SENTIMENT_CLASSIFY` — separate kill switch for *classification itself*, same exact-`"on"`
+  rule. Currently off in production (all three providers out of credit). Independent of
+  `DATA_MODE_SENTIMENT`, and not interchangeable with it — see **The comment pipeline**.
 - `APIFY_TOKEN`, `APIFY_ACTOR_HASHTAG`, `APIFY_ACTOR_PROFILE`, `APIFY_ACTOR_POST`,
   `APIFY_ACTOR_COMMENTS`, `APIFY_ACTOR_SCOUT`, `APIFY_ACTOR_SCOUT_FACEBOOK`,
   `APIFY_ACTOR_BOOKMYSHOW` — Apify actor wiring, plus a set of spend guards
@@ -248,11 +251,21 @@ Three separate things, easy to conflate:
    comment panels have anything to show while the global switch is off. The cron path
    deliberately does *not* opt in — an unattended hourly opt-in would turn a switched-off
    pipeline back on by the back door.
-3. **Classifying comments already stored** keeps running normally, every minute, via
-   `backfill-comment-sentiment`. Posts with no stored comments fall back to caption-only
-   classification and log that they did — "0 comments stored" and "comment scraping is
-   switched off" look identical downstream, and the difference matters: the first is a
-   finding, the second is a config choice.
+3. **Classifying** what's stored is a *third*, separately switched thing: `SENTIMENT_CLASSIFY`
+   (added 2026-08-20), on only for the exact value `"on"`, same discipline as
+   `COMMENT_SCRAPE`. It is currently **off in production** — all three providers (Claude,
+   OpenAI, Gemini) are out of credit. Off means no AI call and no `Sentiment` row written;
+   it does *not* mean mock labels. Note that `DATA_MODE_SENTIMENT=mock` is the wrong way to
+   switch classification off: mock marks every post positive at 0.78 and writes it to the
+   same table as real results, which is worse than no data. Anything skipped is picked up
+   automatically on the first run after the flag flips back on; nothing is lost.
+   `backfill-comment-sentiment` still ticks every minute, and logs what it left unclassified
+   rather than going quiet.
+
+Posts with no stored comments fall back to caption-only classification and log that they
+did — "0 comments stored" and "comment scraping is switched off" look identical downstream,
+and the difference matters: the first is a finding, the second is a config choice. The same
+reasoning is why all three switches log rather than silently no-op.
 
 ### Design system
 

@@ -14,7 +14,7 @@ Not user-facing — this is the operating record from a DPDP (India's Digital Pe
 | Comment text + author handle | `post_comments` | Public commenters (third parties) | Sentiment analysis input. Read exactly once (by the classifier) and never again — nulled after `COMMENT_RETENTION_DAYS` (default 90) by the same cron; the row itself is kept so comment counts stay accurate |
 | Handle, display name, follower count | `competitor_accounts`, `fan_pages` | Public account owners | Competitor/fan tracking |
 | Sentiment label/score/keywords | `sentiment` | Derived from the above | Campaign performance signal |
-| Per-comment sentiment label/score | `comment_sentiment` | Derived from `post_comments` | Comment-level sentiment breakdown (`/campaigns/comments`, fan-page comment panels) |
+| Per-comment sentiment label/score **+ a retained copy of the commenter's handle** | `comment_sentiment` | Public commenters (third parties) | Comment-level sentiment breakdown (`/campaigns/comments`, fan-page comment panels). Not purely derived: `author_handle` is a denormalized copy that outlives the `post_comments` prune — see the correction under Retention |
 | Talent handle, supplied name, follower/engagement stats | `scout_candidates`, `scout_batch_entries`, `scout_snapshots`, `scout_scores` | Public account owners (third parties) — influencers/talent on someone's shortlist | Scoutline: bulk talent scanning and Buzz Factor ranking. `supplied_name` comes from the uploaded source sheet, not from scraping |
 | Full raw Scoutline scrape payload | `scout_snapshots.raw` | Same | Ingestion artifact from the profile-analytics actor. **Not currently pruned** — see Retention, open item 2 |
 | Theatre, screening, seat-availability status | `theaters`, `screenings`, `availability_snapshots`, `bms_scan_runs`, `theater_campaigns` | **Nobody's** — this is a business's showtime listing, not personal data | Theater Campaign Intelligence demand tracking. Listed here so the absence of a privacy question is explicit rather than an omission: no individual is identified, and BookMyShow exposes no booker-level data on any page this feature reads |
@@ -36,6 +36,8 @@ Not user-facing — this is the operating record from a DPDP (India's Digital Pe
 
 ## Cross-border processing
 
+**Current state (2026-08-20): no text is being sent to any of the three, because `SENTIMENT_CLASSIFY` is off in production — all three providers are out of credit.** That is a configuration state, not a control: flipping the flag back on resumes all of the transfers below. The section describes what happens when classification runs.
+
 - **Anthropic (Claude API, US)** — receives post/comment `text` only for sentiment scoring, not the author handle. Good minimization already in place.
 - **OpenAI (US)** and **Google (Gemini API, US)** — **receive exactly the same comment text as Anthropic**, whenever the Claude call fails. This is not a hypothetical path: the Claude → OpenAI → Gemini fallback chain was added in response to a real Anthropic credit exhaustion, and a batch moves down the chain on *any* failure (rate limit, credit, network). Same minimization applies — text only, no author handle — but the recipient list is three US processors, not one. This was the one materially wrong statement in this document before 2026-08-20, when it named Anthropic as the sole recipient. If the fallback keys are left unset, those legs throw immediately and no data reaches them; that is a configuration state, not a guarantee, and it should not be relied on as one.
 - **Resend (US)** — internal alert emails and the weekly digest only.
@@ -47,9 +49,26 @@ Not user-facing — this is the operating record from a DPDP (India's Digital Pe
 `prune-raw-payloads` (cron, once/day, `src/app/api/cron/prune-raw-payloads/route.ts`) runs two jobs:
 
 1. Nulls out `posts.raw`/`post_comments.raw` once a row is older than `RAW_PAYLOAD_RETENTION_DAYS` (default **90**). Safe to run: confirmed by grep that no code path reads `raw` back out, so nulling it doesn't touch any feature — only `caption`, `authorHandle`, and the engagement-count columns (already extracted at ingest time) are ever used.
-2. Nulls out `post_comments.text`/`post_comments.author_handle` once a row is older than `COMMENT_RETENTION_DAYS` (default **90**). Same reasoning, same "confirmed by grep it's never read back" bar: comment text/handle is read exactly once, by the sentiment classifier (`src/lib/data/sentiment.ts`), to derive a `sentiment` row, and never again after. The row itself isn't hard-deleted — `id`/`postId`/`scrapedAt` stay so comment counts remain accurate; only the third-party commenter's actual content is cleared.
+2. Nulls out `post_comments.text`/`post_comments.author_handle` once a row is older than `COMMENT_RETENTION_DAYS` (default **90**). **Read the correction directly below before relying on this: the handle does not actually disappear from the database.** Same reasoning, same "confirmed by grep it's never read back" bar: comment text/handle is read exactly once, by the sentiment classifier (`src/lib/data/sentiment.ts`), to derive a `sentiment` row, and never again after. The row itself isn't hard-deleted — `id`/`postId`/`scrapedAt` stay so comment counts remain accurate; only the third-party commenter's actual content is cleared.
 
 Both defaults are policy decisions, not engineering ones — 90 days each because nothing in the codebase implied a real number. Change the env var if that's wrong for how this data actually gets used.
+
+### Correction (2026-08-20): the commenter handle survives the prune
+
+The retention statement above has been in this document since 2026-07-30 and is **incomplete in a way that overstates deletion**. Nulling `post_comments.author_handle` does not remove the commenter's handle from the database, because a second copy exists and nothing prunes it.
+
+`comment_sentiment.author_handle` is a **deliberate denormalized copy**, written at classification time (`src/lib/data/commentSentiment.ts:86`). The schema comment states the intent plainly: it is taken as a snapshot *before* the handle can be pruned, so that attribution survives the retention cron. Nothing in `prune-raw-payloads` touches the `comment_sentiment` table — verified 2026-08-20, it issues exactly three `updateMany` calls, against `post` and `post_comment` only.
+
+The practical effect:
+
+| After `COMMENT_RETENTION_DAYS` | Comment text | Commenter handle |
+|---|---|---|
+| `post_comments` | nulled | nulled |
+| `comment_sentiment` | never stored (only a label/score) | **retained indefinitely** |
+
+So the accurate statement is: **comment *text* is pruned at 90 days; the commenter's *handle* is retained indefinitely in derived form, alongside a sentiment label about them.** That is a materially different privacy position from the one this section described, and it is the one to state if this is ever reviewed. A handle plus a sentiment judgement is arguably more sensitive than the raw comment, not less — it's the shape of a profile, which is precisely what the "algorithmic profiling" note under Legal basis is about.
+
+Whether the copy should exist is a **product decision that has not been consciously made** — it was introduced to support attribution and never revisited against this policy. Two coherent answers: prune `comment_sentiment.author_handle` on the same clock (the retention policy then means what it says), or keep it and document the retention of handles as deliberate. What should not persist is the current state, where one document says handles are deleted and the schema says they are kept. Tracked in #29.
 
 **One retention control lives outside the database and is worth recording here** (documented in `e2e/phase0-screens.spec.ts`, added to this file 2026-08-20): the e2e suite deliberately never screenshots `/campaigns/comments`. That screen renders commenters' handles and full comment text — precisely the two columns the pruning job nulls after `COMMENT_RETENTION_DAYS`. A PNG committed to the repository would hold the same personal data permanently and entirely outside the prune, since git history is not erasable the way a nulled column is. A screenshot there would silently defeat the policy above. Anyone adding e2e coverage for that screen must keep the capture out of the repo and take it against a scratch database. The same reasoning applies to any future export, fixture or bug-report attachment containing comment text.
 
