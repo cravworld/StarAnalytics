@@ -1,0 +1,12 @@
+-- Adds BmsScanRun.recordsUnmapped.
+--
+-- This lives in its own migration rather than in 20260820120000 because that one had
+-- already been applied to the database by a preview deployment before this column was
+-- added to the schema. Editing an applied migration does not create the column — Prisma
+-- tracks migrations by name, sees it as done, and moves on — and it also breaks the
+-- recorded checksum. The earlier file has been restored to the content that was actually
+-- applied, and the new column arrives here.
+--
+-- IF NOT EXISTS so this is safe to run against a database where an edited copy of the
+-- previous migration did create the column.
+ALTER TABLE "bms_scan_runs" ADD COLUMN IF NOT EXISTS "records_unmapped" INTEGER NOT NULL DEFAULT 0;
