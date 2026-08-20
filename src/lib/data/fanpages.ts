@@ -4,7 +4,7 @@ import { backfillFanPageLink } from "@/lib/providers/apify-public-content";
 import { PLATFORM_HANDLE_VALIDATORS, contentProviderFor } from "@/lib/providers/platform-utils";
 import type { PlatformId, RawPost } from "@/lib/providers/types";
 import { getFollowerTrends, lookupTrend, recordAccountSnapshot } from "@/lib/data/accountSnapshots";
-import { queueSentimentClassification } from "@/lib/data/sentiment";
+import { queueSentimentClassification, type SentimentOptions } from "@/lib/data/sentiment";
 import { AVATAR_PALETTE as SHARED_AVATAR_PALETTE } from "@/lib/palette";
 
 function fmtCompact(n: number): string {
@@ -684,14 +684,49 @@ export async function addFanPage(handleInput: string, platform: PlatformId = "in
 // poll-hashtags cron usually hits the Apify cap during hashtag scraping, long before it
 // gets here, and without this every Instagram page would burn one more doomed call to
 // rediscover it. YouTube pages ignore the flag entirely: separate API, separate quota.
-export async function refreshStaleFanPages(
-  apifyQuotaExhausted = false,
-): Promise<{ handle: string; ok: boolean; error?: string }[]> {
-  const pages = await prisma.fanPage.findMany({ where: { isActive: true } });
-  const results: { handle: string; ok: boolean; error?: string }[] = [];
+export interface FanPageRefreshResult {
+  handle: string;
+  ok: boolean;
+  /** Set when the page was in date and deliberately not re-fetched (TTL runs only). */
+  skipped?: boolean;
+  postCount?: number;
+  error?: string;
+}
+
+export interface RefreshFanPagesOptions {
+  /**
+   * Refresh every active page regardless of how recently it was checked.
+   *
+   * The TTL exists to stop an hourly cron re-paying for data that has not moved. A person
+   * pressing "Refresh all" is making the opposite request — they want current numbers now —
+   * and silently skipping most of the list would look like the button did nothing.
+   */
+  force?: boolean;
+  apifyQuotaExhausted?: boolean;
+  /**
+   * Passed through to the sentiment pipeline. The manual paths opt into the comment scrape;
+   * the cron leaves this undefined so it inherits the global (off) default — see
+   * isCommentScrapeEnabled and the note in actions/fanpages.ts.
+   */
+  sentimentOpts?: SentimentOptions;
+}
+
+/**
+ * Refresh tracked fan pages — the shared implementation behind both the hourly cron and the
+ * "Refresh all" button. One loop rather than two, so the failure handling, the quota
+ * short-circuit and the sentiment follow-up cannot drift apart between them; the callers
+ * differ only in the options above.
+ */
+export async function refreshFanPages(opts: RefreshFanPagesOptions = {}): Promise<FanPageRefreshResult[]> {
+  const { force = false, apifyQuotaExhausted = false, sentimentOpts } = opts;
+  const pages = await prisma.fanPage.findMany({ where: { isActive: true }, orderBy: { igHandle: "asc" } });
+  const results: FanPageRefreshResult[] = [];
   let quotaExhausted = apifyQuotaExhausted;
   for (const p of pages) {
-    if (!isStale(p.lastCheckedAt)) continue;
+    if (!force && !isStale(p.lastCheckedAt)) {
+      results.push({ handle: p.igHandle, ok: true, skipped: true });
+      continue;
+    }
     // Same account-wide short-circuit as refreshStaleCompetitors: once Apify reports the
     // quota gone, every further Instagram page this tick would fail the same way, so they
     // are reported as not-attempted rather than each burning another failed call. YouTube
@@ -706,12 +741,17 @@ export async function refreshStaleFanPages(
       // Same follow-up the manual pull does (pullFanPageHistoryAction). Without it, posts
       // pulled by this path would sit unclassified until some unrelated sweep found them,
       // so the two refresh routes would disagree about what a refresh means.
-      await queueSentimentClassification(postIds);
-      results.push({ handle: p.igHandle, ok: true });
+      await queueSentimentClassification(postIds, sentimentOpts);
+      results.push({ handle: p.igHandle, ok: true, postCount: postIds.length });
     } catch (err) {
       if (isApifyQuotaFailure(err)) quotaExhausted = true;
       results.push({ handle: p.igHandle, ok: false, error: err instanceof Error ? err.message : String(err) });
     }
   }
   return results;
+}
+
+/** The hourly cron's entry point: TTL-gated, and no comment scrape. */
+export async function refreshStaleFanPages(apifyQuotaExhausted = false): Promise<FanPageRefreshResult[]> {
+  return refreshFanPages({ apifyQuotaExhausted });
 }
