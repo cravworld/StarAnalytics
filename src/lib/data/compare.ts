@@ -165,17 +165,46 @@ export interface CompareColumn {
   followerTrendDeltaPct: number | null;
 }
 
-async function competitorColumn(
-  c: { id: string; platform: PlatformId; igHandle: string; displayName: string | null; followers: number | null; lastScrapedAt: Date | null },
-  trend: { values: number[]; deltaPct: number | null },
-): Promise<CompareColumn> {
-  const recentPosts = await prisma.post.findMany({
-    where: { competitorId: c.id },
+/**
+ * The most recent posts for every competitor at once, newest first, grouped by competitor.
+ *
+ * competitorColumn used to run this query itself, and getCompareData mapped it over the whole
+ * competitor list — one query per competitor, all concurrent, against a connection pool of 5.
+ * That is the same shape that took /fan-pages down with P2024 once ten pages were tracked
+ * (see fetchFanPagePosts in data/fanpages.ts); this one simply has not been given enough
+ * competitors yet to fail.
+ *
+ * Ordering is done in SQL and preserved when grouping, so each competitor's slice is exactly
+ * the rows its own `orderBy: { postedAt: "desc" } / take` returned, Postgres' NULLS FIRST
+ * default for DESC included. That matters here beyond tidiness: `avgLikesPerPost` averages
+ * all of the rows taken while `postsPerWeek` drops the ones with a null postedAt, so *which*
+ * rows land in the slice changes both numbers.
+ */
+async function recentPostsByCompetitor(competitorIds: string[]): Promise<Map<string, { likes: number | null; postedAt: Date | null }[]>> {
+  const byCompetitor = new Map<string, { likes: number | null; postedAt: Date | null }[]>();
+  if (competitorIds.length === 0) return byCompetitor;
+
+  const rows = await prisma.post.findMany({
+    where: { competitorId: { in: competitorIds } },
     orderBy: { postedAt: "desc" },
-    take: RECENT_POSTS_FOR_METRICS,
-    select: { likes: true, postedAt: true },
+    select: { competitorId: true, likes: true, postedAt: true },
   });
 
+  for (const r of rows) {
+    if (!r.competitorId) continue;
+    const list = byCompetitor.get(r.competitorId);
+    // Truncated here rather than after grouping so the map never holds more than it needs.
+    if (!list) byCompetitor.set(r.competitorId, [{ likes: r.likes, postedAt: r.postedAt }]);
+    else if (list.length < RECENT_POSTS_FOR_METRICS) list.push({ likes: r.likes, postedAt: r.postedAt });
+  }
+  return byCompetitor;
+}
+
+function competitorColumn(
+  c: { id: string; platform: PlatformId; igHandle: string; displayName: string | null; followers: number | null; lastScrapedAt: Date | null },
+  trend: { values: number[]; deltaPct: number | null },
+  recentPosts: { likes: number | null; postedAt: Date | null }[],
+): CompareColumn {
   const likesList = recentPosts.map((p) => p.likes ?? 0);
   const avgLikesPerPost = likesList.length ? likesList.reduce((a, b) => a + b, 0) / likesList.length : 0;
 
@@ -289,9 +318,14 @@ function metricValue(col: CompareColumn, key: CompareMetricRow["key"]): number |
 export async function getCompareData() {
   const self = await selfColumn();
   const competitorRows = await prisma.competitorAccount.findMany({ orderBy: { igHandle: "asc" } });
-  const trends = await getFollowerTrends(competitorRows.map((c) => ({ platform: c.platform, igHandle: c.igHandle })));
-  const competitors = await Promise.all(
-    competitorRows.map((c) => competitorColumn(c, lookupTrend(trends, c.platform, c.igHandle))),
+  // Both of these are one query for the whole competitor set, so the column count no longer
+  // decides the query count. competitorColumn is pure now — it folds what it is handed.
+  const [trends, postsByCompetitor] = await Promise.all([
+    getFollowerTrends(competitorRows.map((c) => ({ platform: c.platform, igHandle: c.igHandle }))),
+    recentPostsByCompetitor(competitorRows.map((c) => c.id)),
+  ]);
+  const competitors = competitorRows.map((c) =>
+    competitorColumn(c, lookupTrend(trends, c.platform, c.igHandle), postsByCompetitor.get(c.id) ?? []),
   );
   const columns = [self, ...competitors];
 
