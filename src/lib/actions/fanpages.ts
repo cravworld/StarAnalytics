@@ -4,6 +4,7 @@ import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import {
   addFanPage,
+  addFanPages,
   pullFanPageHistory,
   refreshFanPages,
   setFanPageVerified,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/data/fanpages";
 import { queueSentimentClassification } from "@/lib/data/sentiment";
 import { requireSession } from "@/lib/require-session";
+import { MAX_BULK_ADD_HANDLES } from "@/lib/providers/handle-input";
 import type { PlatformId } from "@/lib/providers/types";
 
 // Comments are opted into explicitly on both fan-page paths below, so the detail screen's
@@ -30,6 +32,58 @@ export async function addFanPageAction(handle: string, platform: PlatformId = "i
   // has classified everything it pulled.
   if (postIds.length > 0) after(() => queueSentimentClassification(postIds, FAN_PAGE_SENTIMENT_OPTS));
   revalidatePath("/fan-pages");
+}
+
+/**
+ * Bulk add — one chunk of a pasted list of handles.
+ *
+ * Chunking is the client's job (see BULK_ADD_CHUNK_SIZE) because the time budget belongs to the
+ * hosting page's maxDuration; the cap is enforced here because a Server Action is a public POST
+ * endpoint and cannot trust the caller for the size of its own input.
+ *
+ * Comment scrape: opted in, exactly like the single-add path. Bulk is meant to be the same
+ * operation as pressing "Add" N times, so a page added from a pasted list must end up with the
+ * same data as a page added by hand — anything less would make where a page came from visible in
+ * its comment panels, which is not a distinction anyone asked for.
+ *
+ * WHY THE SCRAPE IS AWAITED HERE RATHER THAN DEFERRED WITH `after()`:
+ *
+ * Every other path hands the sentiment pipeline to `after()` so the click returns as soon as the
+ * page data lands. This one must not, and the reason is the lock, not the cost. The comment
+ * scrape is guarded by a global COMMENT_SCRAPE_LOCK, and losing that lock is deliberately NOT an
+ * error — the losing pass logs, falls back to caption-only, and moves on. Deferred, chunk N's
+ * scrape would still be running when the client's next chunk arrives, so page 1 would get its
+ * comments and pages 2..N would silently get none. That is the worst available outcome, because
+ * "no comments stored" is indistinguishable downstream from "this page has no comments" — the
+ * bulk path would look like it worked while quietly producing thinner data than the button it
+ * replaces. Awaiting makes the client's already-sequential loop serialize the lock by
+ * construction.
+ *
+ * The duration envelope is unchanged. `after()` work counts against the same function limit
+ * anyway, and Instagram chunks are one handle, so a chunk does exactly what one press of the
+ * single-add button already does: one page's scrape plus at most
+ * APIFY_COMMENT_POSTS_PER_INVOCATION posts' comments. Awaiting only moves that work in front of
+ * the response instead of behind it, which has the side benefit of making the client's per-page
+ * progress readout honest about when a page is actually finished.
+ */
+export async function addFanPagesBulkAction(handles: string[], platform: PlatformId = "instagram") {
+  await requireSession();
+  if (!Array.isArray(handles) || handles.length === 0) throw new Error("no handles given");
+  if (handles.length > MAX_BULK_ADD_HANDLES) {
+    throw new Error(`too many handles in one call (max ${MAX_BULK_ADD_HANDLES})`);
+  }
+
+  const { results, postIds } = await addFanPages(handles, platform);
+  if (postIds.length > 0) await queueSentimentClassification(postIds, FAN_PAGE_SENTIMENT_OPTS);
+  revalidatePath("/fan-pages");
+  return {
+    results,
+    added: results.filter((r) => r.ok && r.status === "added").length,
+    reactivated: results.filter((r) => r.ok && r.status === "reactivated").length,
+    alreadyTracked: results.filter((r) => r.ok && r.status === "already-tracked").length,
+    posts: results.reduce((s, r) => s + (r.postCount ?? 0), 0),
+    failures: results.filter((r) => !r.ok).map((r) => ({ handle: r.handle, error: r.error ?? "unknown error" })),
+  };
 }
 
 // The detail screen's refresh. Re-pulls the page's profile and its 50 most recent posts,

@@ -1,6 +1,7 @@
 import { getFanPagesData } from "@/lib/data/fanpages";
 import { KpiGrid, Kpi } from "@/components/ui/Kpi";
 import { AddFanPageForm, PromoteSuggestionButton } from "@/components/fanpages/AddFanPageForm";
+import { BulkAddFanPagesForm } from "@/components/fanpages/BulkAddFanPagesForm";
 import { FanPageList } from "@/components/fanpages/FanPageList";
 import { RefreshAllFanPagesButton } from "@/components/fanpages/RefreshAllFanPagesButton";
 
@@ -23,6 +24,11 @@ export default async function FanPagesPage() {
       </KpiGrid>
 
       <AddFanPageForm />
+
+      {/* Collapsed by default: adding one page stays the one-line path it always was, and the
+          paste-a-list box only unfolds for the batch case rather than doubling the height of
+          the screen's first control for everyone. */}
+      <BulkAddFanPagesForm />
 
       {/* Sits directly above the list it acts on, right-aligned so it reads as a control for
           the whole list rather than another field on the add form above it. */}

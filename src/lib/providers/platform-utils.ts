@@ -3,10 +3,10 @@
 import { getPublicContentProvider, getYouTubeContentProvider } from "@/lib/providers";
 import type { PlatformId } from "./types";
 
-export const PLATFORM_HANDLE_VALIDATORS: Record<PlatformId, { pattern: RegExp; label: string }> = {
-  instagram: { pattern: /^[a-zA-Z0-9._]{1,30}$/, label: "Instagram" },
-  youtube: { pattern: /^[a-zA-Z0-9._-]{3,30}$/, label: "YouTube" },
-};
+// The validators themselves now live in handle-input.ts, which has no provider imports, so the
+// bulk-add client component can share them. Re-exported here because every existing server-side
+// call site imports them from this module alongside contentProviderFor.
+export { PLATFORM_HANDLE_VALIDATORS } from "./handle-input";
 
 export function contentProviderFor(platform: PlatformId) {
   return platform === "youtube" ? getYouTubeContentProvider() : getPublicContentProvider();
