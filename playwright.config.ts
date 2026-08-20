@@ -26,7 +26,18 @@ export default defineConfig({
     // Dev server => NODE_ENV !== "production", so mintSession's guard passes.
     command: "npm run dev",
     url: "http://localhost:3000/login",
-    reuseExistingServer: !process.env.CI,
+    // Was `!process.env.CI`, which quietly voided the DATA_MODE_* pin below. Locally that
+    // reuses whatever is already on :3000 — normally a dev server started from .env.local,
+    // where DATA_MODE_APIFY is "live" — and env here only applies to a server Playwright
+    // starts itself. So the promise in the comment below was decorative in exactly the case
+    // it was written for, and phase3-agency-verify would have run its "Analyse All Posts"
+    // flow against the real, metered Apify actor.
+    //
+    // false instead: if something is already on :3000, Playwright fails loudly ("already
+    // used…") rather than silently spending money. A failure you fix by killing your dev
+    // server strictly beats a metered call you only discover on the invoice. A suite that
+    // pins its providers has to own its server, or the pin isn't real.
+    reuseExistingServer: false,
     timeout: 120_000,
     // Phase 0's "renders seeded mock data" suite (and Compare Pages / Agency Report,
     // which call the provider directly on every render/click) must run against the

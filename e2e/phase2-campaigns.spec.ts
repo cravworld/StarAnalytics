@@ -62,7 +62,12 @@ test.describe("Phase 2 — campaign CRUD and generic detail view", () => {
     // Redirects to /campaigns/[id] on success (a uuid — not "new", "hashtag", "agency").
     await expect(page).toHaveURL(/\/campaigns\/(?!new$|hashtag$|agency$)[^/]+$/);
     createdCampaignIds.push(new URL(page.url()).pathname.split("/").pop()!);
-    await expect(page.getByText(`#${TEST_HASHTAG}`)).toBeVisible();
+    // The detail view now renders the tag in two legitimate places — the hero (.vhero-tag)
+    // and the hashtag-breakdown row (.bar-label) — so a bare getByText resolves to two
+    // elements and fails Playwright's strict mode. That is an ambiguous locator, not a
+    // broken page. Anchor to the hero, which is the one that identifies the campaign, and
+    // assert its exact text so a partial match can't stand in for the real tag.
+    await expect(page.locator(".vhero-tag")).toHaveText(`#${TEST_HASHTAG}`);
 
     // Honest pending states, not fake numbers or a blank card.
     await expect(page.getByText("Sentiment analysis pending")).toBeVisible();
