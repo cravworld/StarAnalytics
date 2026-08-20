@@ -250,10 +250,16 @@ function sets `rgn`, loads the page, asserts the region code, and reads
 `window.__INITIAL_STATE__`. This runs through the existing `src/lib/apify/client.ts` +
 `quotaBreaker.ts` seam like every other actor here — no second Apify client.
 
-Volume: `cities × dates × 1 render` per scan. All 30 Kerala cities × 7 dates = 210
-renders per scan, too much to run hourly. A realistic MVP is 6–10 target cities × 3
-dates ≈ 18–30 renders per scan at 60–90 minute intervals. Cost needs sizing against real
-actor pricing before `BOOKMYSHOW_MONITORING_ENABLED` is flipped on.
+**Scope decision (2026-08-20, campaign owner): all Kerala cities on BookMyShow, and
+every BookMyShow-listed theater playing the film — not a sampled subset.**
+
+Volume: `cities × dates × 1 render` per scan. 30 Kerala city regions × 3 dates = 90
+renders per scan; × 7 dates = 210. At 90-minute intervals that is roughly 1,400–3,400
+renders/day. With the spend cap now at $1000 this is affordable, but it is real
+third-party traffic and real money, so the interval is the lever to keep honest:
+start at 90 minutes and only shorten it where the data proves it moves that fast.
+Per-city results are independent, so a failed city must degrade to "not scanned" for
+that city alone and never to "no demand".
 
 ### Untested assumption: will a cloud IP get the same access?
 
@@ -280,10 +286,15 @@ later be "optimized" into calling the underlying XHR endpoint directly. `/getJSD
 and `/getHTML*` are robots-disallowed, and rendering the permitted public page is the
 line the entire compliance position in §4 rests on. Do not drift across it.
 
-**Blocker on live verification:** the Apify account is past its monthly spend cap
-($29.24 / $29) and self-heals around **2026-08-30**. Until then fixtures/mock are the
-only working path, the opt-in integration test cannot pass, and step zero above cannot
-run.
+**Apify account status (re-checked 2026-08-20, after the cap was raised):**
+`maxMonthlyUsageUsd` is now **1000** with **$195.94** used. The spend cap is no longer a
+blocker and the quota circuit breaker will close on the next successful run.
+
+**Remaining blocker on step zero:** `apify/web-scraper` and `apify/puppeteer-scraper`
+both return `403 full-permission-actor-not-approved` — Apify requires a one-time
+per-actor permission approval in the console before either will run, because they
+execute user-supplied page functions. This is a manual account action, not something the
+integration can grant itself. Until it is approved, the cloud-IP question stays open.
 
 ## 9. Recommendation
 

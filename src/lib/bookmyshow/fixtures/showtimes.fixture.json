@@ -1,0 +1,230 @@
+[
+  {
+    "cityCode": "KOCH",
+    "showDateCode": "20260821",
+    "queryKey": "fetchPrimaryDynamic-ET00502829---20260821-KOCH",
+    "url": "https://in.bookmyshow.com/movies/koch:kochi/bethlehem-kudumba-unit-koch:kochi/buytickets/et00502829/20260821",
+    "venues": [
+      {
+        "id": "PVMF",
+        "additionalData": { "venueCode": "PVMF", "venueName": "PVR: Forum Mall, Kochi" },
+        "analytics": { "company_code": "PVR" },
+        "showtimesSections": [
+          {
+            "showtimes": [
+              {
+                "title": "09:00 AM",
+                "styleId": "orange-pill-with-border",
+                "subtitleAcronym": "ENG",
+                "filters": ["pf3", "pf4", "tf1"],
+                "additionalData": {
+                  "sessionId": "42393",
+                  "availStatus": 2,
+                  "showDateCode": "20260821",
+                  "showTime": "09:00 AM",
+                  "cutOffDateTimeEpoch": 1787289000
+                },
+                "cta": {
+                  "analytics": {
+                    "company_code": "PVR",
+                    "show_session_id": "42393",
+                    "metadata": "{\"venue_info\":[\"fast_filling\"]}"
+                  }
+                }
+              },
+              {
+                "title": "01:10 PM",
+                "styleId": "green-pill-with-border",
+                "subtitleAcronym": "LUXE",
+                "filters": ["pf6", "tf2"],
+                "additionalData": {
+                  "sessionId": "42394",
+                  "availStatus": 3,
+                  "showDateCode": "20260821",
+                  "showTime": "01:10 PM"
+                },
+                "cta": { "analytics": { "company_code": "PVR", "show_session_id": "42394", "metadata": "{}" } }
+              },
+              {
+                "title": "07:50 PM",
+                "styleId": "orange-pill-with-border",
+                "subtitleAcronym": "LUXE",
+                "filters": ["pf6", "pf8"],
+                "additionalData": {
+                  "sessionId": "42395",
+                  "availStatus": 1,
+                  "showDateCode": "20260821",
+                  "showTime": "07:50 PM"
+                },
+                "cta": { "analytics": { "company_code": "PVR", "show_session_id": "42395" } }
+              },
+              {
+                "title": "11:00 PM",
+                "styleId": "grey-pill",
+                "subtitleAcronym": "ENG",
+                "filters": [],
+                "additionalData": {
+                  "sessionId": "42396",
+                  "showDateCode": "20260821",
+                  "showTime": "11:00 PM"
+                },
+                "cta": { "analytics": { "company_code": "PVR", "show_session_id": "42396" } }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "SNYK",
+        "additionalData": { "venueCode": "SNYK", "venueName": "Shenoys: Kochi" },
+        "analytics": { "company_code": "SNYK" },
+        "showtimesSections": [
+          {
+            "showtimes": [
+              {
+                "title": "10:15 AM",
+                "styleId": "green-pill-with-border",
+                "filters": ["pf2"],
+                "additionalData": {
+                  "sessionId": "51001",
+                  "availStatus": 3,
+                  "showDateCode": "20260821",
+                  "showTime": "10:15 AM"
+                }
+              },
+              {
+                "title": "06:30 PM",
+                "styleId": "green-pill-with-border",
+                "filters": ["pf2", "pf3"],
+                "additionalData": {
+                  "sessionId": "51002",
+                  "availStatus": 3,
+                  "showDateCode": "20260821",
+                  "showTime": "06:30 PM"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "additionalData": { "venueName": "Venue With No Code (should be skipped)" },
+        "showtimesSections": [
+          { "showtimes": [{ "title": "08:00 PM", "additionalData": { "sessionId": "99999", "availStatus": 3 } }] }
+        ]
+      }
+    ]
+  },
+  {
+    "cityCode": "PLKK",
+    "showDateCode": "20260821",
+    "queryKey": "fetchPrimaryDynamic-ET00502829---20260821-PLKK",
+    "url": "https://in.bookmyshow.com/movies/plkk:palakkad/bethlehem-kudumba-unit-plkk:palakkad/buytickets/et00502829/20260821",
+    "venues": [
+      {
+        "id": "PLKA",
+        "additionalData": { "venueCode": "PLKA", "venueName": "Priya Cinemas: Palakkad" },
+        "showtimesSections": [
+          {
+            "showtimes": [
+              {
+                "title": "11:00 AM",
+                "styleId": "green-pill-with-border",
+                "filters": ["pf2"],
+                "additionalData": { "sessionId": "61001", "availStatus": 3, "showDateCode": "20260821", "showTime": "11:00 AM" }
+              },
+              {
+                "title": "02:30 PM",
+                "styleId": "green-pill-with-border",
+                "filters": ["pf2"],
+                "additionalData": { "sessionId": "61002", "availStatus": 3, "showDateCode": "20260821", "showTime": "02:30 PM" }
+              },
+              {
+                "title": "06:15 PM",
+                "styleId": "green-pill-with-border",
+                "filters": ["pf2", "pf3"],
+                "additionalData": { "sessionId": "61003", "availStatus": 3, "showDateCode": "20260821", "showTime": "06:15 PM" }
+              },
+              {
+                "title": "09:45 PM",
+                "styleId": "green-pill-with-border",
+                "filters": ["pf3"],
+                "additionalData": { "sessionId": "61004", "availStatus": 3, "showDateCode": "20260821", "showTime": "09:45 PM" }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "cityCode": "KOLM",
+    "showDateCode": "20260821",
+    "queryKey": "fetchPrimaryDynamic-ET00502829---20260821-KOLM",
+    "url": "https://in.bookmyshow.com/movies/kolm:kollam/bethlehem-kudumba-unit-kolm:kollam/buytickets/et00502829/20260821",
+    "venues": [
+      {
+        "id": "KLMA",
+        "additionalData": { "venueCode": "KLMA", "venueName": "Kairali: Kollam" },
+        "showtimesSections": [
+          {
+            "showtimes": [
+              {
+                "title": "07:00 PM",
+                "additionalData": { "sessionId": "71001", "availStatus": 0, "showDateCode": "20260821", "showTime": "07:00 PM" }
+              },
+              {
+                "title": "10:00 PM",
+                "styleId": "orange-pill-with-border",
+                "filters": ["pf4"],
+                "additionalData": { "sessionId": "71002", "availStatus": 2, "showDateCode": "20260821", "showTime": "10:00 PM" },
+                "cta": { "analytics": { "metadata": "{\"venue_info\":[\"fast_filling\"]}" } }
+              },
+              {
+                "title": "not-a-time",
+                "additionalData": { "sessionId": "71003", "availStatus": 3, "showDateCode": "20260821", "showTime": "not-a-time" }
+              },
+              {
+                "title": "04:00 PM",
+                "additionalData": { "availStatus": 3, "showDateCode": "20260821", "showTime": "04:00 PM" }
+              },
+              {
+                "title": "01:00 AM",
+                "styleId": "green-pill-with-border",
+                "additionalData": { "sessionId": "71005", "availStatus": 7, "showDateCode": "20260822", "showTime": "01:00 AM" }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "cityCode": "THSR",
+    "showDateCode": "20260821",
+    "error": "Navigation timed out after 90s"
+  },
+  {
+    "cityCode": "KTYM",
+    "showDateCode": "20260821",
+    "queryKey": "fetchPrimaryDynamic-ET00502829---20260821-KOCH",
+    "url": "https://in.bookmyshow.com/movies/ktym:kottayam/bethlehem-kudumba-unit-ktym:kottayam/buytickets/et00502829/20260821",
+    "venues": [
+      {
+        "id": "PVMF",
+        "additionalData": { "venueCode": "PVMF", "venueName": "PVR: Forum Mall, Kochi" },
+        "showtimesSections": [
+          {
+            "showtimes": [
+              {
+                "title": "09:00 AM",
+                "styleId": "green-pill-with-border",
+                "additionalData": { "sessionId": "42393", "availStatus": 3, "showDateCode": "20260821", "showTime": "09:00 AM" }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

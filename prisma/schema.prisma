@@ -608,3 +608,244 @@ model ScoutSettings {
 
   @@map("scout_settings")
 }
+
+// --- Theater Campaign Intelligence: BookMyShow demand-pressure tracking ---
+//
+// Deliberately NOT folded into the existing `Campaign` model. That one is the
+// hashtag/social-buzz campaign (posts, agencies, buzz snapshots, /campaigns routes);
+// this is a theatrical-release monitor keyed on a BookMyShow event code with an entirely
+// different lifecycle. Same reasoning ScoutPlatform gives for staying out of `Platform`:
+// two concerns that share a word, not a shape.
+//
+// READ BOOKMYSHOW-FEASIBILITY.md BEFORE CHANGING ANYTHING HERE. The single most important
+// constraint: BookMyShow exposes NO seat counts on any page we are permitted to read, so
+// occupancy percentage is not computable and must never be modelled, derived, or
+// displayed. What exists is a 4-level ordinal demand label per show. Every field below
+// follows from that.
+
+enum TheaterCampaignStatus {
+  active
+  paused
+  archived
+}
+
+model TheaterCampaign {
+  id        String                @id @default(uuid())
+  name      String
+  movieName String                @map("movie_name")
+  status    TheaterCampaignStatus @default(active)
+
+  // BookMyShow's own event code (e.g. "et00502829") — the stable identity of a title on
+  // BMS and the only part of a showtime URL that is not cosmetic. Stored uppercase-
+  // insensitive as given; all URL building goes through lib/bookmyshow/urls.ts.
+  bmsEventCode String  @map("bms_event_code")
+  // The URL the user pasted, kept verbatim for provenance/debugging only. Never used to
+  // build scan targets — see the URL allowlist in urls.ts for why (this feature must not
+  // become a generic arbitrary-URL scraper).
+  bmsSourceUrl String? @map("bms_source_url")
+
+  // BookMyShow region codes (e.g. ["KOCH","TRIV"]). EMPTY MEANS ALL DISCOVERED KERALA
+  // REGIONS, which is the configured default for this campaign — not "none".
+  targetCityCodes String[] @map("target_city_codes")
+
+  screeningStartDate DateTime? @map("screening_start_date") @db.Date
+  screeningEndDate   DateTime? @map("screening_end_date") @db.Date
+
+  scanIntervalMinutes Int @default(90) @map("scan_interval_minutes")
+
+  // Alert thresholds, both expressed against demand LABELS, never occupancy.
+  // wideOpenAlertPct: flag a theater when at least this % of its shows are still at the
+  //   most-available level. minShowsForAlert: the minimum sample before a theater may be
+  //   called underperforming at all (brief's "minimum sample count" rule) — a single
+  //   wide-open show at a one-screen venue is noise, not a signal.
+  wideOpenAlertPct Int @default(80) @map("wide_open_alert_pct")
+  minShowsForAlert Int @default(3)  @map("min_shows_for_alert")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  screenings Screening[]
+  scanRuns   BmsScanRun[]
+
+  @@index([status])
+  @@map("theater_campaigns")
+}
+
+// Global, not campaign-scoped: the same venue plays many films over time, and BookMyShow's
+// venueCode is stable and globally unique. Critically this is also what deduplicates the
+// same physical theater appearing under two overlapping BMS city regions (a
+// Mookkannoor/Angamaly venue is listed under both Kochi and Angamaly) — without a global
+// unique on venueCode, every Kerala-wide theater count would be inflated.
+model Theater {
+  id     String @id @default(uuid())
+  source String @default("bookmyshow")
+  // BookMyShow venue code, e.g. "PVMF", "CPCK", "SNYK".
+  venueCode String @map("venue_code")
+  name      String
+  // The region this venue was FIRST seen under. Informational only — a venue can surface
+  // under several adjacent regions, and none of them is authoritative.
+  cityCode String  @map("city_code")
+  cityName String  @map("city_name")
+  // Exhibitor chain from the page's analytics payload ("PVR", "Cinepolis"), when present.
+  chainCode String? @map("chain_code")
+
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
+
+  screenings Screening[]
+
+  @@unique([source, venueCode])
+  @@index([cityCode])
+  @@map("theaters")
+}
+
+// One row per (campaign, theater, BookMyShow session, show date).
+//
+// No `screenName` or capacity column: BookMyShow's public showtime page exposes neither,
+// and a nullable column nothing can ever populate is worse than an absent one. `format`
+// (LUXE/PXL/Atmos/4DX) is the closest available proxy for screen identity and is stored
+// as the raw acronym rather than an enum — same "don't model a controlled vocabulary you
+// don't control" choice CampaignEvent.label already makes.
+model Screening {
+  id         String          @id @default(uuid())
+  campaignId String          @map("campaign_id")
+  campaign   TheaterCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  theaterId  String          @map("theater_id")
+  theater    Theater         @relation(fields: [theaterId], references: [id])
+
+  // BookMyShow's own per-show session identifier. Stable across scans, which is what makes
+  // repeated scans idempotent rather than duplicating a show every tick.
+  bmsSessionId String @map("bms_session_id")
+
+  showDate     DateTime @map("show_date") @db.Date
+  showDateTime DateTime @map("show_date_time")
+  // Booking cutoff from the source. Nullable — not every show reports one.
+  cutOffAt DateTime? @map("cut_off_at")
+
+  language String?
+  format   String?
+  // Price-BAND tags (e.g. ["pf3","pf4"]). Deliberately not a price: the page exposes band
+  // membership, not amounts. Band movement over time is still a real signal.
+  priceBands String[] @map("price_bands")
+
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
+  // Set when a previously-seen show stops appearing in a SUCCESSFUL scan of its city.
+  // Never set from a failed or skipped scan — that distinction is the whole point (see
+  // BmsScanCityResult): "we didn't look" must never be recorded as "it's gone".
+  disappearedAt DateTime? @map("disappeared_at")
+
+  snapshots AvailabilitySnapshot[]
+
+  @@unique([campaignId, bmsSessionId, showDate])
+  @@index([campaignId, showDateTime])
+  @@index([theaterId, showDateTime])
+  @@map("screenings")
+}
+
+// Append-only demand observation, same discipline as AccountSnapshot/ScoutSnapshot.
+//
+// `availStatus` is stored RAW (0-3) alongside the derived label so that a BookMyShow
+// change in meaning is detectable after the fact rather than silently remapped. Only
+// statuses 3 and 2 have confirmed semantics; 1 and 0 are inferred — see the feasibility
+// doc. That uncertainty is carried in `confidence`, never smoothed away.
+model AvailabilitySnapshot {
+  id          String    @id @default(uuid())
+  screeningId String    @map("screening_id")
+  screening   Screening @relation(fields: [screeningId], references: [id], onDelete: Cascade)
+
+  capturedAt DateTime @default(now()) @map("captured_at")
+
+  // Raw source value, 0-3. Nullable because a show can be listed with no status at all.
+  availStatus Int? @map("avail_status")
+  // Normalized level: see lib/bookmyshow/demand.ts. Stored as a string, not an enum, so a
+  // new source state lands as an unmapped value we can see rather than a migration
+  // failure mid-scan.
+  demandLevel String @map("demand_level")
+  // The rendered pill style and any plain-text source label ("fast_filling"), kept for
+  // provenance — they are the corroborating evidence for availStatus's meaning.
+  styleId     String? @map("style_id")
+  sourceLabel String? @map("source_label")
+
+  confidence String @map("confidence")
+
+  scanRunId String     @map("scan_run_id")
+  scanRun   BmsScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+
+  // Idempotency: one observation per show per scan run. A retried or overlapping scan
+  // updates rather than duplicating, so the trend line can never be inflated by a
+  // double-run — the brief's "never create duplicate snapshots" rule, enforced by the
+  // database instead of by remembering to check.
+  @@unique([screeningId, scanRunId])
+  @@index([screeningId, capturedAt])
+  @@map("availability_snapshots")
+}
+
+enum BmsScanStatus {
+  queued
+  running
+  done
+  partial
+  error
+}
+
+// Tracks one scan of one campaign. Mirrors ScoutRun's async handoff: a route that blocks
+// on an Apify run gets killed mid-wait and orphans a billed, unread run (see
+// lib/apify/client.ts), so scans are started here and ingested by a polling cron.
+model BmsScanRun {
+  id         String          @id @default(uuid())
+  campaignId String          @map("campaign_id")
+  campaign   TheaterCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  status BmsScanStatus @default(queued)
+  // "apify" for a real run, "mock" when served from the fixture. Recorded so a mock-backed
+  // number can never be mistaken for a live one in the UI.
+  provider String @default("apify")
+
+  apifyRunId String? @map("apify_run_id")
+  datasetId  String? @map("dataset_id")
+
+  citiesRequested Int @default(0) @map("cities_requested")
+  citiesSucceeded Int @default(0) @map("cities_succeeded")
+  itemsReceived   Int @default(0) @map("items_received")
+  theatersStored  Int @default(0) @map("theaters_stored")
+  screeningsStored Int @default(0) @map("screenings_stored")
+  snapshotsStored Int @default(0) @map("snapshots_stored")
+  recordsSkipped  Int @default(0) @map("records_skipped")
+
+  error String?
+
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+
+  snapshots   AvailabilitySnapshot[]
+  cityResults BmsScanCityResult[]
+
+  @@index([campaignId, startedAt])
+  @@index([status])
+  @@map("bms_scan_runs")
+}
+
+// Per-city outcome within a scan. This table exists so that a city that failed is
+// recorded as FAILED rather than as a city with no demand — the difference between "we
+// couldn't look at Palakkad" and "nothing is selling in Palakkad" is the difference
+// between a correct campaign decision and an expensive wrong one. Also carries the
+// region-mismatch guard: BookMyShow resolves city from a cookie, not the URL, so a scan
+// asserts the region code that came back and marks a mismatch as a failure.
+model BmsScanCityResult {
+  id        String     @id @default(uuid())
+  scanRunId String     @map("scan_run_id")
+  scanRun   BmsScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
+
+  cityCode String @map("city_code")
+  showDate DateTime @map("show_date") @db.Date
+  status   String
+  // What the page actually reported, when it disagreed with what we asked for.
+  returnedCityCode String? @map("returned_city_code")
+  venueCount       Int     @default(0) @map("venue_count")
+  showCount        Int     @default(0) @map("show_count")
+  error            String?
+
+  @@unique([scanRunId, cityCode, showDate])
+  @@map("bms_scan_city_results")
+}
