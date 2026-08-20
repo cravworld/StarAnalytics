@@ -12,6 +12,14 @@ import { queueSentimentClassification } from "@/lib/data/sentiment";
 import { requireSession } from "@/lib/require-session";
 import type { PlatformId } from "@/lib/providers/types";
 
+// Comments are opted into explicitly on both fan-page paths below, so the detail screen's
+// comment panels keep working while the global Comment Sentiment pipeline stays switched
+// off (see isCommentScrapeEnabled). Same justification the agency report uses: a human
+// clicked, and the scrape is bounded to one page's most recent posts rather than running
+// unattended every hour. The fan-page CRON path deliberately does NOT pass this — it
+// inherits the global default, so nothing scrapes comments on a schedule.
+const FAN_PAGE_SENTIMENT_OPTS = { scrapeComments: true } as const;
+
 export async function addFanPageAction(handle: string, platform: PlatformId = "instagram") {
   await requireSession();
   const postIds = await addFanPage(handle, platform);
@@ -19,7 +27,7 @@ export async function addFanPageAction(handle: string, platform: PlatformId = "i
   // manual step someone has to remember — same discipline as trackHashtagAction. Deferred
   // with after() so adding a page returns as soon as the scrape lands, not after Claude
   // has classified everything it pulled.
-  if (postIds.length > 0) after(() => queueSentimentClassification(postIds));
+  if (postIds.length > 0) after(() => queueSentimentClassification(postIds, FAN_PAGE_SENTIMENT_OPTS));
   revalidatePath("/fan-pages");
 }
 
@@ -29,7 +37,7 @@ export async function addFanPageAction(handle: string, platform: PlatformId = "i
 export async function pullFanPageHistoryAction(id: string) {
   await requireSession();
   const { postCount, postIds } = await pullFanPageHistory(id);
-  if (postIds.length > 0) after(() => queueSentimentClassification(postIds));
+  if (postIds.length > 0) after(() => queueSentimentClassification(postIds, FAN_PAGE_SENTIMENT_OPTS));
   revalidatePath("/fan-pages");
   revalidatePath(`/fan-pages/${id}`);
   return { postCount };
