@@ -188,43 +188,51 @@ Schedule it once and it is unattended:
 The task runs interactively because Chrome needs a desktop session — the machine has to be
 on and logged in, and you will see the window appear.
 
-### Measured success rate: one city per run
+### Measured success rate: asking for less gets you more
 
-Small early probes suggested a roughly 50% hit rate:
+The hit rate is **not** a fixed probability per page. It collapses as a run gets longer.
+Every measurement taken on 2026-08-20:
 
-| Run | Result |
-|---|---|
-| 2 cities, 4s apart | 1 ok, 1 × 403 |
-| 4 cities, 15s apart | 2 ok, 2 × 403 |
+| Pages requested in one run | Succeeded | Rate |
+|---|---|---|
+| 2 | 1 | 50% |
+| 4 | 2 | 50% |
+| 6 | 3 | 50% |
+| 6 | 2 | 33% |
+| **30** | **1** | **3%** |
+| **30** | **1** | **3%** |
 
-**Two full 30-city sweeps on 2026-08-20, 17 minutes apart, tell a sharper story:** each one
-returned **1 ok and 29 × 403** — the first page succeeded, and every page after it in the
-same run was refused. That is not a coin flip at ~50%; it reads as a **per-session budget of
-about one page**, and it means the earlier small samples were measuring the same thing from
-too few pages to see the shape.
+The first pages of a run go through and then it clamps — the shape of a small burst
+allowance, not of a coin flip. A 30-page sweep spends 29 requests to learn nothing.
 
-Assume **one city per run**, not half of them.
+**So a short run is both politer and more productive**, which is a rare thing to be able to
+say. `--max-cities` caps the pages per run; the registered task uses `6`, which returns two
+or three cities where asking for all thirty returned one. That is the whole argument for it.
 
-**Which city therefore matters more than how many.** The city list arrives in a fixed order,
-so a sweep that just asks for all 30 would capture Kochi three times a day and never see the
-rest of Kerala. `resolveCities` rotates the window by one city per run, so every region takes
-the leading slot in turn. Simulated over 10 days of the 09:00/14:00/19:00 triggers: 23
-distinct lead cities, every region appearing, none repeated within a day.
+> This is the point to be careful about. Requesting fewer pages is not a trick for getting
+> more out of a session — the per-run yield is what BookMyShow allows either way, and the
+> gain comes entirely from **not sending requests that were going to be refused**. If a
+> change here starts trying to widen what a single session yields — cycling browser
+> sessions, spacing runs to dodge the clamp — that is the line, and `capture.test.ts`
+> exists to catch it.
 
-Pair it with `--max-cities`, which caps how many are requested per run. The yield is
-unchanged — one city either way — but 29 requests already known to be refused are no longer
-sent. The registered task uses `--max-cities 6`.
+**Which cities go in the window matters as much as how many.** The list arrives in a fixed
+order, so a sweep would otherwise read Kochi three times a day and never see the rest of
+Kerala. `resolveCities` rotates the window by **one** city per run.
 
-> Rotation is **not** a way around the limit, and must not become one. It does not try to
-> get more pages out of a session; it sends **fewer** requests for the same result and only
-> changes which city gets the slot that works. If a change here starts trying to widen the
-> per-session yield, that is the line — see below.
+One, not the window size: with 30 regions and a window of 6, `bucket * 6 % 30` takes only 5
+distinct values, so just 5 cities would ever reach the front. Stepping by 1 also degrades
+gracefully — a larger step tuned to "about 3 succeed" would starve every city whose index
+did not line up, on a day when only one got through.
 
-**Partial coverage is survivable by design, and the reason the data model looks the way it
-does.** Each city-date is independent: a 403 is recorded as a *failed city*, never as a city
-with no demand, and snapshots are idempotent per scan run. But at one city per run, budget
-for coverage in **weeks, not days** — a theater's "last seen" can be many days older than
-the last scan, which is why the UI shows per-theater last-seen times.
+**Coverage accumulates; it is never complete in one run.** Each city-date is independent, a
+403 is recorded as a *failed city* and never as a city with no demand, and snapshots are
+idempotent per scan run. At three runs a day the window's leading edge advances about three
+positions daily, so expect a full pass over Kerala in **roughly a week to ten days**, with
+recently-read districts refreshed more often than distant ones. A theater's "last seen" can
+therefore be days older than the last scan — which is why the UI shows per-theater
+last-seen times, and why aggregate figures must be read as a rolling picture rather than a
+snapshot of one moment.
 
 ### Do not try to raise the hit rate
 
