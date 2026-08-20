@@ -141,7 +141,10 @@ export async function GET(request: Request) {
     // stale list to fail on every entry.
     const competitorResults = quotaExhausted ? [] : await refreshStaleCompetitors();
 
-    // And any tracked fan page past its TTL, on either platform. This covers Instagram as
+    // And any tracked fan page past its TTL, on either platform. NB this whole route is
+    // currently absent from vercel.json's cron list, so none of this runs on a schedule
+    // today — fan pages refresh only when someone presses "Refresh data" on a detail
+    // screen. This covers Instagram as
     // well as YouTube now: the hashtag scrape above only links a fan page's post when that
     // post carries a tracked tag and never revisits the profile, so without this an
     // Instagram page's follower count never moved after the day it was added (see

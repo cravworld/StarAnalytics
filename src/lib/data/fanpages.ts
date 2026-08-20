@@ -4,6 +4,7 @@ import { backfillFanPageLink } from "@/lib/providers/apify-public-content";
 import { PLATFORM_HANDLE_VALIDATORS, contentProviderFor } from "@/lib/providers/platform-utils";
 import type { PlatformId, RawPost } from "@/lib/providers/types";
 import { getFollowerTrends, lookupTrend, recordAccountSnapshot } from "@/lib/data/accountSnapshots";
+import { queueSentimentClassification } from "@/lib/data/sentiment";
 import { AVATAR_PALETTE as SHARED_AVATAR_PALETTE } from "@/lib/palette";
 
 function fmtCompact(n: number): string {
@@ -662,8 +663,13 @@ export async function addFanPage(handleInput: string, platform: PlatformId = "in
   return postIds;
 }
 
-// Called from the polling cron — refreshes every tracked fan page past the TTL, on both
-// platforms.
+// Refreshes every tracked fan page past the TTL, on both platforms.
+//
+// CAVEAT ON "cron": its only caller is /api/cron/poll-hashtags, and that route is NOT in
+// vercel.json's schedule (the five entries there don't include it) — presumably pulled for
+// cost, given the ~$248/month-per-hashtag figure in that route's own header. So nothing
+// invokes this automatically today. The detail screen's "Refresh data" button is the live
+// refresh path; this one is wired and correct but dormant until that cron is restored.
 //
 // Instagram used to be excluded here on the grounds that the hashtag pipeline kept it
 // current. It doesn't: that pipeline only touches a fan page's post if the post carries a
@@ -696,7 +702,11 @@ export async function refreshStaleFanPages(
       continue;
     }
     try {
-      await scrapeFanPageFull(p.platform, p.igHandle);
+      const { postIds } = await scrapeFanPageFull(p.platform, p.igHandle);
+      // Same follow-up the manual pull does (pullFanPageHistoryAction). Without it, posts
+      // pulled by this path would sit unclassified until some unrelated sweep found them,
+      // so the two refresh routes would disagree about what a refresh means.
+      await queueSentimentClassification(postIds);
       results.push({ handle: p.igHandle, ok: true });
     } catch (err) {
       if (isApifyQuotaFailure(err)) quotaExhausted = true;
