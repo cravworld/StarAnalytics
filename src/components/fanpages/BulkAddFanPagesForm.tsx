@@ -36,19 +36,22 @@ const PLACEHOLDERS: Record<PlatformId, string> = {
  * handles arriving as a list, and doing that through a one-line input is a long, error-prone
  * afternoon.
  *
- * Three things drive the design, all of them consequences of the fact that each Instagram
- * handle is a real, metered Apify scrape:
+ * Each page gets exactly the pull the single-add button gives it — profile, recent posts and
+ * comments — because "the same thing, in bulk" is the whole requirement. Where a page came from
+ * must not be visible in the data it ends up with.
  *
- * 1. **It says what it parsed before it spends anything.** The counts under the box update as
- *    you type, using the same parser the server uses, so "24 pages · 2 duplicates removed ·
- *    1 line not recognised" is visible while it is still free to fix.
+ * Three things drive the design, all consequences of each handle being a real, slow scrape:
+ *
+ * 1. **It says what it parsed before it starts.** The counts under the box update as you type,
+ *    using the same parser the server uses, so "24 pages · 2 duplicates removed · 1 line not
+ *    recognised" is visible while it is still free to fix.
  * 2. **It submits in chunks and reports progress per handle.** A Server Action is bounded by
  *    the page's maxDuration and one Instagram handle can take ~600s of it, so the list is
  *    chunked at BULK_ADD_CHUNK_SIZE and the results accumulate as they land. A failure or a
  *    closed tab halfway through keeps every page added so far — nothing is all-or-nothing.
- * 3. **It can be stopped.** Twenty minutes into a long paid run is exactly when someone
- *    realises they pasted the wrong column. Stop takes effect after the chunk in flight, since
- *    an Apify run already paid for cannot be un-started.
+ * 3. **It can be stopped.** Twenty minutes into a long run is exactly when someone realises
+ *    they pasted the wrong column. Stop takes effect after the chunk in flight, since an Apify
+ *    run already started cannot be un-started.
  */
 export function BulkAddFanPagesForm() {
   const router = useRouter();
@@ -168,9 +171,10 @@ export function BulkAddFanPagesForm() {
       </div>
 
       {platform === "instagram" && parsed.handles.length > 0 ? (
-        <div style={{ fontSize: 11, color: "var(--pencil-amber)", marginTop: 4 }}>
-          Each Instagram page is a paid scrape (profile + 50 posts). Comments are not scraped for
-          bulk adds — open a page and press Refresh data if you need its comments.
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+          Each page gets the same full pull as adding it by hand — profile, 50 recent posts and
+          comments — so this runs one page at a time and takes about as long as {parsed.handles.length}{" "}
+          individual add{parsed.handles.length === 1 ? "" : "s"}. You can leave it running.
         </div>
       ) : null}
 

@@ -33,7 +33,9 @@ vi.mock("@/lib/data/fanpages", () => ({
 vi.mock("@/lib/require-session", () => ({ requireSession: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 // after() defers work past the response in Next; run it inline so the assertion can see it.
-vi.mock("next/server", () => ({ after: (fn: () => unknown) => fn() }));
+// Kept as a spy as well, because one test below asserts a path deliberately does NOT defer.
+const afterSpy = vi.fn((fn: () => unknown) => fn());
+vi.mock("next/server", () => ({ after: (fn: () => unknown) => afterSpy(fn) }));
 
 describe("fan-page actions and the comment scrape", () => {
   beforeEach(() => {
@@ -49,17 +51,30 @@ describe("fan-page actions and the comment scrape", () => {
     );
   });
 
-  it("bulk add does NOT opt in — one click no longer means one page", async () => {
-    // The single-add opt-in is justified by "a human clicked, and the scrape is bounded to one
-    // page's recent posts". A pasted list voids both halves: one click stands for N pages and
-    // the bound becomes N x 50 posts, which at ~20 comments each is the unbounded comment
-    // fan-out the Apify audit calls finding A — roughly $2.30 a page against $0.08 for the
-    // profile and post pull alone. Pinned as the inverse case, because "we didn't pass a flag"
-    // is only meaningful if something checks: adding FAN_PAGE_SENTIMENT_OPTS here would compile,
-    // run, and quietly multiply the bill by ~30.
+  it("bulk add opts into the comment scrape, exactly like adding by hand", async () => {
+    // Bulk is meant to be "the same operation, N times". If this flag went missing, a page added
+    // from a pasted list would end up with thinner data than the identical page added by hand,
+    // and nothing would say so — the comment panels would just be empty, which looks exactly
+    // like a page that has no comments.
     const { addFanPagesBulkAction } = await import("./fanpages");
     await addFanPagesBulkAction(["someone"]);
-    expect(queueSentimentClassification).toHaveBeenCalledWith(["post-4", "post-5"]);
+    expect(queueSentimentClassification).toHaveBeenCalledWith(["post-4", "post-5"], { scrapeComments: true });
+  });
+
+  it("bulk add AWAITS the comment scrape instead of deferring it past the response", async () => {
+    // Load-bearing, and invisible if it regresses. The comment scrape takes a global
+    // COMMENT_SCRAPE_LOCK, and losing that lock is deliberately not an error: the pass logs and
+    // falls back to caption-only. Deferred with after(), chunk N's scrape is still holding the
+    // lock when the client's next chunk arrives, so the first page of a pasted list gets its
+    // comments and every page after it silently gets none. Awaiting is what makes the client's
+    // sequential loop serialize the lock. Asserted by proving this path did not route through
+    // after() at all — the failure it guards against is a "harmless" tidy-up that wraps the call
+    // to match the three paths around it.
+    const { addFanPagesBulkAction } = await import("./fanpages");
+    afterSpy.mockClear();
+    await addFanPagesBulkAction(["someone"]);
+    expect(queueSentimentClassification).toHaveBeenCalledWith(["post-4", "post-5"], { scrapeComments: true });
+    expect(afterSpy, "the bulk comment scrape must not be deferred — see the lock note").not.toHaveBeenCalled();
   });
 
   it("bulk add refuses a batch larger than the action's cap", async () => {
