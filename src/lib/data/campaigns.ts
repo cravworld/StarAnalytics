@@ -4,6 +4,18 @@ import { computeBuzzScore, type BuzzScoreResult } from "@/lib/scoring/buzzScore"
 import { getCampaignEvents, type CampaignEventRow } from "@/lib/data/campaignEvents";
 import { getBuzzTrend, getBuzzWeekAgoDelta, type BuzzTrend } from "@/lib/data/campaignBuzzSnapshots";
 import { TILE_WASHES, STREAM_AVATAR_PALETTE as SHARED_STREAM_PALETTE } from "@/lib/palette";
+import { runWithConcurrency } from "@/lib/concurrency";
+
+/**
+ * How many campaign-detail loads may be in flight at once.
+ *
+ * getCampaignDetail costs roughly six queries plus one per tracked hashtag, and the runtime
+ * connection pool holds five (see AGENTS.md and the P2024 incident on /fan-pages). Three is
+ * the compromise between a pool timeout and a slow screen: it bounds the worst case to
+ * around twenty in-flight queries while still overlapping most of the cross-region latency
+ * that makes running them one at a time painful.
+ */
+export const CAMPAIGN_DETAIL_CONCURRENCY = 3;
 
 function fmtCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -21,22 +33,52 @@ function iconFor(id: string) {
   return ICON_PALETTE[hash % ICON_PALETTE.length];
 }
 
-async function campaignStats(campaignId: string) {
-  const [postCount, engAgg] = await Promise.all([
-    prisma.post.count({ where: { campaignId } }),
-    prisma.post.aggregate({ where: { campaignId }, _sum: { likes: true, comments: true } }),
-  ]);
-  // True reach is a private Insights metric — never available for scraped public
-  // posts (see Phase 1 §5). Engagement (likes+comments) is the honest substitute.
-  const engagement = (engAgg._sum.likes ?? 0) + (engAgg._sum.comments ?? 0);
-  return { postCount, engagement };
+/**
+ * Post count and total engagement for every campaign at once, keyed by campaign id.
+ *
+ * Was two queries per campaign (`count` + `aggregate`), run concurrently across the whole
+ * list — so the campaigns screen issued 2N queries against a connection pool of 5. That is
+ * the same shape that took `/fan-pages` down with P2024 once the tracked-page count reached
+ * ten (see fetchFanPagePosts). One groupBy does both aggregates for every campaign instead,
+ * and the count no longer grows with the number of campaigns.
+ *
+ * Campaigns with no posts do not appear in a groupBy result at all, so callers must treat a
+ * missing key as a real zero rather than as missing data — `statsFor` below does. Getting
+ * that wrong would drop every post-less campaign off the screen entirely.
+ */
+async function campaignStatsByCampaign(): Promise<Map<string, { postCount: number; engagement: number }>> {
+  const rows = await prisma.post.groupBy({
+    by: ["campaignId"],
+    where: { campaignId: { not: null } },
+    _count: { _all: true },
+    _sum: { likes: true, comments: true },
+  });
+
+  const byId = new Map<string, { postCount: number; engagement: number }>();
+  for (const r of rows) {
+    if (!r.campaignId) continue;
+    // True reach is a private Insights metric — never available for scraped public
+    // posts (see Phase 1 §5). Engagement (likes+comments) is the honest substitute.
+    byId.set(r.campaignId, {
+      postCount: r._count._all,
+      engagement: (r._sum.likes ?? 0) + (r._sum.comments ?? 0),
+    });
+  }
+  return byId;
+}
+
+/** A campaign absent from the aggregate genuinely has no posts — not unknown, zero. */
+function statsFor(byId: Map<string, { postCount: number; engagement: number }>, id: string) {
+  return byId.get(id) ?? { postCount: 0, engagement: 0 };
 }
 
 export async function getOwnCampaigns() {
-  const campaigns = await prisma.campaign.findMany({ orderBy: { startDate: "desc" } });
-  const withStats = await Promise.all(
-    campaigns.map(async (c) => {
-      const { postCount, engagement } = await campaignStats(c.id);
+  const [campaigns, statsById] = await Promise.all([
+    prisma.campaign.findMany({ orderBy: { startDate: "desc" } }),
+    campaignStatsByCampaign(),
+  ]);
+  const withStats = campaigns.map((c) => {
+      const { postCount, engagement } = statsFor(statsById, c.id);
       const palette = iconFor(c.id);
       const dateRange =
         c.startDate && c.endDate
@@ -61,8 +103,7 @@ export async function getOwnCampaigns() {
               ]
             : [],
       };
-    }),
-  );
+  });
 
   const active = campaigns.filter((c) => c.status === "live").length;
   const totalEngagement = withStats.reduce((sum, c) => sum + c.engagement, 0);
@@ -318,24 +359,36 @@ export interface CampaignDetail {
 async function getCampaignHashtagBreakdown(campaignId: string, hashtags: string[]): Promise<CampaignHashtagRow[]> {
   if (hashtags.length === 0) return [];
 
-  const rows = await Promise.all(
-    hashtags.map(async (tag) => {
-      const matched = await prisma.$queryRaw<{ likes: number | null; comments: number | null }[]>`
-        SELECT likes, comments FROM posts
-        WHERE campaign_id = ${campaignId} AND raw -> 'hashtags' @> to_jsonb(ARRAY[${tag}]::text[])
-      `;
-      const postCount = matched.length;
-      const totalEngagement = matched.reduce((s, p) => s + (p.likes ?? 0) + (p.comments ?? 0), 0);
+  // One query for every tag, not one per tag. `unnest` turns the tag list into rows and the
+  // join condition stays the same `@>` containment test the per-tag version used, so this
+  // keeps the check inside Postgres exactly as the note above requires — `raw` is still never
+  // pulled into JS. What changes is only how many round trips it takes.
+  const rows = await prisma.$queryRaw<{ hashtag: string; post_count: bigint; total_engagement: bigint }[]>`
+    SELECT t.tag AS hashtag,
+           count(p.id) AS post_count,
+           coalesce(sum(coalesce(p.likes, 0) + coalesce(p.comments, 0)), 0) AS total_engagement
+    FROM unnest(${hashtags}::text[]) AS t(tag)
+    LEFT JOIN posts p
+      ON p.campaign_id = ${campaignId}
+     AND p.raw -> 'hashtags' @> to_jsonb(ARRAY[t.tag]::text[])
+    GROUP BY t.tag
+  `;
+
+  // LEFT JOIN rather than an inner one so a tracked tag nobody has posted under still comes
+  // back as a zero row. A plain join would silently drop it, and "this tag has no posts" is a
+  // finding the screen is meant to show, not a row to hide.
+  return rows
+    .map((r) => {
+      const postCount = Number(r.post_count);
+      const totalEngagement = Number(r.total_engagement);
       return {
-        hashtag: tag,
+        hashtag: r.hashtag,
         postCount,
         totalEngagement,
         avgEngagementPerPost: postCount ? Math.round(totalEngagement / postCount) : 0,
       };
-    }),
-  );
-
-  return rows.sort((a, b) => b.totalEngagement - a.totalEngagement);
+    })
+    .sort((a, b) => b.totalEngagement - a.totalEngagement);
 }
 
 // One raw query, not one per handle (there's no fixed handle list to loop over the way
@@ -707,7 +760,17 @@ export interface CampaignCompareResult {
 // shape mirrors getCompareData()'s exact pattern in this same file, computed here (not in the
 // page component) for the same reason that one is: the page should stay a thin renderer.
 export async function getCampaignCompareData(campaignIds: string[]): Promise<CampaignCompareResult> {
-  const details = await Promise.all(campaignIds.map((id) => getCampaignDetail(id)));
+  // Bounded, not unbounded. getCampaignDetail is a composite — roughly six queries plus one
+  // per tracked hashtag — so an unbounded Promise.all here put (campaigns x ~7) queries in
+  // flight at once against a pool of five. Unlike the other fan-outs fixed alongside this
+  // one, there is no single set-wide query to collapse it into without dismantling
+  // getCampaignDetail, so the concurrency is capped instead.
+  //
+  // CAMPAIGN_DETAIL_CONCURRENCY is 3 rather than 1 deliberately: serializing would trade a
+  // pool timeout for wall-clock on a user-facing screen, and every query here crosses to a
+  // database in another region. Three keeps the worst case (~21 in flight) survivable while
+  // still overlapping most of the latency.
+  const details = await runWithConcurrency(campaignIds, CAMPAIGN_DETAIL_CONCURRENCY, (id) => getCampaignDetail(id));
   const columns: CampaignCompareColumn[] = details
     .filter((d): d is CampaignDetail => d !== null)
     .map((d) => ({
@@ -810,30 +873,65 @@ export interface CampaignCompareAtDayResult {
 export async function getCampaignCompareDataAtDay(campaignIds: string[], dayN: number): Promise<CampaignCompareAtDayResult> {
   const campaigns = await prisma.campaign.findMany({ where: { id: { in: campaignIds } } });
 
-  const columns: CampaignCompareAtDayColumn[] = await Promise.all(
-    campaigns.map(async (c): Promise<CampaignCompareAtDayColumn> => {
+  // Two queries for the whole comparison rather than two per campaign. Every campaign has
+  // its own cutoff (its start date plus dayN), so there is no single date filter to push
+  // down — the posts come back for all the selected campaigns at once and each column
+  // applies its own cutoff in memory. Bounded by the handful of campaigns someone puts
+  // side by side, and it keeps this off the 2N-queries-against-a-pool-of-5 path that took
+  // /fan-pages down.
+  const dated = campaigns.filter((c) => c.startDate !== null);
+  const allPosts = dated.length
+    ? await prisma.post.findMany({
+        where: { campaignId: { in: dated.map((c) => c.id) } },
+        select: { id: true, campaignId: true, likes: true, comments: true, postedAt: true },
+      })
+    : [];
+
+  const postsByCampaign = new Map<string, typeof allPosts>();
+  for (const p of allPosts) {
+    if (!p.campaignId) continue;
+    const list = postsByCampaign.get(p.campaignId);
+    if (list) list.push(p);
+    else postsByCampaign.set(p.campaignId, [p]);
+  }
+
+  // Which posts each column counts, decided before the sentiment lookup so that lookup can
+  // be a single query over the union rather than one per column.
+  const inWindowByCampaign = new Map<string, typeof allPosts>();
+  for (const c of dated) {
+    const cutoff = new Date(c.startDate!.getTime() + dayN * 24 * 60 * 60 * 1000);
+    // `postedAt: { lte: cutoff }` never matched a NULL in SQL, and it must not here either.
+    inWindowByCampaign.set(
+      c.id,
+      (postsByCampaign.get(c.id) ?? []).filter((p) => p.postedAt !== null && p.postedAt <= cutoff),
+    );
+  }
+
+  const windowedIds = Array.from(inWindowByCampaign.values()).flatMap((ps) => ps.map((p) => p.id));
+  const sentimentRows = windowedIds.length
+    ? await prisma.sentiment.findMany({ where: { postId: { in: windowedIds } }, select: { postId: true, label: true } })
+    : [];
+  const labelByPost = new Map(sentimentRows.map((s) => [s.postId, s.label]));
+
+  const columns: CampaignCompareAtDayColumn[] = campaigns.map((c): CampaignCompareAtDayColumn => {
       if (!c.startDate) {
         return { id: c.id, name: c.name, hasStartDate: false, postCount: 0, engagement: 0, avgEngagementPerPost: 0, positivePct: null };
       }
-      const cutoff = new Date(c.startDate.getTime() + dayN * 24 * 60 * 60 * 1000);
-      const posts = await prisma.post.findMany({
-        where: { campaignId: c.id, postedAt: { lte: cutoff } },
-        select: { id: true, likes: true, comments: true },
-      });
+      const posts = inWindowByCampaign.get(c.id) ?? [];
       const postCount = posts.length;
       const engagement = posts.reduce((s, p) => s + (p.likes ?? 0) + (p.comments ?? 0), 0);
       const avgEngagementPerPost = postCount ? Math.round(engagement / postCount) : 0;
 
-      const sentiments = postCount
-        ? await prisma.sentiment.findMany({ where: { postId: { in: posts.map((p) => p.id) } } })
-        : [];
-      const positivePct = sentiments.length
-        ? Math.round((sentiments.filter((s) => s.label === "pos").length / sentiments.length) * 100)
+      // Posts with no Sentiment row are excluded from the percentage rather than counted as
+      // non-positive — the same thing the old per-campaign `sentiment.findMany` did, since a
+      // missing row simply never came back from it.
+      const labels = posts.map((p) => labelByPost.get(p.id)).filter((l) => l !== undefined);
+      const positivePct = labels.length
+        ? Math.round((labels.filter((l) => l === "pos").length / labels.length) * 100)
         : null;
 
       return { id: c.id, name: c.name, hasStartDate: true, postCount, engagement, avgEngagementPerPost, positivePct };
-    }),
-  );
+  });
 
   const rows = CAMPAIGN_DAY_N_METRIC_ROWS.map((row) => {
     const cells = columns.map((col) => {
@@ -880,23 +978,38 @@ export async function getTrackedHashtags() {
   const campaignTags = new Set(campaigns.flatMap((c) => c.hashtags.map((h) => h.toLowerCase())));
 
   const now = new Date();
-  const rows = await Promise.all(
-    Array.from(byTag.entries()).map(async ([tag, history]) => {
+  const recentWindow = new Date(now.getTime() - TRENDING_WINDOW_HOURS * 60 * 60 * 1000);
+
+  // One aggregate over every tracked tag, not a full `posts` scan per tag. This was by far
+  // the heaviest of the per-item query fan-outs: the old version ran one unindexed raw query
+  // per tracked hashtag with no campaign filter, so the cost was (tags x whole posts table)
+  // and it grew on both axes at once. Same `@>` containment test, same numbers, one round
+  // trip — and the three aggregates are computed in Postgres rather than by pulling every
+  // matching row's id/likes/comments/posted_at back into JS to be counted.
+  const tags = Array.from(byTag.keys());
+  const aggregates = await prisma.$queryRaw<
+    { hashtag: string; post_count: bigint; total_engagement: bigint; recent_count: bigint }[]
+  >`
+    SELECT t.tag AS hashtag,
+           count(p.id) AS post_count,
+           coalesce(sum(coalesce(p.likes, 0) + coalesce(p.comments, 0)), 0) AS total_engagement,
+           count(p.id) FILTER (WHERE p.posted_at >= ${recentWindow}) AS recent_count
+    FROM unnest(${tags}::text[]) AS t(tag)
+    LEFT JOIN posts p ON p.raw -> 'hashtags' @> to_jsonb(ARRAY[t.tag]::text[])
+    GROUP BY t.tag
+  `;
+  // LEFT JOIN, so a tag that has been snapshotted but has no matching posts still returns a
+  // zero row — it was previously represented by an empty `matched` array, and dropping it
+  // here would remove the tag from the table rather than showing it at zero.
+  const aggByTag = new Map(aggregates.map((a) => [a.hashtag, a]));
+
+  const rows = Array.from(byTag.entries()).map(([tag, history]) => {
       const first = history[0];
 
-      const matched = await prisma.$queryRaw<
-        { id: string; likes: number | null; comments: number | null; posted_at: Date | null }[]
-      >`
-        SELECT id, likes, comments, posted_at
-        FROM posts
-        WHERE raw -> 'hashtags' @> to_jsonb(ARRAY[${tag}]::text[])
-      `;
-      const postCount = matched.length;
-      const avgEng = postCount
-        ? matched.reduce((s, m) => s + (m.likes ?? 0) + (m.comments ?? 0), 0) / postCount
-        : 0;
-      const recentWindow = new Date(now.getTime() - TRENDING_WINDOW_HOURS * 60 * 60 * 1000);
-      const recentCount = matched.filter((m) => m.posted_at && m.posted_at >= recentWindow).length;
+      const agg = aggByTag.get(tag);
+      const postCount = Number(agg?.post_count ?? 0);
+      const avgEng = postCount ? Number(agg?.total_engagement ?? 0) / postCount : 0;
+      const recentCount = Number(agg?.recent_count ?? 0);
       const trackedHours = Math.max(1, (now.getTime() - first.snapshotAt.getTime()) / (60 * 60 * 1000));
       const avgHourlyRate = postCount / trackedHours;
       const isTrending =
@@ -908,8 +1021,7 @@ export async function getTrackedHashtags() {
       const status = isCampaignTag ? "Campaign" : isTrending ? "Trending" : isNew ? "New" : "Active";
 
       return { tag, postCount, avgEng, status };
-    }),
-  );
+  });
 
   const maxPosts = Math.max(1, ...rows.map((r) => r.postCount));
   return rows.map((r) => ({

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { getCampaignDetail, type CampaignDetail } from "@/lib/data/campaigns";
+import { getCampaignDetail, CAMPAIGN_DETAIL_CONCURRENCY, type CampaignDetail } from "@/lib/data/campaigns";
+import { runWithConcurrency } from "@/lib/concurrency";
 import { getNotifierChannel, getNotifierProvider } from "@/lib/providers";
 import { TOKEN } from "@/lib/palette";
 
@@ -211,9 +212,13 @@ export async function sendWeeklyDigest(): Promise<{ sent: boolean; campaignCount
     return { sent: false, campaignCount: 0 };
   }
 
-  const details = (await Promise.all(liveCampaigns.map((c) => getCampaignDetail(c.id)))).filter(
-    (d): d is CampaignDetail => d !== null,
-  );
+  // Bounded like the compare screen's identical fan-out — see CAMPAIGN_DETAIL_CONCURRENCY.
+  // This one is a weekly cron rather than a page load, so nobody is waiting on it, but it
+  // loops over every live campaign with no ceiling at all and would be the first thing to
+  // exhaust the connection pool as that list grows.
+  const details = (
+    await runWithConcurrency(liveCampaigns, CAMPAIGN_DETAIL_CONCURRENCY, (c) => getCampaignDetail(c.id))
+  ).filter((d): d is CampaignDetail => d !== null);
   const summaries = sortCampaignsByBuzz(details.map(toSummary));
   const now = new Date();
   const message = formatWeeklyDigest(summaries, now);
