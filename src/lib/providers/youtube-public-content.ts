@@ -11,7 +11,12 @@ import type { AccountSnapshot, PublicContentProvider, RawPost } from "./types";
 import { normalizeVideoItem, type YouTubeVideoItem } from "./youtube-normalize";
 
 const API_BASE = "https://www.googleapis.com/youtube/v3";
-const MAX_RECENT_VIDEOS = 25;
+// 50 is both the deliberate product cap (a fan account's older uploads are stale for the
+// questions this app asks) and, conveniently, the exact per-page ceiling of the two
+// endpoints below — playlistItems.list maxResults and videos.list's comma-joined id list
+// both stop at 50. Keeping the cap here means neither needs pagination. Matches Instagram's
+// APIFY_HANDLE_POSTS_LIMIT default so a fan page pulls the same depth on either platform.
+const MAX_RECENT_VIDEOS = 50;
 
 function apiKey(): string {
   const key = process.env.YOUTUBE_API_KEY;

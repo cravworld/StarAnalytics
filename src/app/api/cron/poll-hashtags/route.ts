@@ -141,15 +141,18 @@ export async function GET(request: Request) {
     // stale list to fail on every entry.
     const competitorResults = quotaExhausted ? [] : await refreshStaleCompetitors();
 
-    // And any YouTube fan channel past its TTL — Instagram fan pages don't need this (they
-    // update passively via the hashtag scrape above), but YouTube has no such pipeline to
-    // piggyback on (see fanpages.ts's refreshStaleFanPages).
+    // And any tracked fan page past its TTL, on either platform. This covers Instagram as
+    // well as YouTube now: the hashtag scrape above only links a fan page's post when that
+    // post carries a tracked tag and never revisits the profile, so without this an
+    // Instagram page's follower count never moved after the day it was added (see
+    // fanpages.ts's refreshStaleFanPages).
     //
-    // Deliberately NOT gated on quotaExhausted, unlike the competitor refresh above: these
-    // channels go through the YouTube Data API, which has its own separate quota. Skipping
-    // them during an Apify outage would stop YouTube fan-channel data updating and save
-    // exactly zero Apify credit.
-    const fanPageResults = await refreshStaleFanPages();
+    // Deliberately NOT skipped wholesale when quotaExhausted, unlike the competitor refresh
+    // above: YouTube channels go through the YouTube Data API and its separate quota, so
+    // skipping the whole call during an Apify outage would freeze YouTube fan-channel data
+    // and save exactly zero Apify credit. The flag is passed through instead, so the
+    // Instagram half is skipped and the YouTube half still runs.
+    const fanPageResults = await refreshStaleFanPages(quotaExhausted);
 
     return NextResponse.json({
       polled: results.length,

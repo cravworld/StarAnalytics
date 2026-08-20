@@ -674,6 +674,15 @@ canvas{max-width:100%}
   /* Long post tables scroll past their own header otherwise. */
   position:sticky;top:52px;z-index:1
 }
+/* Horizontal-scroll wrapper for a wide .post-tbl.
+   The sticky `th` above is offset by 52px to clear the fixed topbar, which is only correct
+   while the PAGE is the scroll container. An `overflow-x` wrapper becomes the scroll
+   container itself, and the 52px then pushes the header down over the top of the body —
+   harmless-looking on a long table (it just covers row one) but on a short table it hides
+   every row there is, so the table reads as empty. Inside a wrapper the header has nothing
+   to clear, so the offset goes back to zero. */
+.tbl-scroll{overflow-x:auto}
+.tbl-scroll .post-tbl th{top:0}
 .post-tbl td{padding:7px 10px;border-bottom:1px solid var(--rule);color:var(--ink)}
 .post-tbl tr:hover td{background:var(--marker-wash)}
 .post-tbl td{transition:background-color var(--dur-fast) var(--ease-standard)}
@@ -696,6 +705,14 @@ button.flag-chip:hover{background:rgba(129,0,31,.14);border-color:rgba(129,0,31,
    ══════════════════════════════════════════════════════════════════════════ */
 .fan-row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--rule)}
 .fan-row:last-child{border-bottom:none}
+/* Each row is a link into that page's detail screen. Inherits ink rather than taking the
+   link colour: the row's own type hierarchy already says what it is, and a blue name would
+   read as one link inside the row instead of the whole row being the target. The marker
+   wash on hover is the same affordance .post-tbl rows use. */
+a.fan-row{text-decoration:none;color:inherit;padding-left:var(--s2);padding-right:var(--s2);
+  margin-left:calc(var(--s2) * -1);margin-right:calc(var(--s2) * -1);border-radius:var(--radius-sm);
+  transition:background-color var(--dur-fast) var(--ease-standard)}
+a.fan-row:hover{background:var(--marker-wash)}
 .fan-av{
   width:36px;height:36px;border-radius:var(--radius);display:flex;align-items:center;
   justify-content:center;font-size:11px;font-weight:700;flex-shrink:0
