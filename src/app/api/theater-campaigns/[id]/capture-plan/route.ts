@@ -43,11 +43,27 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: `campaign is ${campaign.status}` }, { status: 409 });
   }
 
+  // How many ingests the daily cap still allows.
+  //
+  // Returned so the script can stop BEFORE it opens a browser. Without it the cap is only
+  // discovered at ingest, which is the worst possible moment: the pages have already been
+  // fetched from BookMyShow and the result is then thrown away. Requests spent, nothing
+  // learned — the same waste the city-window cap exists to avoid, one layer up.
+  //
+  // A count, not the policy: the ingest route stays the only thing that enforces it, so a
+  // modified script cannot talk its way past the limit by ignoring this number.
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const capturesToday = await prisma.bmsScanRun.count({
+    where: { campaignId: id, provider: "capture", startedAt: { gte: since } },
+  });
+  const maxPerDay = Number(process.env.BOOKMYSHOW_CAPTURE_MAX_PER_DAY) || 6;
+
   return NextResponse.json({
     eventCode: campaign.bmsEventCode,
     movieSlug: movieSlugFor(campaign.movieName),
     // Resolved, so an empty configuration (meaning "all Kerala") arrives as the explicit
     // list rather than as an empty array the script would have to interpret.
     cityCodes: resolveRegions(campaign.targetCityCodes).map((r) => r.code),
+    capturesRemaining: Math.max(0, maxPerDay - capturesToday),
   });
 }
