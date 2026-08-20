@@ -598,7 +598,10 @@ async function ingestCityResult(
       for (const s of placeable) {
         const screeningId = screeningIdByKey.get(screeningKey(s.bmsSessionId, s.showDate));
         if (!screeningId) continue;
-        const reading = readDemand(s.availStatus);
+        // The pill is passed as a fallback because live BookMyShow no longer sends
+        // availStatus — see readPill in demand.ts. Both channels are stored on the
+        // snapshot regardless, so a reading can always be re-derived from its raw source.
+        const reading = readDemand(s.availStatus, { styleId: s.styleId, sourceLabel: s.sourceLabel });
         if (reading.unmapped) unmapped++;
         snapshotRows.push({
           screeningId,

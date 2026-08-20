@@ -23,12 +23,35 @@ import { runCampaignScan } from "@/lib/data/theaterCampaigns";
 const ENABLED = process.env.RUN_BMS_DB_TEST === "true" && Boolean(process.env.DATABASE_URL);
 
 let campaignId: string | null = null;
+/** Theater ids that existed BEFORE this test ran. Anything outside this set is ours. */
+let preExistingTheaterIds: Set<string> = new Set();
 
 afterAll(async () => {
-  // Screenings, snapshots, runs and city results all cascade from the campaign. Theaters do
-  // not — they are shared reference rows for real Kerala venues, and a production scan would
-  // create the same ones, so they are left in place.
-  if (campaignId) await prisma.theaterCampaign.delete({ where: { id: campaignId } }).catch(() => {});
+  // Screenings, snapshots, runs and city results cascade from the campaign. Theaters do
+  // NOT — they are not campaign-scoped — so they have to be removed explicitly.
+  //
+  // An earlier version of this comment claimed they were safe to leave because "a
+  // production scan would create the same ones". That was wrong, and it cost a real
+  // investigation: mock venue codes are synthetic (`KOCH01`), so they never merge with a
+  // real BookMyShow venue. Two runs of this test left 178 permanent phantom theaters in the
+  // database, sitting alongside 27 real ones with no screenings attached.
+  //
+  // Scoped by ID to theaters that did not exist before this test started, and that still
+  // carry no screenings. "Screening-less" alone is NOT a safe filter here: this runs
+  // against DATABASE_URL, which is production, and a real venue whose theater row was
+  // written by a partial run whose screening write failed would match it too.
+  if (campaignId) {
+    await prisma.theaterCampaign.delete({ where: { id: campaignId } }).catch(() => {});
+    const ours = await prisma.theater.findMany({
+      where: { screenings: { none: {} }, id: { notIn: [...preExistingTheaterIds] } },
+      select: { id: true },
+    });
+    if (ours.length > 0) {
+      await prisma.theater
+        .deleteMany({ where: { id: { in: ours.map((t) => t.id) } } })
+        .catch(() => {});
+    }
+  }
   await prisma.$disconnect();
 });
 
@@ -38,6 +61,10 @@ describe.skipIf(!ENABLED)("ingest against a real database (opt-in)", () => {
   it(
     "writes a full Kerala scan, then repeats it without disturbing what it wrote",
     async () => {
+      preExistingTheaterIds = new Set(
+        (await prisma.theater.findMany({ select: { id: true } })).map((t) => t.id),
+      );
+
       // DATA_MODE_BOOKMYSHOW is left alone deliberately: if a run ever reports a provider
       // other than "mock" this test is sending real traffic and must fail, not adapt.
       const campaign = await prisma.theaterCampaign.create({

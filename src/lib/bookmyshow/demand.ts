@@ -21,6 +21,12 @@
 //
 // That asymmetry is why `confidence` exists and why it is carried on every snapshot
 // rather than being decided once at read time.
+//
+// UPDATE 2026-08-20, from the first REAL capture (165 shows, Kochi): `availStatus` is no
+// longer present in the payload at all. The pill and the analytics label still are, on
+// every show. Since those are what the table above was derived FROM, they are read as a
+// fallback — see `readPill`. `availStatus` remains primary for any source that still
+// carries it, including the mock fixtures.
 
 /**
  * Normalized demand level.
@@ -114,7 +120,10 @@ export function demandExplanation(level: DemandLevel): string {
  * a visible count of unmapped readings — not as a failed scan, and emphatically not as a
  * silently-wrong demand figure that moves campaign spend.
  */
-export function readDemand(availStatus: number | null | undefined): DemandReading {
+export function readDemand(
+  availStatus: number | null | undefined,
+  pill?: DemandPill,
+): DemandReading {
   switch (availStatus) {
     case 3:
       return { level: "wide_open", confidence: "high", unmapped: false };
@@ -129,10 +138,65 @@ export function readDemand(availStatus: number | null | undefined): DemandReadin
       return { level: "unavailable", confidence: "low", unmapped: false };
     case null:
     case undefined:
-      return { level: "unknown", confidence: "none", unmapped: false };
+      return readPill(pill);
     default:
       return { level: "unknown", confidence: "none", unmapped: true };
   }
+}
+
+/**
+ * The rendered pill, which is what BookMyShow actually ships today.
+ *
+ * `availStatus` was absent from every one of the 165 shows in the first real capture
+ * (2026-08-20), while `styleId` and the analytics label were present on all of them. The
+ * rest of `additionalData` came through intact — session ids and show times were all
+ * usable, nothing was skipped — so this is BookMyShow no longer publishing that field, not
+ * a field lost in transit.
+ */
+export interface DemandPill {
+  styleId?: string | null;
+  sourceLabel?: string | null;
+}
+
+/**
+ * Fallback from the pill, used only when `availStatus` is absent.
+ *
+ * This is not a new claim about the data. It is the SAME correspondence the spike recorded
+ * (see the evidence table at the top of this file) read in the other direction: the pill
+ * colour and the analytics label are what `availStatus` was originally derived from, so
+ * reading them directly recovers the identical three states, with the identical confidence.
+ *
+ * The observed distribution over that first real capture:
+ *
+ *   green-pill-with-border,  no label        92 shows  -> wide_open  (was availStatus 3)
+ *   orange-pill-with-border, "fast_filling"  58 shows  -> filling    (was availStatus 2)
+ *   orange-pill-with-border, no label        15 shows  -> limited    (was availStatus 1)
+ *
+ * `availStatus` stays primary and this stays a fallback, deliberately. Mock fixtures carry
+ * `availStatus`, so making the pill authoritative would leave every test passing while
+ * quietly changing what the live path means.
+ */
+function readPill(pill: DemandPill | undefined): DemandReading {
+  const style = pill?.styleId?.trim().toLowerCase() ?? "";
+  const label = pill?.sourceLabel?.trim().toLowerCase() ?? "";
+
+  if (style.startsWith("green-pill")) {
+    return { level: "wide_open", confidence: "high", unmapped: false };
+  }
+  if (style.startsWith("orange-pill")) {
+    // "fast_filling" is BookMyShow's own word, which is what makes this one confirmed
+    // rather than inferred — the same reason availStatus 2 outranked 1 on confidence.
+    return label === "fast_filling"
+      ? { level: "filling", confidence: "high", unmapped: false }
+      : { level: "limited", confidence: "low", unmapped: false };
+  }
+
+  // Nothing usable in either channel. UNMAPPED, not merely unknown — and this is the whole
+  // lesson of 2026-08-20. The red alert built for "BookMyShow renumbered availStatus" did
+  // not fire for "BookMyShow stopped sending availStatus", because a null read as a quiet,
+  // expected absence. 165 real shows landed with no demand signal and the scan reported
+  // zero problems. A colour we do not recognise, or no colour at all, must be loud.
+  return { level: "unknown", confidence: "none", unmapped: true };
 }
 
 /**
