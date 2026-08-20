@@ -1,8 +1,0 @@
-2026-08-20T12:27:35.930Z capture start campaign=aee46763-8862-47f0-9943-ed2b0c178674 cities=30 dates=1 pages=30
-2026-08-20T12:27:36.232Z sweep: 30 pages in 8 batches of 4, 5 min between batches — expect roughly 37 minutes
-2026-08-20T12:27:36.233Z batch 1/8
-2026-08-20T12:27:36.806Z   KOCH 20260820 -> 27 venues, 165 shows
-2026-08-20T12:27:41.817Z   TRIV 20260820 -> 30 venues, 166 shows
-2026-08-20T12:27:46.080Z   THSR 20260820 -> FAILED: HTTP 403
-2026-08-20T12:27:50.266Z   KOZH 20260820 -> FAILED: HTTP 403
-2026-08-20T12:27:54.267Z   pausing 5 min to let the allowance recover...
