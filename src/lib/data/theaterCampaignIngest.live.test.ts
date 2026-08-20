@@ -25,10 +25,21 @@ const ENABLED = process.env.RUN_BMS_DB_TEST === "true" && Boolean(process.env.DA
 let campaignId: string | null = null;
 
 afterAll(async () => {
-  // Screenings, snapshots, runs and city results all cascade from the campaign. Theaters do
-  // not — they are shared reference rows for real Kerala venues, and a production scan would
-  // create the same ones, so they are left in place.
-  if (campaignId) await prisma.theaterCampaign.delete({ where: { id: campaignId } }).catch(() => {});
+  // Screenings, snapshots, runs and city results cascade from the campaign. Theaters do
+  // NOT — they are not campaign-scoped — so they have to be removed explicitly.
+  //
+  // An earlier version of this comment claimed they were safe to leave because "a
+  // production scan would create the same ones". That was wrong, and it cost a real
+  // investigation: mock venue codes are synthetic (`KOCH01`), so they never merge with a
+  // real BookMyShow venue. Two runs of this test left 178 permanent phantom theaters in the
+  // database, sitting alongside 27 real ones with no screenings attached.
+  //
+  // Scoped to theaters this test's own scan created — anything already carrying a screening
+  // belongs to someone else and is left alone.
+  if (campaignId) {
+    await prisma.theaterCampaign.delete({ where: { id: campaignId } }).catch(() => {});
+    await prisma.theater.deleteMany({ where: { screenings: { none: {} } } }).catch(() => {});
+  }
   await prisma.$disconnect();
 });
 
