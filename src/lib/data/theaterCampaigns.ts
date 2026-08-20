@@ -972,6 +972,30 @@ export async function getTheaterShows(campaignId: string, theaterId: string) {
  * are caught and logged rather than thrown — a mail outage must not fail a scan whose data
  * landed correctly.
  */
+/**
+ * How long the same theater stays quiet after alerting.
+ *
+ * Was just `scanIntervalMinutes`, which was correct while the only caller was the Vercel
+ * cron: scans and alerts shared a cadence, so "once per scan interval" meant "once per
+ * scan". The local capture path broke that assumption. Captures run three times a day, five
+ * hours apart, and the campaign's interval is 90 minutes — so every run fell outside the
+ * window and re-alerted every flagged theater.
+ *
+ * Measured on 2026-08-20: 32 flagged theaters × 3 runs a day is ~96 notifications daily,
+ * and at full Kerala coverage (~178 theaters) it would be ~530. Precisely the outcome the
+ * dedup was written to prevent — the doc comment even says "trains the recipient to ignore
+ * it".
+ *
+ * So the interval becomes a FLOOR, not the whole rule: whichever is longer, the campaign's
+ * own interval or this default. Twelve hours means a theater that is quiet all day is
+ * mentioned at most twice, which is the point at which the message still carries weight.
+ */
+const ALERT_DEDUP_FLOOR_MINUTES = Number(process.env.BOOKMYSHOW_ALERT_DEDUP_MINUTES) || 720;
+
+export function alertDedupMinutes(scanIntervalMinutes: number): number {
+  return Math.max(scanIntervalMinutes, ALERT_DEDUP_FLOOR_MINUTES);
+}
+
 export async function raiseCampaignAlerts(
   campaignId: string,
   opts: { now?: Date } = {},
@@ -983,7 +1007,7 @@ export async function raiseCampaignAlerts(
   const targets = detail.theaters.filter((t) => t.priority.band === "high");
   if (targets.length === 0) return { raised: 0, suppressed: 0 };
 
-  const windowStart = new Date(now.getTime() - detail.campaign.scanIntervalMinutes * 60_000);
+  const windowStart = new Date(now.getTime() - alertDedupMinutes(detail.campaign.scanIntervalMinutes) * 60_000);
   const notifier = getNotifierProvider();
   const channel = getNotifierChannel();
 

@@ -62,7 +62,11 @@ All server-side. `APIFY_TOKEN` is never exposed to the browser.
 | `BOOKMYSHOW_MAX_CHARGE_USD` | `10` | Hard ceiling per run, enforced by Apify. |
 | `BOOKMYSHOW_MOCK_FAIL_CITY` | unset | Mock mode only. Set to a region code (e.g. `GOOL`) to simulate a city that always fails, exercising the partial-scan UI. |
 | `DATA_MODE_NOTIFIER` | `mock` | Existing project variable. `mock` = alerts log to console (dry run); `live` = email via Resend. |
+| `BOOKMYSHOW_ALERT_DEDUP_MINUTES` | `720` | Floor on how often one theater can alert (§3a). Must outlast the gap between captures. |
+| `BOOKMYSHOW_CAPTURE_MAX_PER_DAY` | `6` | Server-side cap on capture ingests per campaign per 24h. |
+| `BOOKMYSHOW_CAPTURE_SECRET` | — | Shared secret for the capture ingest endpoint (§5a). No default: unset means the endpoint is closed. |
 | `RUN_BOOKMYSHOW_INTEGRATION_TEST` | `false` | Opt-in live test (§6). |
+| `RUN_BMS_DB_TEST` | `false` | Opt-in database test (§10). |
 
 ### Database migration
 
@@ -128,14 +132,34 @@ machinery — the same seam the fan-page alerts use.
 - `DATA_MODE_NOTIFIER=live` sends email via Resend, using the existing
   `RESEND_API_KEY` / `ALERT_EMAIL_FROM` / `ALERT_EMAIL_TO`.
 
-Deduped per theater per campaign scan-interval window, so a 90-minute campaign cannot email
-the same "Palakkad is quiet" line sixteen times a day. Alerts are **never** raised off a
-failed scan, and every alert body carries the line stating it is based on availability
-labels rather than ticket sales.
+Alerts are **never** raised off a failed scan, and every alert body carries the line stating
+it is based on availability labels rather than ticket sales.
 
-Alerts fire from the cron only, not from a manual "Scan now" — clicking scan to look at
-data should not mail anyone. Delivery failures are logged, not thrown: a mail outage must
-not fail a scan whose data landed correctly.
+Alerts fire from the cron and from a **capture ingest** — not from a manual "Scan now", since
+clicking scan to look at data should not mail anyone. Delivery failures are logged, not
+thrown: a mail outage must not fail a scan whose data landed correctly.
+
+### One alert per theater per 12 hours
+
+Deduped per theater, over `max(campaign.scanIntervalMinutes, BOOKMYSHOW_ALERT_DEDUP_MINUTES)`
+— default **720 minutes**. The campaign's own interval is a **floor**, not the whole rule.
+
+It used to be the interval alone, which was right while the Vercel cron was the only caller:
+scans and alerts shared a cadence, so "once per scan interval" meant "once per scan". The
+local capture path broke that. Captures run three times a day, five hours apart, against a
+90-minute campaign interval — so every run fell outside the window and re-alerted every
+flagged theater. Measured 2026-08-20: **32 flagged theaters × 3 runs ≈ 96 notifications a
+day**, heading for ~530 at full Kerala coverage. Exactly what the dedup existed to prevent.
+
+Set `BOOKMYSHOW_ALERT_DEDUP_MINUTES` higher for a quieter inbox, or lower to be told sooner.
+Note it is a floor: a campaign that already asks for less frequent alerts keeps its own
+interval.
+
+> **Still one email per theater.** At full coverage that is up to ~178 separate messages in a
+> day even at one per theater. If that proves too noisy in practice, the fix is a **digest** —
+> one message listing the flagged theaters — rather than a longer window, since a longer
+> window delays the signal this feature exists to deliver. That is a product decision and has
+> not been made.
 
 ## 4. Scheduled scans
 
