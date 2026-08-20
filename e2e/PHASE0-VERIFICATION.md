@@ -14,8 +14,14 @@
 > - Route shapes moved: campaign detail is `/campaigns/[id]` (a DB uuid), not the
 >   hardcoded `/campaigns/vijayam` in the table below, and `/campaigns` gained
 >   `keywords`, `comments`, `compare-own`, `new` and `[id]/media-kit` siblings.
-> - Still **not** covered by any spec: `/theater-campaigns/*`, `/fan-pages/[id]`,
->   `/scout/[batchId]`, `/scout/compare`, `/campaigns/comments`.
+> - Two routes are **deliberately** never captured, and the reasons are in
+>   `phase0-screens.spec.ts` next to the `VIEWS` list: `/campaigns/comments` (a committed
+>   PNG of commenter handles and comment text would retain personal data permanently and
+>   outside the `COMMENT_RETENTION_DAYS` prune — git history isn't erasable the way a
+>   nulled column is) and `/scout/compare` (empty until batches are selected, and seeding
+>   them would break this suite's read-only discipline).
+> - Genuinely not covered yet: `/theater-campaigns/*`, `/fan-pages/[id]`,
+>   `/scout/[batchId]`.
 > - The auth approach, the read-only discipline, and the "screenshots are for human
 >   judgement, not pixel-diffing" reasoning below all still hold, and are still the
 >   reasons the suite is shaped the way it is.

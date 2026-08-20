@@ -36,8 +36,10 @@ npm run db:migrate           # once DATABASE_URL points at a real Postgres insta
 npm run dev
 ```
 
-Everything runs with no third-party credentials at all: every provider defaults to `mock`
-(see **Data & providers**), so a fresh checkout renders the whole app on seeded data.
+Everything runs with no third-party *API* credentials at all: every provider defaults to
+`mock` (see **Data & providers**), so a fresh checkout renders the whole app on seeded data.
+A Postgres instance is still required — that's what `DATABASE_URL` and the migrate step
+above are for.
 
 ### Environment variables
 
@@ -310,7 +312,12 @@ The deployed app lives at **`https://staranalytics.vercel.app`** (Vercel project
 - **e2e** — `npm run test:e2e`: 29 tests across 4 spec files, driving the app in a real
   browser against seeded mock data, behind real auth (a session token minted the same way
   Auth.js's own `encode()` would produce one — nothing about the guard is disabled or
-  stubbed, and negative tests prove it still bites). The redesign sign-off set covers 17
+  stubbed, and negative tests prove it still bites). One of the four,
+  `e2e/reference/prototype.spec.ts`, captures the *prototype* HTML rather than the app, to
+  produce the comparison set. The harness mints its session from `AUTH_SECRET` or
+  `NEXTAUTH_SECRET` (Auth.js v5 order — setting `NEXTAUTH_SECRET` alone is enough) and
+  optionally `E2E_TEST_EMAIL`, which defaults to `e2e@staranalytics.test`. The redesign
+  sign-off set covers 17
   route/state captures in `e2e/screens/`, for side-by-side human review against
   `e2e/reference/shots/`. They are deliberately not pixel-diffed — different DOM, fonts and
   scroll model would produce false failures that say nothing about fidelity. Both sets
@@ -321,8 +328,21 @@ The deployed app lives at **`https://staranalytics.vercel.app`** (Vercel project
   prototype (`staranalytics_prototype.html`). It's a dated record, not a live description of
   today's suite.
 
-Coverage gaps worth knowing: the e2e set does not yet cover `/theater-campaigns/*`,
-`/fan-pages/[id]`, `/scout/[batchId]`, `/scout/compare` or `/campaigns/comments`. The agency
+Coverage gaps worth knowing — and two of them are decisions, not backlog:
+
+- **`/campaigns/comments` is deliberately never screenshotted.** It renders third-party
+  commenters' handles and full comment text — exactly the two columns `DATA-PRIVACY.md`
+  treats as personal data and prunes after `COMMENT_RETENTION_DAYS`. A PNG committed to git
+  would hold that data permanently and outside any prune, because git history isn't erasable
+  the way a nulled column is. Capturing it would quietly defeat a retention policy the app
+  actually implements. If a capture is ever wanted for design review, take it against a
+  scratch database and keep it out of the repo.
+- **`/scout/compare` is deliberately not captured** either: it renders an empty main region
+  until batches are selected, and seeding scan batches would break the suite's read-only
+  discipline.
+- Genuinely not covered yet: `/theater-campaigns/*`, `/fan-pages/[id]`, `/scout/[batchId]`.
+
+The agency
 analysis flow is exercised exactly once, in `phase3-agency-verify.spec.ts`, with throwaway
 `E2E Agency N` names and an `afterAll` cleanup — three stray agencies were still sitting in
 production on 2026-08-07 because an earlier spec wrote realistic-looking rows to whatever
@@ -467,5 +487,6 @@ the tree: route/component counts by `find`, cron names and schedules against `ve
 the unit total against an actual `vitest run` (243 passed / 1 skipped), the e2e total against
 `playwright test --list` (29 tests in 4 files — the suite was listed, not run, in this pass,
 so no pass/fail claim is made for it), model defaults against
-`src/lib/providers/claude-sentiment.ts`, and env names against `.env.example` plus a grep of
-`process.env` across `src/` and `scripts/`.*
+`src/lib/providers/claude-sentiment.ts`, env names against `.env.example` plus a grep of
+`process.env` across `src/` and `scripts/`, and the e2e coverage-gap list against all four
+spec files rather than inferred from the screenshot filenames.*
