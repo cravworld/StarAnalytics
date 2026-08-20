@@ -1,5 +1,6 @@
-// DPDP data-minimization cron: `posts.raw` and `post_comments.raw` store the
-// full Apify scrape payload, which the app never actually reads back (see
+// DPDP data-minimization cron: `posts.raw`, `post_comments.raw` and
+// `scout_snapshots.raw` store the full Apify scrape payload, which the app
+// never actually reads back (see
 // DATA-PRIVACY.md) — every feature uses the structured columns (caption,
 // author, engagement counts) that were already extracted from it at ingest
 // time. Keeping the raw blob forever is over-collection with no product
@@ -70,6 +71,24 @@ export async function GET(request: Request) {
     data: { raw: Prisma.DbNull },
   });
 
+  // Third raw-payload column, same cutoff and same reasoning as the two above. Scoutline
+  // landed (2026-08-17) after this job was written (2026-07-30) and nobody came back to
+  // it, so these accumulated indefinitely while the equivalent post/comment payloads
+  // pruned at 90 days — an inconsistency by accident of ordering, not a judgement call.
+  // If anything the argument is stronger here: scout_snapshots.raw is the full profile
+  // payload for a third-party influencer who was put on someone's shortlist, with no
+  // relationship to this business at all.
+  //
+  // Deliberately NOT extended to the derived Scoutline data (scout_candidates, the
+  // snapshot metric columns, scout_scores). Whether a talent shortlist should age out is
+  // a real product question — its value is partly historical, the same argument that
+  // keeps posts' own engagement data forever — and it stays open. This is only the raw
+  // blob, where the answer was already settled everywhere else in the schema.
+  const scoutSnapshots = await prisma.scoutSnapshot.updateMany({
+    where: { scrapedAt: { lt: rawCutoff }, raw: { not: Prisma.DbNull } },
+    data: { raw: Prisma.DbNull },
+  });
+
   const commentTextCutoff = cutoffFrom("COMMENT_RETENTION_DAYS", DEFAULT_COMMENT_RETENTION_DAYS);
 
   const commentText = await prisma.postComment.updateMany({
@@ -81,6 +100,7 @@ export async function GET(request: Request) {
     rawCutoff: rawCutoff.toISOString(),
     postsPruned: posts.count,
     commentsRawPruned: comments.count,
+    scoutSnapshotsRawPruned: scoutSnapshots.count,
     commentTextCutoff: commentTextCutoff.toISOString(),
     commentTextPruned: commentText.count,
   });

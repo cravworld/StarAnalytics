@@ -533,7 +533,12 @@ model ScoutSnapshot {
   contentMixImagePct      Float?         @map("content_mix_image_pct")
   mostEngagedPostUrl      String?        @map("most_engaged_post_url")
   note                    String?
-  raw                     Json
+  // Nullable so the prune-raw-payloads cron can clear it after RAW_PAYLOAD_RETENTION_DAYS,
+  // same as Post.raw and PostComment.raw. This is an ingestion artifact — written here and
+  // at :527 during ingest and never read back (getScoutRawRows, despite the name, returns
+  // the structured columns only), so keeping a third party's full profile payload forever
+  // was over-collection by accident of ordering: this table landed after the cron existed.
+  raw                     Json?
   scrapedAt               DateTime       @default(now()) @map("scraped_at")
 
   score ScoutScore?
