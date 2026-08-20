@@ -66,7 +66,11 @@ export async function addFanPageAction(handle: string, platform: PlatformId = "i
  * the response instead of behind it, which has the side benefit of making the client's per-page
  * progress readout honest about when a page is actually finished.
  */
-export async function addFanPagesBulkAction(handles: string[], platform: PlatformId = "instagram") {
+export async function addFanPagesBulkAction(
+  handles: string[],
+  platform: PlatformId = "instagram",
+  revalidate = true,
+) {
   await requireSession();
   if (!Array.isArray(handles) || handles.length === 0) throw new Error("no handles given");
   if (handles.length > MAX_BULK_ADD_HANDLES) {
@@ -75,7 +79,17 @@ export async function addFanPagesBulkAction(handles: string[], platform: Platfor
 
   const { results, postIds } = await addFanPages(handles, platform);
   if (postIds.length > 0) await queueSentimentClassification(postIds, FAN_PAGE_SENTIMENT_OPTS);
-  revalidatePath("/fan-pages");
+  // Only the client's LAST chunk revalidates. Every other path here revalidates unconditionally
+  // because it is one call per click; this one is called once per page in a run of N, and
+  // revalidatePath does not just invalidate a cache — per the Server Actions guide, it makes the
+  // action response carry a freshly rendered RSC payload for the whole route, "which the client
+  // commits as a seeded navigation". Twelve pasted handles meant twelve full server re-renders
+  // of /fan-pages *during* the run: twelve extra getFanPagesData passes against a 5-connection
+  // pool while twelve scrapes are in flight, and twelve mid-run commits into the tree holding
+  // the progress and result state this screen is trying to show. Refreshing once at the end
+  // costs nothing in freshness — the route is dynamic, so there is no cached payload to go stale
+  // in the meantime — and removes both problems.
+  if (revalidate) revalidatePath("/fan-pages");
   return {
     results,
     added: results.filter((r) => r.ok && r.status === "added").length,

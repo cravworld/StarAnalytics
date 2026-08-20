@@ -31,7 +31,8 @@ vi.mock("@/lib/data/fanpages", () => ({
   stopTrackingFanPage: vi.fn(),
 }));
 vi.mock("@/lib/require-session", () => ({ requireSession: vi.fn() }));
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+const revalidatePathSpy = vi.fn();
+vi.mock("next/cache", () => ({ revalidatePath: (p: string) => revalidatePathSpy(p) }));
 // after() defers work past the response in Next; run it inline so the assertion can see it.
 // Kept as a spy as well, because one test below asserts a path deliberately does NOT defer.
 const afterSpy = vi.fn((fn: () => unknown) => fn());
@@ -75,6 +76,22 @@ describe("fan-page actions and the comment scrape", () => {
     await addFanPagesBulkAction(["someone"]);
     expect(queueSentimentClassification).toHaveBeenCalledWith(["post-4", "post-5"], { scrapeComments: true });
     expect(afterSpy, "the bulk comment scrape must not be deferred — see the lock note").not.toHaveBeenCalled();
+  });
+
+  it("bulk add revalidates only when the caller says this is the last chunk", async () => {
+    // revalidatePath does not merely invalidate a cache here: it makes the action's response
+    // carry a freshly rendered RSC payload for the whole route, which the client commits as a
+    // seeded navigation. Called once per chunk, a twelve-handle paste therefore triggered twelve
+    // full re-renders of /fan-pages mid-run — wasted getFanPagesData passes against a
+    // 5-connection pool while scrapes were in flight, and twelve commits into the tree holding
+    // the progress and result state the screen exists to show.
+    const { addFanPagesBulkAction } = await import("./fanpages");
+    revalidatePathSpy.mockClear();
+    await addFanPagesBulkAction(["someone"], "instagram", false);
+    expect(revalidatePathSpy, "a non-final chunk must not re-render the route").not.toHaveBeenCalled();
+
+    await addFanPagesBulkAction(["someone"], "instagram", true);
+    expect(revalidatePathSpy).toHaveBeenCalledWith("/fan-pages");
   });
 
   it("bulk add refuses a batch larger than the action's cap", async () => {

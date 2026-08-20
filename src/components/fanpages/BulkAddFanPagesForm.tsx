@@ -87,7 +87,11 @@ export function BulkAddFanPagesForm() {
         }
         const chunk = parsed.handles.slice(i, i + chunkSize);
         setProgress({ done: i, total, current: chunk.join(", ") });
-        const outcome = await addFanPagesBulkAction(chunk, platform);
+        // Revalidate on the final chunk only — see the note on addFanPagesBulkAction. Mid-run
+        // revalidation makes every chunk's response carry a re-render of this whole route, which
+        // is both wasted database work and a commit into the tree holding this component's state.
+        const isFinalChunk = i + chunkSize >= total;
+        const outcome = await addFanPagesBulkAction(chunk, platform, isFinalChunk);
         running.added += outcome.added;
         running.reactivated += outcome.reactivated;
         running.alreadyTracked += outcome.alreadyTracked;
@@ -194,14 +198,35 @@ export function BulkAddFanPagesForm() {
         ) : null}
       </div>
 
+      {/* The finished state was 11px muted text tucked under the button — the same weight as the
+          hint above it, and easy to miss entirely after a run long enough to walk away from.
+          A run that spends real time and money has to end in something you cannot scroll past,
+          so the outcome gets a bordered panel and the headline number gets full contrast. */}
       {tally ? (
-        <div style={{ fontSize: 11, marginTop: 8, color: tally.failures.length > 0 ? "var(--pencil-amber)" : "var(--muted)" }}>
-          {tally.stopped ? "Stopped. " : ""}
-          Added {tally.added} · {tally.posts} posts stored
-          {tally.reactivated > 0 ? ` · ${tally.reactivated} re-activated` : ""}
-          {tally.alreadyTracked > 0 ? ` · ${tally.alreadyTracked} already tracked` : ""}
+        <div
+          style={{
+            marginTop: 10,
+            padding: "8px 10px",
+            border: "1px solid var(--border)",
+            borderLeft: `3px solid ${tally.failures.length > 0 ? "var(--pencil-amber)" : "var(--green, var(--muted))"}`,
+            borderRadius: 4,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 700 }}>
+            {pending
+              ? `Adding… ${tally.added} of ${progress.total} done`
+              : tally.stopped
+                ? `Stopped — added ${tally.added} page${tally.added === 1 ? "" : "s"}`
+                : `Done — added ${tally.added} page${tally.added === 1 ? "" : "s"}`}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+            {tally.posts} posts stored
+            {tally.reactivated > 0 ? ` · ${tally.reactivated} re-activated` : ""}
+            {tally.alreadyTracked > 0 ? ` · ${tally.alreadyTracked} already tracked` : ""}
+            {tally.failures.length > 0 ? ` · ${tally.failures.length} failed` : ""}
+          </div>
           {tally.failures.length > 0 ? (
-            <div style={{ marginTop: 4 }}>
+            <div style={{ fontSize: 11, color: "var(--pencil-amber)", marginTop: 6 }}>
               {tally.failures.map((f) => (
                 <div key={f.handle}>
                   @{f.handle}: {f.error}
