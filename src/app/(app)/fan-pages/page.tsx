@@ -2,6 +2,7 @@ import { getFanPagesData } from "@/lib/data/fanpages";
 import { KpiGrid, Kpi } from "@/components/ui/Kpi";
 import { AddFanPageForm, PromoteSuggestionButton } from "@/components/fanpages/AddFanPageForm";
 import { FanPageList } from "@/components/fanpages/FanPageList";
+import { RefreshAllFanPagesButton } from "@/components/fanpages/RefreshAllFanPagesButton";
 
 // Adding a fan page (and promoting a suggestion) now runs a full profile + post-history
 // scrape rather than the old profile-only call, which does not fit in the default action
@@ -22,6 +23,12 @@ export default async function FanPagesPage() {
       </KpiGrid>
 
       <AddFanPageForm />
+
+      {/* Sits directly above the list it acts on, right-aligned so it reads as a control for
+          the whole list rather than another field on the add form above it. */}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+        <RefreshAllFanPagesButton totalTracked={totalTracked} />
+      </div>
 
       {suggestions.length > 0 ? (
         <div className="card" style={{ marginBottom: 16 }}>

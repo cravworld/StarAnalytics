@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import {
   addFanPage,
   pullFanPageHistory,
+  refreshFanPages,
   setFanPageVerified,
   stopTrackingFanPage,
 } from "@/lib/data/fanpages";
@@ -41,6 +42,32 @@ export async function pullFanPageHistoryAction(id: string) {
   revalidatePath("/fan-pages");
   revalidatePath(`/fan-pages/${id}`);
   return { postCount };
+}
+
+/**
+ * "Refresh all" on the Fan Pages list — the same pull the per-page button does, run across
+ * every tracked page so nobody has to open them one at a time.
+ *
+ * Forced rather than TTL-gated: someone pressing this wants current numbers, and quietly
+ * skipping the pages that were checked an hour ago would look like the button did nothing.
+ * Runs sequentially and returns a per-page outcome, so one page failing (a dead handle, a
+ * rate limit) neither aborts the rest nor gets reported as success — the same discipline the
+ * cron uses, because it is literally the same loop.
+ */
+export async function refreshAllFanPagesAction() {
+  await requireSession();
+  const results = await refreshFanPages({ force: true, sentimentOpts: FAN_PAGE_SENTIMENT_OPTS });
+  revalidatePath("/fan-pages");
+  // Every detail page at once, via the route pattern — the results carry handles, not ids,
+  // so there is nothing to build a literal path from, and `type: "page"` is required for a
+  // path containing a dynamic segment.
+  revalidatePath("/fan-pages/[id]", "page");
+  return {
+    total: results.length,
+    refreshed: results.filter((r) => r.ok).length,
+    posts: results.reduce((s, r) => s + (r.postCount ?? 0), 0),
+    failures: results.filter((r) => !r.ok).map((r) => ({ handle: r.handle, error: r.error ?? "unknown error" })),
+  };
 }
 
 export async function setFanPageVerifiedAction(id: string, isVerifiedFan: boolean) {

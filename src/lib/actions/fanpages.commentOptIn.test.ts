@@ -15,11 +15,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const queueSentimentClassification = vi.fn();
 const addFanPage = vi.fn(async () => ["post-1", "post-2"]);
 const pullFanPageHistory = vi.fn(async () => ({ postIds: ["post-3"], postCount: 1 }));
+const refreshFanPages = vi.fn(async () => [{ handle: "a", ok: true, postCount: 2 }]);
 
 vi.mock("@/lib/data/sentiment", () => ({ queueSentimentClassification }));
 vi.mock("@/lib/data/fanpages", () => ({
   addFanPage,
   pullFanPageHistory,
+  refreshFanPages,
   setFanPageVerified: vi.fn(),
   stopTrackingFanPage: vi.fn(),
 }));
@@ -48,15 +50,25 @@ describe("fan-page actions and the comment scrape", () => {
     expect(queueSentimentClassification).toHaveBeenCalledWith(["post-3"], { scrapeComments: true });
   });
 
+  it("Refresh all opts in, and forces past the TTL", async () => {
+    const { refreshAllFanPagesAction } = await import("./fanpages");
+    await refreshAllFanPagesAction();
+    expect(refreshFanPages).toHaveBeenCalledWith({
+      force: true,
+      sentimentOpts: { scrapeComments: true },
+    });
+  });
+
   it("the cron refresh does NOT opt in — it inherits the global default", async () => {
-    // refreshStaleFanPages queues classification itself, in the data layer, with no options.
-    // Reading the real module here (not the mock above) keeps this honest.
+    // refreshStaleFanPages and refreshFanPages share one loop now, and which of them scrapes
+    // comments is decided purely by whether `sentimentOpts` is passed. So the property worth
+    // pinning is that the cron's entry point forwards no sentiment options at all — assert it
+    // against the real source, since the module is mocked for the cases above.
     const { readFileSync } = await import("node:fs");
     const src = readFileSync(new URL("../data/fanpages.ts", import.meta.url), "utf8");
-    const cronCall = src.match(/await queueSentimentClassification\([^)]*\)/g) ?? [];
-    expect(cronCall.length).toBeGreaterThan(0);
-    for (const call of cronCall) {
-      expect(call, `cron path must not pass scrapeComments: ${call}`).not.toContain("scrapeComments");
-    }
+    const body = src.match(/export async function refreshStaleFanPages[\s\S]*?\n}/)?.[0] ?? "";
+    expect(body, "refreshStaleFanPages not found — did it get renamed?").toContain("refreshFanPages(");
+    expect(body, "the cron must not pass sentiment options").not.toContain("sentimentOpts");
+    expect(body, "the cron must not opt into the comment scrape").not.toContain("scrapeComments");
   });
 });
