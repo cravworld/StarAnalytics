@@ -261,23 +261,44 @@ start at 90 minutes and only shorten it where the data proves it moves that fast
 Per-city results are independent, so a failed city must degrade to "not scanned" for
 that city alone and never to "no demand".
 
-### Untested assumption: will a cloud IP get the same access?
+### RESOLVED — automated collection is blocked. Tested 2026-08-20.
 
-**This is the biggest open risk in the document.** Every observation above was made
-from a normal residential browser session. During the same spike, a server-side fetch
-from Claude Code's infrastructure was **blocked at BookMyShow's edge** — plain
-`curl` reached `robots.txt` and the sitemaps fine, but the tooling's own fetcher could
-not retrieve pages.
+The actor permission was approved and the test was run. **It failed.**
 
-An Apify browser actor runs from a datacenter IP: the same class of client. Nothing here
-demonstrates that `/buytickets/` loads and hydrates from cloud infrastructure. If it
-does not, the remedies are proxies and stealth fingerprinting — both ruled out under
-constraint #6 — and the recommendation flips from "proceed" to "proceed only via an
-authorized feed."
+`apify/web-scraper` (Puppeteer, Apify datacenter proxy, no stealth plugins) against one
+Kochi showtime URL:
 
-**Phase 3 step zero, before any schema work:** one Apify browser-actor run against one
-Kochi URL, asserting that the region code comes back correct and `showtimeWidgets` is
-populated. That single run is worth more than any amount of further design.
+```
+Request blocked - received 403 status code.   × 4  (initial + 3 retries)
+```
+
+The page never loaded. Follow-up measurements, same URL, within minutes of each other:
+
+| Client | Result |
+|---|---|
+| Apify headless Puppeteer, datacenter proxy | **403** |
+| `curl`, ordinary local connection, browser UA | **403** |
+| Real Chrome, same local connection, same moment | **200, hydrates fully** |
+
+Two conclusions follow, and the second is the important one:
+
+1. **It is not an IP block.** A real browser on the very same connection that `curl` was
+   refused from loads the page perfectly. So relocating the collector to a
+   non-datacenter connection would not, on its own, fix this.
+2. **It is request-fingerprint anti-bot protection.** BookMyShow (via its edge provider)
+   distinguishes a genuine browser from an automated client — including a headless
+   Puppeteer, which *is* a real browser engine. Notably, plain `curl` returned 200
+   earlier the same day and 403 later, so the protection is adaptive or probabilistic
+   rather than a static rule.
+
+**Getting past this would require stealth fingerprinting** (`puppeteer-extra-plugin-
+stealth`, fingerprint spoofing) **and/or residential proxy rotation.** That is precisely
+the circumvention ruled out by project constraint #6 and by BookMyShow's own prohibition
+on unauthorized scraping. **It is not being attempted, and it should not be.**
+
+Note on method: every measurement in §2 and §6 of this document was collected through a
+real browser session and remains valid. What is now established is that the same data
+cannot be collected *automatically* by permitted means.
 
 ### Compliance guardrail for whoever implements this
 
@@ -296,24 +317,41 @@ per-actor permission approval in the console before either will run, because the
 execute user-supplied page functions. This is a manual account action, not something the
 integration can grant itself. Until it is approved, the cloud-IP question stays open.
 
-## 9. Recommendation
+## 9. Recommendation — do not ship automated scanning
 
-Proceed, scoped as a demand-pressure and show-retention tracker.
+The go/no-go in §8 came back **no**. BookMyShow's anti-bot protection blocks automated
+clients, and the only ways through are the ones this project ruled out. Everything below
+follows from that.
 
-Scope is settled: BookMyShow-listed theaters only (§6).
+**What the data question established (still true, still useful):** BookMyShow's public
+showtime pages carry a real, usable 4-level demand signal per show, with stable theater
+and session identifiers, on a robots-permitted path. The *analysis* is sound. Only the
+*collection* is blocked.
 
-Three things still need confirming before the schema is fixed, in priority order:
+**What was built:** the full feature — schema, normalization, scoring, API, UI, tests,
+docs — works end to end against the mock provider, which replays the real Kerala
+measurements. It is not wasted: every layer above the fetch is independent of how the
+data arrives, so it stays valid for any of the options below.
 
-1. **Can an Apify cloud actor load these pages at all (§8)?** Go/no-go for the whole
-   collection approach. One run answers it. Blocked until the Apify cap clears
-   ~2026-08-30.
-2. **The semantics of `availStatus: 0`, and where `availStatus: 1` sits on the scale.**
-   Both currently inferred.
-3. **Whether `availStatus` moves observably within a day** — a signal that never changes
-   is not a signal.
+**Options, in the order I would pursue them:**
 
-(2) and (3) are answered together by logging a sample of shows every 30 minutes for ~48
-hours and reading the deltas. Cheap, and it de-risks the entire data model.
+1. **Ask for authorized access.** BookMyShow, the distributor, or the theater chains.
+   This is now the only route to *automated* data, and it is the one that yields better
+   data anyway — real occupancy rather than an ordinal label. A distributor doing paid
+   Kerala campaigns has a legitimate commercial ask here.
+2. **Periodic manual capture.** The browser path still works. A person opening the
+   showtime pages for the target cities once or twice a day, with a small paste-in or
+   file-upload path into the existing ingest, would populate the same tables and light up
+   the same UI. Unglamorous, entirely above board, and probably sufficient for a campaign
+   that runs a few weeks.
+3. **Drop the BookMyShow dependency** and keep only what is independently observable —
+   show counts and screen retention per theater, which a person can read off the page
+   quickly, or which exhibitor contacts will tell you directly.
 
-Do not ship the occupancy percentage, the seats-per-hour velocity metric, or any
-"tickets sold" wording from the original brief. The data does not support them.
+**What not to do:** stealth fingerprinting, residential proxy rotation, or retrying
+through anything designed to look like organic user traffic. Beyond the terms question, a
+distributor running recognisable campaigns in Kerala is not well placed to be caught
+circumventing a ticketing platform's bot protection.
+
+Unchanged regardless of route: do not ship the occupancy percentage, the seats-per-hour
+velocity metric, or any "tickets sold" wording. The source does not support them.

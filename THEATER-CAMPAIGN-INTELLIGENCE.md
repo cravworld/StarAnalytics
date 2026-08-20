@@ -167,13 +167,32 @@ client-side hydration, so the collector must execute JavaScript and read
    robots-disallowed. Rendering the permitted public page is the line the entire
    compliance position rests on.
 
-## 6. Verifying the actor actually satisfies the requirement
+## 6. The live path is BLOCKED — read this before enabling anything
 
-**This has never been run successfully.** Both `apify/web-scraper` and
-`apify/puppeteer-scraper` return `403 full-permission-actor-not-approved` until the actor's
-permissions are approved once in the Apify console.
+**Tested 2026-08-20 with the actor permission approved. BookMyShow blocked it.**
 
-Once approved:
+`apify/web-scraper` against one Kochi showtime URL returned
+`Request blocked - received 403 status code` on all four attempts. Same URL, same few
+minutes: a real Chrome browser loaded it fine, while `curl` on that *same connection* was
+also refused — so this is **request-fingerprint anti-bot protection, not an IP block**, and
+moving the collector off a datacenter would not fix it.
+
+Getting through would need stealth fingerprinting or residential proxy rotation. Both are
+out of scope (§9), so **`DATA_MODE_BOOKMYSHOW` must stay `mock`** and
+`BOOKMYSHOW_MONITORING_ENABLED` must stay `false`.
+
+The Apify provider code remains in the tree because it is correct as written and costs
+nothing to keep — if authorized access is ever granted, it is the shape that access would
+plug into. It is not dead code to delete; it is a wired-up path with a closed door in
+front of it. Everything above the fetch — schema, normalization, scoring, UI — is
+unaffected and works today against the mock provider.
+
+See `BOOKMYSHOW-FEASIBILITY.md` §9 for the routes that remain open (authorized feed,
+periodic manual capture).
+
+### Re-testing later, if something changes
+
+The test below is kept for exactly that. It is still opt-in and still safe to run.
 
 ```
 RUN_BOOKMYSHOW_INTEGRATION_TEST=true npx vitest run src/lib/bookmyshow/integration.live.test.ts
@@ -264,8 +283,11 @@ Apify is never called in the default suite.
 
 ## 11. Known gaps
 
-- The live path has never executed (§6). Until it does, `DATA_MODE_BOOKMYSHOW` stays `mock`.
-- `availStatus` 0 and 1 semantics are inferred.
+- **The live path is blocked by BookMyShow's anti-bot protection (§6).** This is the
+  headline limitation, not a to-do: automated collection is not available by permitted
+  means. `DATA_MODE_BOOKMYSHOW` stays `mock` until authorized access exists.
+- `availStatus` 0 and 1 semantics are inferred, and — because the 48-hour delta run needed
+  automated collection — they can no longer be settled cheaply.
 - The Kerala region list is seeded from a sitemap, which carries no completeness guarantee.
   Enumerating regions from BookMyShow directly would be more robust.
 - Scans are synchronous. If a Kerala-wide scan outgrows the wait budget, the migration path
