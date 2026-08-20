@@ -199,6 +199,7 @@ Every measurement taken on 2026-08-20:
 | 4 | 2 | 50% |
 | 6 | 3 | 50% |
 | 6 | 2 | 33% |
+| 12 | 1 | 8% |
 | **30** | **1** | **3%** |
 | **30** | **1** | **3%** |
 
@@ -206,8 +207,17 @@ The first pages of a run go through and then it clamps — the shape of a small 
 allowance, not of a coin flip. A 30-page sweep spends 29 requests to learn nothing.
 
 **So a short run is both politer and more productive**, which is a rare thing to be able to
-say. `--max-cities` caps the pages per run; the registered task uses `6`, which returns two
-or three cities where asking for all thirty returned one. That is the whole argument for it.
+say. That is the whole argument for keeping runs small.
+
+**Count pages, not cities.** `--max-cities` caps cities, but a run requests
+`cities × dates`, and `--days` defaults to **2**. The 12-page row above is exactly that
+mistake: the scheduled task was set to `--max-cities 6`, which is twelve pages, and it
+clamped to one success like a full sweep would. Six pages is the size that holds ~50%, so
+the registered task uses **`--max-cities 3`** — three cities across two dates.
+
+Two dates is worth keeping rather than trading away for more cities: the entire point is
+seeing weak demand *before* the screening, and tomorrow's slate is where that lead time
+comes from.
 
 > This is the point to be careful about. Requesting fewer pages is not a trick for getting
 > more out of a session — the per-run yield is what BookMyShow allows either way, and the
