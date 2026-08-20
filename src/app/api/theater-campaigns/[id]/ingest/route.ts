@@ -13,7 +13,7 @@
 import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/prisma";
-import { ingestScrapeItems, raiseCampaignAlerts } from "@/lib/data/theaterCampaigns";
+import { ingestScrapeItems, markLatestRunFailed, raiseCampaignAlerts } from "@/lib/data/theaterCampaigns";
 import { releaseCronLock, tryAcquireCronLock } from "@/lib/cronLock";
 import type { BmsScrapeItem } from "@/lib/bookmyshow/types";
 
@@ -138,7 +138,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     return NextResponse.json(result, { status: result.status === "error" ? 502 : 200 });
   } catch (err) {
-    console.error(`[bms-capture] ingest failed campaign=${id}:`, err instanceof Error ? err.message : err);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[bms-capture] ingest failed campaign=${id}:`, message);
+    // Same reason as the manual scan route: a run left saying `running` is a failure the
+    // scan status panel can never report. The capture script is unattended, so that panel
+    // is the only place the operator would ever find out.
+    await markLatestRunFailed(id, message);
     return NextResponse.json({ error: "ingest failed" }, { status: 500 });
   } finally {
     await releaseCronLock(lockName);
