@@ -7,7 +7,7 @@ import { getNotifierChannel, getNotifierProvider } from "@/lib/providers";
 import { getBookMyShowProvider, isBookMyShowLive } from "@/lib/bookmyshow/providers";
 import { scoreTheater, type ShowSignal, type TheaterPriority } from "@/lib/bookmyshow/scoring";
 import { resolveRegions } from "@/lib/bookmyshow/urls";
-import type { NormalizedCityResult } from "@/lib/bookmyshow/types";
+import type { BmsScrapeItem, NormalizedCityResult } from "@/lib/bookmyshow/types";
 
 // Data layer for Theater Campaign Intelligence.
 //
@@ -225,6 +225,26 @@ export async function runCampaignScan(
     };
   }
 
+  return ingestScrapeItems({ campaignId, scanRunId: scanRun.id, items, now, requested: regions.length * dates.length });
+}
+
+/**
+ * The ingest half, shared by every way data can arrive.
+ *
+ * Split out from runCampaignScan so the local-capture path (scripts/bms-capture.mjs, which
+ * drives a real browser and POSTs its findings) lands through EXACTLY the same
+ * normalization, region assertion, idempotency and disappearance logic as a provider-driven
+ * scan. Two ingest paths that drift apart would be two different definitions of the truth.
+ */
+export async function ingestScrapeItems(args: {
+  campaignId: string;
+  scanRunId: string;
+  items: BmsScrapeItem[];
+  now: Date;
+  requested: number;
+}): Promise<ScanResult> {
+  const { campaignId, scanRunId, items, now } = args;
+
   console.log(`${SCAN_LOG} items received campaign=${campaignId} count=${items.length}`);
 
   let theatersStored = 0;
@@ -254,13 +274,13 @@ export async function runCampaignScan(
     await prisma.bmsScanCityResult.upsert({
       where: {
         scanRunId_cityCode_showDate: {
-          scanRunId: scanRun.id,
+          scanRunId,
           cityCode: normalized.cityCode,
           showDate,
         },
       },
       create: {
-        scanRunId: scanRun.id,
+        scanRunId,
         cityCode: normalized.cityCode,
         showDate,
         status: normalized.status,
@@ -289,7 +309,7 @@ export async function runCampaignScan(
     succeededCityCodes.add(normalized.cityCode);
     succeededDates.add(normalized.showDateCode);
 
-    const stored = await ingestCityResult(campaignId, scanRun.id, normalized);
+    const stored = await ingestCityResult(campaignId, scanRunId, normalized);
     theatersStored += stored.theaters;
     screeningsStored += stored.screenings;
     snapshotsStored += stored.snapshots;
@@ -307,7 +327,7 @@ export async function runCampaignScan(
     citiesSucceeded === 0 ? "error" : citiesSucceeded < items.length ? "partial" : "done";
 
   await prisma.bmsScanRun.update({
-    where: { id: scanRun.id },
+    where: { id: scanRunId },
     data: {
       status,
       finishedAt: new Date(),
@@ -335,9 +355,9 @@ export async function runCampaignScan(
   }
 
   return {
-    scanRunId: scanRun.id,
+    scanRunId,
     status,
-    citiesRequested: regions.length * dates.length,
+    citiesRequested: args.requested,
     citiesSucceeded,
     theatersStored,
     screeningsStored,

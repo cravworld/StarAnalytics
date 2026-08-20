@@ -167,7 +167,57 @@ client-side hydration, so the collector must execute JavaScript and read
    robots-disallowed. Rendering the permitted public page is the line the entire
    compliance position rests on.
 
-## 6. The live path is BLOCKED — read this before enabling anything
+## 5a. Local capture — the working collection path
+
+`scripts/bms-capture.mjs` drives the **real Chrome installed on the operator's machine**,
+over that machine's own connection, and POSTs its findings to
+`/api/theater-campaigns/{id}/ingest`. That endpoint runs the same `ingestScrapeItems()`
+pipeline a provider-driven scan would, so both routes share one definition of the truth.
+
+```
+node scripts/bms-capture.mjs --campaign <campaignId>
+node scripts/bms-capture.mjs --campaign <id> --cities KOCH,PLKK --days 1 --dry-run
+```
+
+Schedule it once and it is unattended:
+
+```
+.\scripts\install-bms-capture-task.ps1 -CampaignId <id> -Times '09:00','14:00','19:00'
+```
+
+The task runs interactively because Chrome needs a desktop session — the machine has to be
+on and logged in, and you will see the window appear.
+
+### Measured success rate: partial and unpredictable
+
+Verified 2026-08-20. BookMyShow serves some requests and 403s others, seemingly at random:
+
+| Run | Result |
+|---|---|
+| 2 cities, 4s apart | 1 ok, 1 × 403 |
+| 4 cities, 15s apart | 2 ok, 2 × 403 |
+
+Backing off further did **not** improve it, so this is not simple rate limiting — it is a
+probabilistic challenge. Expect roughly half the pages in any given run to fail.
+
+**This is survivable by design, and the reason the data model looks the way it does.** Each
+city-date is independent: a 403 is recorded as a *failed city*, never as a city with no
+demand, and snapshots are idempotent per scan run. Three runs a day across a week gives
+most cities repeated coverage even at a 50% per-run hit rate. Partial data that knows it is
+partial is the thing this feature was built to handle.
+
+### Do not try to raise the hit rate
+
+The script contains no stealth plugin, no fingerprint patching, no user-agent override and
+no proxy, and `src/lib/bookmyshow/capture.test.ts` asserts all of that. It works because it
+genuinely is an ordinary browser, not because it is disguised as one — that distinction is
+the entire basis for collecting this way.
+
+If the 403 rate climbs toward 100%, the correct response is to **stop and pursue authorized
+access**, not to start pretending. A retry-until-through loop is how a defensible tool
+becomes an attack; the script deliberately exits when every page fails rather than looping.
+
+## 6. Server-side collection is BLOCKED — read this before enabling anything
 
 **Tested 2026-08-20 with the actor permission approved. BookMyShow blocked it.**
 
@@ -283,9 +333,12 @@ Apify is never called in the default suite.
 
 ## 11. Known gaps
 
-- **The live path is blocked by BookMyShow's anti-bot protection (§6).** This is the
-  headline limitation, not a to-do: automated collection is not available by permitted
-  means. `DATA_MODE_BOOKMYSHOW` stays `mock` until authorized access exists.
+- **Server-side collection is blocked (§6).** `DATA_MODE_BOOKMYSHOW` stays `mock`. The
+  working path is local capture (§5a), which needs an operator machine that is on and
+  logged in, and which loses roughly half its pages to 403s on any given run.
+- **Capture coverage is probabilistic.** Any single run returns partial data. Coverage is
+  accumulated across runs rather than guaranteed per run, so a theater's "last seen" can be
+  hours older than the last scan. The UI shows per-theater last-seen times for that reason.
 - `availStatus` 0 and 1 semantics are inferred, and — because the 48-hour delta run needed
   automated collection — they can no longer be settled cheaply.
 - The Kerala region list is seeded from a sitemap, which carries no completeness guarantee.
