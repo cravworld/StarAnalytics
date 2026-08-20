@@ -5,14 +5,10 @@ import { DemandPill } from "@/components/theater/DemandPill";
 import { DemandTrendChart } from "@/components/theater/DemandTrendChart";
 import { getTheaterShows } from "@/lib/data/theaterCampaigns";
 import type { DemandLevel } from "@/lib/bookmyshow/demand";
+import { formatIstDateTime } from "@/lib/format";
 
 function when(d: Date | string): string {
-  return new Date(d).toLocaleString(undefined, {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatIstDateTime(d);
 }
 
 export default async function TheaterShowsPage({

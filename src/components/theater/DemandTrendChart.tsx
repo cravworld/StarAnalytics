@@ -4,6 +4,7 @@ import "@/components/charts/register";
 import { Line } from "react-chartjs-2";
 import { demandRank, type DemandLevel } from "@/lib/bookmyshow/demand";
 import { GRIDLINE, INK, INK_FILL, tickFont } from "@/components/charts/theme";
+import { formatIstDateTime } from "@/lib/format";
 
 export interface TrendPoint {
   capturedAt: string | Date;
@@ -38,12 +39,7 @@ export function DemandTrendChart({ points }: { points: TrendPoint[] }) {
   }
 
   const labels = points.map((p) =>
-    new Date(p.capturedAt).toLocaleString(undefined, {
-      day: "numeric",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+    formatIstDateTime(p.capturedAt),
   );
 
   return (
