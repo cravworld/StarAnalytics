@@ -409,5 +409,21 @@ lives here instead, where nothing validates it.
 
 | Path | Schedule | Why it is off |
 | --- | --- | --- |
-| `/api/cron/poll-hashtags` | `0 * * * *` | Spends Apify credit (hashtag + comment scraping). Disabled 2026-08-17 ahead of the Scale plan top-up so it doesn't start eating credits the moment they land. Restore this entry to re-enable. |
-| `/api/cron/backfill-sentiment` | `0 * * * *` | Calls scrapeCommentsForPosts (Apify) per APIFY-USAGE-AUDIT.md finding A. Disabled 2026-08-17 for the same reason as poll-hashtags. Restore this entry to re-enable. |
+| `/api/cron/backfill-sentiment` | `0 * * * *` | Calls scrapeCommentsForPosts (Apify) per finding A. Disabled 2026-08-17 ahead of the Scale plan top-up. **Still off as of 2026-08-20**, now for a second and more durable reason: it exists only to backfill Comment Sentiment, which is not a feature in use. Restore this entry *and* set `COMMENT_SCRAPE=on` to re-enable — the entry alone would run it to no effect. |
+
+### `poll-hashtags` re-enabled 2026-08-20
+
+Restored to `crons` at `0 * * * *`. It was disabled 2026-08-17 for credit reasons, but that
+disabled *all* automatic ingestion, not just the expensive part — hashtag snapshots, competitor
+refresh and fan-page refresh all stopped with it, and the app's data went stale from
+2026-08-19T10:11Z onward while the staleness banner correctly reported it.
+
+What makes re-enabling safe now is that the reason it was expensive is separately switched off:
+`poll-hashtags` used to pay for a comment scrape via its `after()`-deferred
+`queueSentimentClassification`, which is finding A's unbounded fan-out. That call still runs —
+classification of already-stored comments is free of Apify — but `isCommentScrapeEnabled()`
+returns false unless `COMMENT_SCRAPE=on`, so no new comments are fetched. The hashtag, profile
+and post scrapes it drives are the ones the product actually needs.
+
+The lock race this document recorded (both crons on `0 * * * *` scraping the same post) cannot
+recur while `backfill-sentiment` stays unscheduled, and could not spend anything even if it did.

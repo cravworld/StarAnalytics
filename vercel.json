@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/poll-hashtags",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/api/cron/prune-raw-payloads",
       "schedule": "0 7 * * *"
     },
