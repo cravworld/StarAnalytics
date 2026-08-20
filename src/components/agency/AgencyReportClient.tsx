@@ -513,7 +513,14 @@ export function AgencyReportClient({ agencies: dbAgencies }: { agencies: Agency[
               <option value="flags">Sort: Flags</option>
             </select>
           </div>
-          <div className="card" style={{ overflowX: "auto", padding: 0 }}>
+          {/* .tbl-scroll carries the overflow-x AND resets .post-tbl's sticky header offset.
+              The 52px in `.post-tbl th { top: 52px }` exists to clear the fixed topbar, which
+              is only the right thing to do while the page is the scroll container. This card
+              scrolls, so it becomes the container itself and the header was landing 52px down
+              — squarely on top of the first row, hiding it completely (measured: 52px of
+              overlap on a 34.5px row). Easy to miss here because the table is long enough
+              that only row one disappeared. */}
+          <div className="card tbl-scroll" style={{ padding: 0 }}>
             <table className="post-tbl">
               <thead>
                 <tr>
