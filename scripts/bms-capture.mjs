@@ -106,6 +106,24 @@ const REGIONS = {
 // --- main -------------------------------------------------------------------
 
 const plan = await fetchPlan();
+
+// Stop before opening a browser if the server will not accept the result anyway.
+//
+// The daily cap is enforced at ingest, which is the worst moment to discover it: the pages
+// have already been fetched from BookMyShow and the whole run is then discarded with a 429.
+// Requests spent, nothing learned. Checking here is the same principle as capping the city
+// window — do not send requests whose outcome is already decided.
+//
+// Advisory only. The server remains the thing that enforces the cap, so editing this out
+// buys nothing except a wasted run.
+if (!DRY_RUN && typeof plan.capturesRemaining === "number" && plan.capturesRemaining <= 0) {
+  fail(
+    "Daily capture limit already reached for this campaign, so this run would be rejected. " +
+      "Nothing was requested from BookMyShow. Try again later — the limit is a rolling 24 hours, " +
+      "not a calendar day, so the earliest slot frees up 24h after the oldest run.",
+  );
+}
+
 const cities = resolveCities(plan);
 const dates = nextIstDates(DAYS);
 

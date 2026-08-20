@@ -62,6 +62,17 @@ describe("the capture script does not disguise itself", () => {
     expect(SCRIPT).toMatch(/stop and reassess rather than retrying/i);
   });
 
+  it("checks the daily budget before opening a browser, not after", () => {
+    // Discovering the cap at ingest means the pages were already fetched from BookMyShow
+    // and the run is then thrown away with a 429 — requests spent, nothing learned. The
+    // check has to come before chromium.launch.
+    const budgetAt = code.indexOf("capturesRemaining");
+    const launchAt = code.indexOf("chromium.launch");
+    expect(budgetAt, "capture script never reads capturesRemaining").toBeGreaterThan(-1);
+    expect(launchAt).toBeGreaterThan(-1);
+    expect(budgetAt, "budget check runs after the browser is opened").toBeLessThan(launchAt);
+  });
+
   it("does not request pages it already knows will be refused", () => {
     // Measured twice on 2026-08-20: page one of a run succeeds, every page after it 403s.
     // With a fixed city order that means a scheduled sweep captures Kochi three times a day
@@ -123,13 +134,23 @@ describe("capture endpoints fail closed", () => {
     expect(stripComments(INGEST)).toMatch(/campaign\.status === "archived"/);
   });
 
-  it("returns only what is needed to build public URLs", () => {
-    // A leaked secret should expose as little as possible.
+  it("returns only what is needed to build public URLs and pace the run", () => {
+    // A leaked secret should expose as little as possible. capturesRemaining is a bare
+    // count with no campaign detail in it, which is why it is allowed here.
     const returned = stripComments(PLAN);
     expect(returned).toMatch(/eventCode/);
     expect(returned).toMatch(/movieSlug/);
     expect(returned).toMatch(/cityCodes/);
+    expect(returned).toMatch(/capturesRemaining/);
     expect(returned).not.toMatch(/wideOpenAlertPct|minShowsForAlert|bmsSourceUrl/);
+  });
+
+  it("still enforces the cap server-side, not just in the plan", () => {
+    // The plan reports the budget so the script can stop early; the ingest route is what
+    // actually refuses. If enforcement ever moved to the advisory number, an edited script
+    // could ignore it and the cap would be decoration.
+    expect(stripComments(INGEST)).toMatch(/capturesToday >= MAX_CAPTURES_PER_DAY/);
+    expect(stripComments(INGEST)).toMatch(/status: 429/);
   });
 });
 

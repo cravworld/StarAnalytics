@@ -224,14 +224,56 @@ node scripts/bms-capture.mjs --campaign <campaignId>
 node scripts/bms-capture.mjs --campaign <id> --cities KOCH,PLKK --days 1 --dry-run
 ```
 
-Schedule it once and it is unattended:
+Either way it runs on a **machine**, not on Vercel: Chrome needs a desktop session, so the
+laptop has to be on and logged in, and the window is visible while it works.
+
+#### On demand (how this is actually run)
+
+A double-clickable launcher, because a laptop that may be closed at 19:00 cannot be the
+thing a schedule depends on. Nothing fires on a timer.
+
+```bat
+cd /d C:\Projects\StarAnalytics
+node "scripts\bms-capture.mjs" --campaign <id> --url https://staranalytics.vercel.app --max-cities 3
+pause
+```
+
+Saved as a `.cmd` on the Desktop. `pause` matters — without it the window closes before the
+result can be read, and partial results are the normal case here, not an error to hide.
+
+`--max-cities 3` is three cities across two dates: **six pages**, the size that holds the
+best hit rate. See the table below before raising it.
+
+#### Scheduled (available, not in use)
 
 ```
 .\scripts\install-bms-capture-task.ps1 -CampaignId <id> -Times '09:00','14:00','19:00'
 ```
 
-The task runs interactively because Chrome needs a desktop session — the machine has to be
-on and logged in, and you will see the window appear.
+Registers a Windows task. Remove it again with:
+
+```
+Unregister-ScheduledTask -TaskName 'StarAnalytics BMS Capture' -Confirm:$false
+```
+
+Worth knowing if you ever schedule it: **`--max-cities` counts cities, not pages.** A run
+requests `cities × dates` and `--days` defaults to 2, so `--max-cities 6` is twelve pages
+and clamps as badly as a full sweep.
+
+#### The daily cap is checked before the browser opens
+
+`BOOKMYSHOW_CAPTURE_MAX_PER_DAY` (default 6, rolling 24 hours) is enforced by the ingest
+route — that is the only thing that decides. But the capture plan also reports
+`capturesRemaining`, and the script stops on zero **before** launching Chrome.
+
+Without that, hitting the cap meant fetching every page from BookMyShow and then having the
+whole run rejected with a 429: requests spent, nothing learned. Two failures that look alike
+in the log need opposite responses, and the launcher spells both out —
+
+- **"Daily capture limit already reached"** — our own cap. Nothing was requested from
+  BookMyShow. Come back later.
+- **HTTP 403 / every page failed** — BookMyShow refused us. Do **not** click again;
+  repeated retries are what turn a defensible tool into abuse.
 
 ### Measured success rate: asking for less gets you more
 
