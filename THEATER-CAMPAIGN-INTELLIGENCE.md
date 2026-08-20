@@ -321,6 +321,24 @@ gets longer" and concluded that a run yields about one city. That was wrong. Not
 collapses: an allowance is spent and then refills. A fast run of 30 pages and a paced run of
 30 pages differ by everything.
 
+#### There is a second, slower limit — and a day of testing found it
+
+The five-minute recovery above is not unconditional. Later the same day, after roughly
+**150 page requests** across an afternoon of investigation, a paced sweep was refused
+outright: three batches, five-minute pauses between them, **1 of 12 pages served**. The same
+pacing that had returned 12/12 a couple of hours earlier returned nothing.
+
+So there are two limits stacked: a short burst allowance that a five-minute pause restores,
+and a **slower, day-scale budget that pauses do not restore**. Exhaust the second and the
+first stops helping.
+
+The practical rule: **one sweep a day, and do not investigate on the same day you need
+data.** A sweep started from a quiet day should complete; a sweep started after heavy use
+will stop early, by design, having learned nothing new.
+
+The correct response when this happens is the one the script takes automatically — stop.
+Not shorter batches, not longer pauses, not "just one more try". Come back tomorrow.
+
 ### Reading everything: `--sweep`
 
 ```
