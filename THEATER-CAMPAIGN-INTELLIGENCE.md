@@ -112,6 +112,27 @@ showing the raw `availStatus` behind every reading.
 It is there to make failure loud. A scan that could not read some cities lists them
 explicitly as **not scanned** — never as cities with no demand.
 
+**The date column is the date REQUESTED, not necessarily the date returned.** Late in the
+day BookMyShow stops listing today's remaining shows — they are past their booking cutoff —
+and serves the next available date instead. Observed 2026-08-20 at 17:26 IST: a request for
+`20260820` came back with fourteen shows all running 09:00–23:59 on the **21st**, and a
+second request for `20260821` returned the same fourteen.
+
+Nothing is corrupted by this, and it is worth being precise about why: every screening
+carries its own `showDate`, derived from the show's own start time in IST, and that value
+was verified correct against the raw instants. The ranking is computed from screenings, so
+the ranking is right. Only the scan-result row's date can mislead — reading it as proof that
+a particular date was read is the mistake to avoid. **Trust the screening's date, not the
+request's.**
+
+Two practical consequences:
+
+- An evening run asking for two dates spends both on the same slate. The morning and
+  midday runs are the ones that get today *and* tomorrow. This is one reason the daily
+  triggers are spread rather than clustered.
+- A repeat is not wasted data: the snapshot unique constraint means the second read updates
+  nothing and adds no duplicate history.
+
 Two counters matter:
 
 - **Rows skipped** — rows that could not be read at all (missing show id, unparseable
