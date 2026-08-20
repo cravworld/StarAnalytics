@@ -120,12 +120,22 @@ const VIEWS: View[] = [
     path: "/compare",
     text: ["Compare Pages", "Nivin Pauly", "Followers", "Story Response Rate", "Add account to compare"],
   },
-  // 05-campaigns-own and 06-campaigns-hashtag retired in Phase 2: both screens now
-  // read from the real `campaigns`/`hashtag_snapshots` tables unconditionally
-  // (mock and live mode alike — see src/lib/data/campaigns.ts), not the static
-  // CAMPAIGNS/TRACKED_HASHTAGS seed fixtures. A fresh DB has neither, so the
-  // fixed seed strings this test asserted on no longer appear by design. Covered
-  // instead by e2e/phase2-campaigns.spec.ts against real DB-backed data.
+  // 05 and 06 were retired in Phase 2 because both screens moved off the static
+  // CAMPAIGNS/TRACKED_HASHTAGS fixtures onto the real campaigns/hashtag_snapshots tables,
+  // so the seed strings they asserted stopped appearing. Retiring them was right for the
+  // assertions but threw out the screenshots too, leaving two re-skinned screens with no
+  // sign-off capture at all. Restored here on furniture only — the same treatment 04, 12
+  // and 13 get — so the design review set is complete without depending on any row.
+  {
+    name: "05-campaigns-own",
+    path: "/campaigns",
+    text: ["Own Campaigns", "Active Campaigns", "Total Engagement", "Hashtags Tracked", "New Campaign"],
+  },
+  {
+    name: "06-campaigns-hashtag",
+    path: "/campaigns/hashtag",
+    text: ["Track Hashtag", "Tracked Hashtags", "Hashtag Search"],
+  },
   {
     name: "07-agency-upload",
     path: "/campaigns/agency",
@@ -206,6 +216,43 @@ const VIEWS: View[] = [
     path: "/scout",
     text: ["Quick Scan", "Scan Batches", "Select 2-4 batches to compare"],
   },
+  // 14-16 had no sign-off capture at all. They were re-skinned along with everything else
+  // but were never in this walk, so the design review set silently covered 7 of the app's
+  // 17 routes. Furniture-only assertions, for the same reason as 04/05/06/12/13: every one
+  // of these screens is DB-backed.
+  {
+    name: "14-campaign-new",
+    path: "/campaigns/new",
+    text: ["New Campaign", "Name", "Hashtags (comma-separated)", "Start date", "Create Campaign"],
+  },
+  {
+    name: "15-keyword-trends",
+    path: "/campaigns/keywords",
+    // "All Campaigns" deliberately absent: it is an <option> inside the campaign filter, and
+    // Playwright treats options as hidden, so asserting it would fail on a screen that renders
+    // perfectly well. The filter itself is covered by the visible headings around it.
+    text: ["Classified Posts", "Keywords Tracked", "Top Keyword", "Trending Topics"],
+  },
+  {
+    name: "16-compare-campaigns",
+    path: "/campaigns/compare-own",
+    text: ["Compare at day", "Buzz Score", "Positive Sentiment", "Total Engagement", "Posts Tracked"],
+  },
+  // Two routes are deliberately NOT captured here.
+  //
+  // /campaigns/comments renders third-party commenters' handles and their full comment text.
+  // DATA-PRIVACY.md ("Retention") treats exactly those two columns as personal data and has
+  // the prune-raw-payloads cron null them after COMMENT_RETENTION_DAYS (default 90). A PNG
+  // of that screen committed to git would hold the same data permanently and outside any
+  // prune — git history is not erasable in the way a nulled column is — so a screenshot here
+  // would quietly defeat the retention policy the app implements. The screen's own layout is
+  // still exercised: phase2 asserts its pending states, and check-tokens.mjs covers its
+  // colours. If a capture is ever wanted for design review, take it against a scratch
+  // database rather than this one, and keep it out of the repo.
+  //
+  // /scout/compare renders an empty main region until batches are selected, so there is no
+  // populated state to capture without seeding scan batches — which this read-only walk
+  // must not do.
 ];
 
 test.describe("Phase 0 — authenticated screens render seeded mock data", () => {
