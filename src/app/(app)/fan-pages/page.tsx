@@ -3,6 +3,12 @@ import { KpiGrid, Kpi } from "@/components/ui/Kpi";
 import { AddFanPageForm, PromoteSuggestionButton } from "@/components/fanpages/AddFanPageForm";
 import { FanPageList } from "@/components/fanpages/FanPageList";
 
+// Adding a fan page (and promoting a suggestion) now runs a full profile + post-history
+// scrape rather than the old profile-only call, which does not fit in the default action
+// timeout. Vercel applies the hosting page's maxDuration to its Server Actions — same fix
+// as the agency and hashtag-search screens.
+export const maxDuration = 800;
+
 export default async function FanPagesPage() {
   const { fanPages, totalTracked, kpis, alerts, suggestions } = await getFanPagesData();
 
