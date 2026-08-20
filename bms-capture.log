@@ -1,0 +1,30 @@
+2026-08-20T12:27:35.930Z capture start campaign=aee46763-8862-47f0-9943-ed2b0c178674 cities=30 dates=1 pages=30
+2026-08-20T12:27:36.232Z sweep: 30 pages in 8 batches of 4, 5 min between batches — expect roughly 37 minutes
+2026-08-20T12:27:36.233Z batch 1/8
+2026-08-20T12:27:36.806Z   KOCH 20260820 -> 27 venues, 165 shows
+2026-08-20T12:27:41.817Z   TRIV 20260820 -> 30 venues, 166 shows
+2026-08-20T12:27:46.080Z   THSR 20260820 -> FAILED: HTTP 403
+2026-08-20T12:27:50.266Z   KOZH 20260820 -> FAILED: HTTP 403
+2026-08-20T12:27:54.267Z   pausing 5 min to let the allowance recover...
+2026-08-20T12:33:45.516Z capture start campaign=aee46763-8862-47f0-9943-ed2b0c178674 cities=30 dates=1 pages=30
+2026-08-20T12:33:45.726Z sweep: 30 pages in 8 batches of 4, 5 min between batches — expect roughly 37 minutes
+2026-08-20T12:33:45.726Z batch 1/8
+2026-08-20T12:33:46.769Z   KOCH 20260820 -> 27 venues, 165 shows
+2026-08-20T12:33:50.999Z   TRIV 20260820 -> FAILED: HTTP 403
+2026-08-20T12:33:55.173Z   THSR 20260820 -> FAILED: HTTP 403
+2026-08-20T12:33:59.343Z   KOZH 20260820 -> FAILED: HTTP 403
+2026-08-20T12:34:03.349Z   pausing 5 min to let the allowance recover...
+2026-08-20T12:39:03.360Z batch 2/8
+2026-08-20T12:39:03.542Z   KOLM 20260820 -> FAILED: HTTP 403
+2026-08-20T12:39:07.850Z   ALPZ 20260820 -> FAILED: HTTP 403
+2026-08-20T12:39:12.028Z   KTYM 20260820 -> FAILED: HTTP 403
+2026-08-20T12:39:16.217Z   KANN 20260820 -> FAILED: HTTP 403
+2026-08-20T12:39:20.227Z   pausing 5 min to let the allowance recover...
+2026-08-20T12:44:20.232Z batch 3/8
+2026-08-20T12:44:20.526Z   PLKK 20260820 -> FAILED: HTTP 403
+2026-08-20T12:44:24.769Z   PNTM 20260820 -> FAILED: HTTP 403
+2026-08-20T12:44:28.988Z   THOD 20260820 -> FAILED: HTTP 403
+2026-08-20T12:44:33.219Z   MUVA 20260820 -> FAILED: HTTP 403
+2026-08-20T12:44:37.220Z two consecutive batches returned nothing — stopping the sweep rather than continuing to ask.
+2026-08-20T12:44:37.448Z capture done ok=1 failed=11
+2026-08-20T12:44:39.831Z ingest ok: {"scanRunId":"52845777-5dac-408e-b575-a63e84ef4cfb","status":"partial","citiesRequested":30,"citiesSucceeded":1,"theatersStored":27,"screeningsStored":165,"snapshotsStored":165,"recordsSkipped":0,"recordsUnmapped":0,"error":null}

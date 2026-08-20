@@ -6,7 +6,7 @@
 // constraint.
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { markLatestRunFailed, runCampaignScan } from "@/lib/data/theaterCampaigns";
+import { markLatestRunFailed, mockScanBlockedReason, runCampaignScan } from "@/lib/data/theaterCampaigns";
 import { bookMyShowConfigError } from "@/lib/bookmyshow/providers";
 import { tryAcquireCronLock, releaseCronLock } from "@/lib/cronLock";
 import { isApifyQuotaFailure } from "@/lib/apify/quotaBreaker";
@@ -26,6 +26,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (configError) {
     // 503, not 500: the code is fine, the deployment is not configured for live scanning.
     return NextResponse.json({ error: configError }, { status: 503 });
+  }
+
+  // Refuse to write fixtures over measurements. See mockScanBlockedReason — with
+  // server-side collection blocked, this button can only produce mock data, and on a
+  // campaign built from real captures that would be fabrication in the one table the user
+  // spends money from.
+  const mockBlocked = await mockScanBlockedReason(id);
+  if (mockBlocked) {
+    return NextResponse.json({ error: mockBlocked }, { status: 409 });
   }
 
   // One scan per campaign at a time. Without this, an impatient double-click starts two
