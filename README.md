@@ -447,7 +447,11 @@ surface — this is the honest version, and it is not "everything works":
   There's also no schema link between `User` and `Agency`, so an `agency_viewer` couldn't be
   scoped to just their own agency's data even if role-checking were added — link that before
   onboarding the first external agency login, not after.
-- **The Compare page's "Live" indicator polls rather than truly streams.** `LiveStream.tsx`
+- **The campaign detail page's "Live" post stream polls rather than truly streams.**
+  `src/components/campaigns/LiveStream.tsx`, rendered by `/campaigns/[id]` and nowhere else —
+  earlier versions of this README attributed it to `/compare`, which has no live indicator at
+  all (the `isInstagramInsightsLive()` call on that screen is the Meta App Review badge, an
+  unrelated thing). It
   used Supabase Realtime, which turned out to be silently non-functional in production: RLS
   is enabled with zero policies, so the public `NEXT_PUBLIC_SUPABASE_ANON_KEY` can't read any
   row — it would connect and show "Live" but never actually receive an event. Granting the
