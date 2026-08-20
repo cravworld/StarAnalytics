@@ -101,11 +101,33 @@ number can never be mistaken for a live one.
    - **Flag a theater at (% shows wide open)** — default 80.
    - **Minimum shows before judging** — default 3. Small venues run few shows; one quiet
      slot is not a signal.
-5. **Run scan now**, or wait for the cron.
+5. Collect data with the **local capture** (§5a). "Run scan now" is not that — see below.
 
 The campaign page ranks theaters worst-first, with the reasons for each score written out.
 Click a theater for its individual shows, their demand history, and a source-data panel
 showing the raw `availStatus` behind every reading.
+
+### What "Run scan now" actually does — and why it refuses
+
+It runs a **server-side** scan through whatever `DATA_MODE_BOOKMYSHOW` selects. That is
+`mock` in every deployment, because BookMyShow blocks server-side collection (§6). It cannot
+drive the Chrome on your machine, so it can never fetch live showtimes.
+
+So on a campaign built from real captures, the button would inject **fabricated** theaters
+and readings — mock venue codes look like `KOCH01`, where a real one is `ZTKC` — into the
+exact table used to decide where campaign money goes. Synthetic codes never merge with real
+venues, so they persist as phantoms, and the detail page reads snapshots across *all* runs,
+so the ranking would blend invented numbers with measured ones.
+
+**It now refuses**, with a 409 and an explanation, whenever the campaign already holds real
+captured data. The cron applies the same rule, which matters more there: nobody is watching
+an unattended tick dilute real data.
+
+Mock scanning stays fully available on a campaign with **no** real data — that is what makes
+the feature demoable without an Apify account. The rule is about *mixing fixtures into
+measurements*, not about mock being bad.
+
+To actually collect data, use the local capture (§5a).
 
 ### Reading the scan status panel
 

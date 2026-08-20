@@ -11,7 +11,7 @@
 //     campaign from being scanned every tick.
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { markLatestRunFailed, raiseCampaignAlerts, runCampaignScan } from "@/lib/data/theaterCampaigns";
+import { markLatestRunFailed, mockScanBlockedReason, raiseCampaignAlerts, runCampaignScan } from "@/lib/data/theaterCampaigns";
 import { isMonitoringEnabled, bookMyShowConfigError } from "@/lib/bookmyshow/providers";
 import { releaseCronLock, tryAcquireCronLock } from "@/lib/cronLock";
 import { isApifyQuotaFailure } from "@/lib/apify/quotaBreaker";
@@ -59,6 +59,15 @@ export async function GET(request: Request) {
     const results: { campaignId: string; status: string; error?: string }[] = [];
     for (const campaign of due) {
       try {
+        // Same rule as the manual button: fixtures must never be written over
+        // measurements. Unattended, this matters more — nobody would be watching as a
+        // nightly tick quietly diluted a campaign's real data with invented theaters.
+        const blocked = await mockScanBlockedReason(campaign.id);
+        if (blocked) {
+          results.push({ campaignId: campaign.id, status: "skipped", error: blocked });
+          continue;
+        }
+
         const result = await runCampaignScan(campaign.id, { now });
         // Alerts only on a scan that actually read something. Alerting off a failed scan
         // would be the exact false signal this feature is built to avoid — "no demand

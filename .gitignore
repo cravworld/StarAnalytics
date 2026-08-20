@@ -50,3 +50,6 @@ next-env.d.ts
 
 # claude code — local settings and throwaway worktrees (full repo copies)
 /.claude/
+
+# Local capture run log — written by scripts/bms-capture.mjs on the operator machine.
+bms-capture.log

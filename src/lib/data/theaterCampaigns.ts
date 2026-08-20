@@ -646,6 +646,42 @@ async function ingestCityResult(
  * database is what broke then this write breaks too. Masking the original error with a
  * second one would lose the only useful diagnostic.
  */
+/**
+ * Why a mock-provider scan must not run against this campaign, or null if it may.
+ *
+ * "Run scan now" uses whatever `DATA_MODE_BOOKMYSHOW` selects, and that is `mock` in every
+ * deployment today because server-side collection is blocked (see BOOKMYSHOW-FEASIBILITY.md
+ * §6). On a campaign holding real captured data, clicking it would inject ~178 fabricated
+ * theaters and thousands of invented readings straight into the table the user makes spend
+ * decisions from.
+ *
+ * That is not a hypothetical. The opt-in database test drives this same code path, and twice
+ * left 178 synthetic venues behind — codes like `KOCH01`, where a real BookMyShow venue is
+ * `ZTKC`. Synthetic codes never merge with real ones, so they accumulate as permanent
+ * phantoms, and the campaign detail page reads snapshots across ALL runs, so the ranking
+ * would blend invented numbers with measured ones.
+ *
+ * Mock stays fully usable on a campaign that has no real data — that is what makes the
+ * feature demoable without an Apify account. The rule is only that fixtures must never be
+ * mixed into measurements.
+ */
+export async function mockScanBlockedReason(campaignId: string): Promise<string | null> {
+  if (isBookMyShowLive()) return null;
+
+  const realRun = await prisma.bmsScanRun.findFirst({
+    where: { campaignId, provider: { not: "mock" }, status: { in: ["done", "partial"] } },
+    select: { provider: true },
+  });
+  if (!realRun) return null;
+
+  return (
+    "This campaign holds real captured data, and a server-side scan can only produce mock " +
+    "fixtures right now — BookMyShow blocks automated collection, so DATA_MODE_BOOKMYSHOW is " +
+    "'mock'. Running it would mix invented theaters and readings into measured ones. Use the " +
+    "local capture instead (scripts/bms-capture.mjs, or the desktop launcher)."
+  );
+}
+
 export async function markLatestRunFailed(campaignId: string, message: string): Promise<void> {
   try {
     const running = await prisma.bmsScanRun.findFirst({
