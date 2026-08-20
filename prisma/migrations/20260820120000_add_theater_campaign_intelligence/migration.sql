@@ -88,6 +88,7 @@ CREATE TABLE "bms_scan_runs" (
     "screenings_stored" INTEGER NOT NULL DEFAULT 0,
     "snapshots_stored" INTEGER NOT NULL DEFAULT 0,
     "records_skipped" INTEGER NOT NULL DEFAULT 0,
+    "records_unmapped" INTEGER NOT NULL DEFAULT 0,
     "error" TEXT,
     "started_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "finished_at" TIMESTAMP(3),

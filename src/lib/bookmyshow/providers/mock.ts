@@ -146,8 +146,17 @@ function buildShow(status: number, index: number, dateCode: string, venueCode: s
   };
 }
 
-/** One city that fails every scan, so the partial-failure UI is reachable in dev. */
-const ALWAYS_FAILS = "GOOL";
+/**
+ * Opt-in simulated failure, so the partial-scan UI is reachable in dev.
+ *
+ * Off by default: when it was always on, every mock scan finished as "Completed with gaps"
+ * and the first thing anyone saw was a yellow warning about a village cinema — which
+ * teaches people to ignore exactly the banner that matters most. Set
+ * BOOKMYSHOW_MOCK_FAIL_CITY=GOOL (or any region code) to exercise that path.
+ */
+function mockFailCity(): string | null {
+  return process.env.BOOKMYSHOW_MOCK_FAIL_CITY?.trim().toUpperCase() || null;
+}
 
 export class MockBookMyShowProvider implements BookMyShowProvider {
   readonly name = "mock" as const;
@@ -164,12 +173,13 @@ export class MockBookMyShowProvider implements BookMyShowProvider {
     const items: BmsScrapeItem[] = [];
 
     const codes = opts.regionCodes.length > 0 ? opts.regionCodes : KERALA_REGIONS.map((r) => r.code);
+    const failCity = mockFailCity();
 
     for (const code of codes) {
       for (const date of opts.dates) {
         const dateCode = toDateCode(date);
 
-        if (code === ALWAYS_FAILS) {
+        if (code === failCity) {
           items.push({
             cityCode: code,
             showDateCode: dateCode,

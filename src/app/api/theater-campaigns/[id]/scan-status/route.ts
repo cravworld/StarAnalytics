@@ -32,6 +32,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       screeningsStored: run.screeningsStored,
       snapshotsStored: run.snapshotsStored,
       recordsSkipped: run.recordsSkipped,
+      recordsUnmapped: run.recordsUnmapped,
       error: run.error,
       failedCities: run.cityResults.map((c) => ({
         cityCode: c.cityCode,

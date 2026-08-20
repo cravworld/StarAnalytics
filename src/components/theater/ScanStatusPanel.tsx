@@ -39,7 +39,11 @@ export function ScanStatusPanel({ detail }: { detail: CampaignDetail }) {
     <Card title="Last scan">
       <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center", fontSize: 12 }}>
         <StatusPill status={scan.status} />
-        {!detail.isLive ? (
+        {/* Keyed on what produced THIS scan, not on the current env var. Flipping
+            DATA_MODE_BOOKMYSHOW to live does not retroactively make yesterday's fixture
+            numbers real, and the badge has to keep saying so until a live scan replaces
+            them. */}
+        {scan.provider === "mock" ? (
           <span title="These figures come from the bundled fixture, not from BookMyShow.">
             <Pill kind="warn">Mock data</Pill>
           </span>
@@ -63,6 +67,29 @@ export function ScanStatusPanel({ detail }: { detail: CampaignDetail }) {
           </span>
         ) : null}
       </div>
+
+      {scan.recordsUnmapped > 0 ? (
+        // The loudest thing on this panel, deliberately. An unrecognised availStatus means
+        // the demand vocabulary the whole ranking rests on may no longer match what
+        // BookMyShow sends — and because unrecognised readings are excluded from the
+        // signal, the symptom is a table that quietly empties rather than an error.
+        <div
+          role="alert"
+          style={{
+            marginTop: 10,
+            fontSize: 12,
+            color: "var(--pencil-red)",
+            border: "1px solid rgba(129,0,31,.26)",
+            background: "rgba(129,0,31,.07)",
+            padding: "8px 10px",
+            borderRadius: 3,
+          }}
+        >
+          <strong>{scan.recordsUnmapped} shows returned an availability code we do not recognise.</strong>{" "}
+          BookMyShow may have changed how it reports availability. Demand levels and the ranking below may be
+          wrong — verify before acting on them.
+        </div>
+      ) : null}
 
       {scan.error ? (
         <div role="alert" style={{ marginTop: 10, fontSize: 12, color: "var(--pencil-red)" }}>

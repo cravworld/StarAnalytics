@@ -60,6 +60,8 @@ All server-side. `APIFY_TOKEN` is never exposed to the browser.
 | `BOOKMYSHOW_RUN_WAIT_MS` | `480000` | Wait budget per run. Must stay below the scan route's `maxDuration` (800s). |
 | `BOOKMYSHOW_CHARGE_PER_PAGE_USD` | `0.02` | Used to size the per-run Apify spend cap. |
 | `BOOKMYSHOW_MAX_CHARGE_USD` | `10` | Hard ceiling per run, enforced by Apify. |
+| `BOOKMYSHOW_MOCK_FAIL_CITY` | unset | Mock mode only. Set to a region code (e.g. `GOOL`) to simulate a city that always fails, exercising the partial-scan UI. |
+| `DATA_MODE_NOTIFIER` | `mock` | Existing project variable. `mock` = alerts log to console (dry run); `live` = email via Resend. |
 | `RUN_BOOKMYSHOW_INTEGRATION_TEST` | `false` | Opt-in live test (§6). |
 
 ### Database migration
@@ -104,8 +106,36 @@ showing the raw `availStatus` behind every reading.
 ### Reading the scan status panel
 
 It is there to make failure loud. A scan that could not read some cities lists them
-explicitly as **not scanned** — never as cities with no demand. If `Rows skipped` jumps,
-BookMyShow has probably changed something; check `demand.ts` and `normalize.ts`.
+explicitly as **not scanned** — never as cities with no demand.
+
+Two counters matter:
+
+- **Rows skipped** — rows that could not be read at all (missing show id, unparseable
+  time). A jump means BookMyShow changed a field shape.
+- **Unrecognised availability codes** — rendered as a red alert, and the more serious of
+  the two. It means BookMyShow returned an `availStatus` outside the documented `0–3`
+  vocabulary. Because unrecognised readings are excluded from demand signals, the symptom
+  of ignoring this is a priority table that *quietly empties* rather than an error. Any
+  non-zero value means stop and re-read `demand.ts` before acting on the ranking.
+
+## 3a. Alerts
+
+After each scheduled scan that read something, theaters in the **push here** band raise an
+`Alert` row and are sent through the existing `NotifierProvider`. No new notification
+machinery — the same seam the fan-page alerts use.
+
+- `DATA_MODE_NOTIFIER=mock` (default) logs to console. That is the dry-run mode.
+- `DATA_MODE_NOTIFIER=live` sends email via Resend, using the existing
+  `RESEND_API_KEY` / `ALERT_EMAIL_FROM` / `ALERT_EMAIL_TO`.
+
+Deduped per theater per campaign scan-interval window, so a 90-minute campaign cannot email
+the same "Palakkad is quiet" line sixteen times a day. Alerts are **never** raised off a
+failed scan, and every alert body carries the line stating it is based on availability
+labels rather than ticket sales.
+
+Alerts fire from the cron only, not from a manual "Scan now" — clicking scan to look at
+data should not mail anyone. Delivery failures are logged, not thrown: a mail outage must
+not fail a scan whose data landed correctly.
 
 ## 4. Scheduled scans
 
@@ -218,15 +248,17 @@ Established 2026-08-20; recheck before scaling up.
 ## 10. Tests
 
 ```
-npm run test:unit        # 214 tests; the live integration test skips unless opted in
+npm run test:unit        # 221 tests; the live integration test skips unless opted in
 npx tsc --noEmit         # npm run lint is broken project-wide, pre-existing
 npx next build
 ```
 
 Covered: normalization, missing/changed fields, unknown `availStatus` values, IST and
 past-midnight show handling, region mismatch, page errors, demand mapping and confidence,
-movement, priority scoring and its sample-size gate, the URL allowlist, and campaign
-validation. Two guard tests assert no user-facing string uses sales or occupancy wording.
+movement, priority scoring and its sample-size gate, the URL allowlist, campaign
+validation, that no secret reaches an API response or a client component, and that every
+exported Server Action calls `requireSession()`. Guard tests assert no user-facing string
+uses sales or occupancy wording.
 
 Apify is never called in the default suite.
 
@@ -239,5 +271,7 @@ Apify is never called in the default suite.
 - Scans are synchronous. If a Kerala-wide scan outgrows the wait budget, the migration path
   is the async handoff `ScoutRun` already models — `BmsScanRun` carries `apifyRunId` and
   `datasetId` columns for exactly that.
-- Alerts are not wired up. The thresholds are stored and drive the on-screen ranking, but
-  nothing sends anything yet; `NotifierProvider` is the seam when it is wanted.
+- Theater `cityCode` records where a venue was FIRST seen. BookMyShow lists the same venue
+  under several adjacent regions, so filtering by city is approximate at the boundaries
+  (an Angamaly venue may file under Kochi). Deduplication by `venueCode` is exact; region
+  attribution is not.

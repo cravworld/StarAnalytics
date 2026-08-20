@@ -812,6 +812,15 @@ model BmsScanRun {
   screeningsStored Int @default(0) @map("screenings_stored")
   snapshotsStored Int @default(0) @map("snapshots_stored")
   recordsSkipped  Int @default(0) @map("records_skipped")
+  // Shows whose availStatus was a value this codebase has never seen. Counted rather than
+  // skipped — the row is still stored, as `unknown`, with its raw status preserved.
+  //
+  // This counter is the alarm for a BookMyShow renumbering. Without it the failure is
+  // silent and severe: unknown readings are excluded from demand signals, so every theater
+  // would drift to "not enough data" and the priority table would quietly empty with no
+  // error anywhere. A non-zero value here means stop and re-read demand.ts before trusting
+  // any ranking.
+  recordsUnmapped Int @default(0) @map("records_unmapped")
 
   error String?
 

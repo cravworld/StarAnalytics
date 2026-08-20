@@ -11,7 +11,7 @@
 //     campaign from being scanned every tick.
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { runCampaignScan } from "@/lib/data/theaterCampaigns";
+import { raiseCampaignAlerts, runCampaignScan } from "@/lib/data/theaterCampaigns";
 import { isMonitoringEnabled, bookMyShowConfigError } from "@/lib/bookmyshow/providers";
 import { releaseCronLock, tryAcquireCronLock } from "@/lib/cronLock";
 import { isApifyQuotaFailure } from "@/lib/apify/quotaBreaker";
@@ -60,6 +60,12 @@ export async function GET(request: Request) {
     for (const campaign of due) {
       try {
         const result = await runCampaignScan(campaign.id, { now });
+        // Alerts only on a scan that actually read something. Alerting off a failed scan
+        // would be the exact false signal this feature is built to avoid — "no demand
+        // anywhere" when the truth is "we could not look".
+        if (result.status !== "error") {
+          await raiseCampaignAlerts(campaign.id, { now });
+        }
         results.push({ campaignId: campaign.id, status: result.status });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

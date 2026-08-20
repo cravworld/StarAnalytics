@@ -2,7 +2,8 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { readDemand, type DemandLevel } from "@/lib/bookmyshow/demand";
-import { normalizeCityPage } from "@/lib/bookmyshow/normalize";
+import { istDateOnly, normalizeCityPage } from "@/lib/bookmyshow/normalize";
+import { getNotifierChannel, getNotifierProvider } from "@/lib/providers";
 import { getBookMyShowProvider, isBookMyShowLive } from "@/lib/bookmyshow/providers";
 import { scoreTheater, type ShowSignal, type TheaterPriority } from "@/lib/bookmyshow/scoring";
 import { resolveRegions } from "@/lib/bookmyshow/urls";
@@ -85,13 +86,20 @@ export async function listTheaterCampaigns() {
   }));
 }
 
-/** The dates a scan should cover, clamped to the campaign's screening window. */
+/**
+ * The dates a scan should cover, clamped to the campaign's screening window.
+ *
+ * Anchored on the IST calendar day, not the UTC one. Those diverge for 5.5 hours every
+ * evening: a scan running at 19:00 UTC is already on the next day in India, and a UTC
+ * anchor would spend its first slot re-scanning a day that has finished there while
+ * missing the far end of the horizon.
+ */
 export function scanDates(campaign: {
   screeningStartDate: Date | null;
   screeningEndDate: Date | null;
 }, now: Date, horizonDays: number): Date[] {
   const dates: Date[] = [];
-  const start = midnightUtc(now);
+  const start = istDateOnly(now);
   for (let i = 0; i < horizonDays; i++) {
     const d = new Date(start.getTime() + i * 86_400_000);
     if (campaign.screeningStartDate && d < midnightUtc(campaign.screeningStartDate)) continue;
@@ -122,6 +130,7 @@ export interface ScanResult {
   screeningsStored: number;
   snapshotsStored: number;
   recordsSkipped: number;
+  recordsUnmapped: number;
   error: string | null;
 }
 
@@ -178,6 +187,7 @@ export async function runCampaignScan(
       screeningsStored: 0,
       snapshotsStored: 0,
       recordsSkipped: 0,
+      recordsUnmapped: 0,
       error: null,
     };
   }
@@ -210,6 +220,7 @@ export async function runCampaignScan(
       screeningsStored: 0,
       snapshotsStored: 0,
       recordsSkipped: 0,
+      recordsUnmapped: 0,
       error: message,
     };
   }
@@ -220,6 +231,7 @@ export async function runCampaignScan(
   let screeningsStored = 0;
   let snapshotsStored = 0;
   let recordsSkipped = 0;
+  let recordsUnmapped = 0;
   let citiesSucceeded = 0;
   const succeededCityCodes = new Set<string>();
   const succeededDates = new Set<string>();
@@ -228,18 +240,29 @@ export async function runCampaignScan(
     const normalized = normalizeCityPage(item);
     recordsSkipped += normalized.skipped.length;
 
+    // The date code comes off an Apify dataset item, so it is untrusted input. A malformed
+    // one must fail THIS city, not throw out of the loop and abandon the whole scan —
+    // degrading to partial results is the property the entire pipeline is built around.
+    const showDate = dateFromCode(normalized.showDateCode);
+    if (!showDate) {
+      console.warn(
+        `${SCAN_LOG} unusable show date campaign=${campaignId} city=${normalized.cityCode} code=${String(normalized.showDateCode)}`,
+      );
+      continue;
+    }
+
     await prisma.bmsScanCityResult.upsert({
       where: {
         scanRunId_cityCode_showDate: {
           scanRunId: scanRun.id,
           cityCode: normalized.cityCode,
-          showDate: dateFromCode(normalized.showDateCode),
+          showDate,
         },
       },
       create: {
         scanRunId: scanRun.id,
         cityCode: normalized.cityCode,
-        showDate: dateFromCode(normalized.showDateCode),
+        showDate,
         status: normalized.status,
         returnedCityCode: normalized.returnedCityCode,
         venueCount: normalized.theaters.length,
@@ -270,13 +293,14 @@ export async function runCampaignScan(
     theatersStored += stored.theaters;
     screeningsStored += stored.screenings;
     snapshotsStored += stored.snapshots;
+    recordsUnmapped += stored.unmapped;
   }
 
   const disappeared = await markDisappeared({
     campaignId,
     scanStartedAt: now,
     cityCodes: [...succeededCityCodes],
-    showDates: [...succeededDates].map(dateFromCode),
+    showDates: [...succeededDates].map(dateFromCode).filter((d): d is Date => d !== null),
   });
 
   const status: ScanResult["status"] =
@@ -293,13 +317,22 @@ export async function runCampaignScan(
       screeningsStored,
       snapshotsStored,
       recordsSkipped,
+      recordsUnmapped,
       error: citiesSucceeded === 0 ? "No city page could be read in this scan" : null,
     },
   });
 
   console.log(
-    `${SCAN_LOG} run finished campaign=${campaignId} status=${status} cities=${citiesSucceeded}/${items.length} theaters=${theatersStored} screenings=${screeningsStored} snapshots=${snapshotsStored} skipped=${recordsSkipped} disappeared=${disappeared}`,
+    `${SCAN_LOG} run finished campaign=${campaignId} status=${status} cities=${citiesSucceeded}/${items.length} theaters=${theatersStored} screenings=${screeningsStored} snapshots=${snapshotsStored} skipped=${recordsSkipped} unmapped=${recordsUnmapped} disappeared=${disappeared}`,
   );
+
+  if (recordsUnmapped > 0) {
+    // Loud on purpose. This means BookMyShow returned an availStatus this codebase has
+    // never seen, which invalidates the demand vocabulary the whole ranking rests on.
+    console.error(
+      `${SCAN_LOG} ${recordsUnmapped} shows carried an UNRECOGNISED availStatus (campaign=${campaignId}). Demand levels may be wrong — review src/lib/bookmyshow/demand.ts before trusting this ranking.`,
+    );
+  }
 
   return {
     scanRunId: scanRun.id,
@@ -310,6 +343,7 @@ export async function runCampaignScan(
     screeningsStored,
     snapshotsStored,
     recordsSkipped,
+    recordsUnmapped,
     error: null,
   };
 }
@@ -326,9 +360,10 @@ async function ingestCityResult(
   campaignId: string,
   scanRunId: string,
   normalized: NormalizedCityResult,
-): Promise<{ theaters: number; screenings: number; snapshots: number }> {
+): Promise<{ theaters: number; screenings: number; snapshots: number; unmapped: number }> {
   return prisma.$transaction(async (tx) => {
     const theaterIdByVenue = new Map<string, string>();
+    let unmapped = 0;
 
     for (const t of normalized.theaters) {
       const theater = await tx.theater.upsert({
@@ -387,6 +422,7 @@ async function ingestCityResult(
       });
 
       const reading = readDemand(s.availStatus);
+      if (reading.unmapped) unmapped++;
       await tx.availabilitySnapshot.upsert({
         // The idempotency guarantee: one observation per show per scan run, enforced by
         // the database. A retried scan updates in place instead of doubling the history.
@@ -415,6 +451,7 @@ async function ingestCityResult(
       theaters: normalized.theaters.length,
       screenings: normalized.screenings.length,
       snapshots,
+      unmapped,
     };
   });
 }
@@ -447,10 +484,19 @@ async function markDisappeared(opts: {
   return result.count;
 }
 
-function dateFromCode(code: string): Date {
+/**
+ * Returns null for anything that is not a YYYYMMDD code.
+ *
+ * Null rather than a `new Date(0)` fallback on purpose: a 1970 date written into a scan
+ * result is a plausible-looking wrong value that would sit in the table forever, which is
+ * worse than an explicitly skipped city.
+ */
+function dateFromCode(code: string | null | undefined): Date | null {
+  if (typeof code !== "string") return null;
   const m = code.match(/^(\d{4})(\d{2})(\d{2})$/);
-  if (!m) return new Date(0);
-  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 export interface TheaterRow {
@@ -492,6 +538,7 @@ export interface CampaignDetail {
     citiesRequested: number;
     citiesSucceeded: number;
     recordsSkipped: number;
+    recordsUnmapped: number;
     failedCities: { cityCode: string; status: string; error: string | null }[];
   } | null;
   theaters: TheaterRow[];
@@ -528,11 +575,48 @@ export async function getTheaterCampaignDetail(
       where: { campaignId, disappearedAt: null, showDateTime: { gte: new Date(now.getTime() - 3_600_000) } },
       include: {
         theater: true,
-        snapshots: { orderBy: { capturedAt: "asc" } },
       },
       orderBy: { showDateTime: "asc" },
     }),
   ]);
+
+  // Snapshots are fetched in three BOUNDED queries rather than as a nested include.
+  //
+  // The include version pulled every snapshot for every show — this table is append-only
+  // and grows by one row per show per scan, so at a 90-minute cadence across Kerala it
+  // reaches tens of thousands of rows within days, all to render one table that only needs
+  // three facts per show: the latest reading, the first one, and how many there are.
+  // `distinct` on an ordered findMany gives the first two in one row per screening each.
+  const screeningIds = screenings.map((s) => s.id);
+  const [latestSnaps, firstSnaps, counts] = await Promise.all([
+    screeningIds.length
+      ? prisma.availabilitySnapshot.findMany({
+          where: { screeningId: { in: screeningIds } },
+          orderBy: [{ screeningId: "asc" }, { capturedAt: "desc" }],
+          distinct: ["screeningId"],
+          select: { screeningId: true, demandLevel: true, confidence: true },
+        })
+      : [],
+    screeningIds.length
+      ? prisma.availabilitySnapshot.findMany({
+          where: { screeningId: { in: screeningIds } },
+          orderBy: [{ screeningId: "asc" }, { capturedAt: "asc" }],
+          distinct: ["screeningId"],
+          select: { screeningId: true, demandLevel: true },
+        })
+      : [],
+    screeningIds.length
+      ? prisma.availabilitySnapshot.groupBy({
+          by: ["screeningId"],
+          where: { screeningId: { in: screeningIds } },
+          _count: { _all: true },
+        })
+      : [],
+  ]);
+
+  const latestById = new Map(latestSnaps.map((s) => [s.screeningId, s]));
+  const firstById = new Map(firstSnaps.map((s) => [s.screeningId, s]));
+  const countById = new Map(counts.map((c) => [c.screeningId, c._count._all]));
 
   const byTheater = new Map<string, { theater: (typeof screenings)[number]["theater"]; signals: ShowSignal[]; rows: typeof screenings }>();
   const byLevel: Record<DemandLevel, number> = {
@@ -544,10 +628,10 @@ export async function getTheaterCampaignDetail(
   };
 
   for (const s of screenings) {
-    const snaps = s.snapshots;
-    if (snaps.length === 0) continue;
-    const latest = snaps[snaps.length - 1];
-    const first = snaps[0];
+    const latest = latestById.get(s.id);
+    if (!latest) continue;
+    const snapshotCount = countById.get(s.id) ?? 1;
+    const first = firstById.get(s.id);
     byLevel[latest.demandLevel as DemandLevel] = (byLevel[latest.demandLevel as DemandLevel] ?? 0) + 1;
 
     let entry = byTheater.get(s.theaterId);
@@ -560,8 +644,8 @@ export async function getTheaterCampaignDetail(
       showDateTime: s.showDateTime,
       latestLevel: latest.demandLevel as DemandLevel,
       latestConfidence: latest.confidence as "high" | "low" | "none",
-      firstLevel: snaps.length > 1 ? (first.demandLevel as DemandLevel) : null,
-      snapshotCount: snaps.length,
+      firstLevel: snapshotCount > 1 && first ? (first.demandLevel as DemandLevel) : null,
+      snapshotCount,
     });
     entry.rows.push(s);
   }
@@ -620,6 +704,7 @@ export async function getTheaterCampaignDetail(
           citiesRequested: lastScan.citiesRequested,
           citiesSucceeded: lastScan.citiesSucceeded,
           recordsSkipped: lastScan.recordsSkipped,
+          recordsUnmapped: lastScan.recordsUnmapped,
           failedCities: lastScan.cityResults.map((c) => ({
             cityCode: c.cityCode,
             status: c.status,
@@ -666,6 +751,79 @@ export async function getTheaterShows(campaignId: string, theaterId: string) {
       styleId: snap.styleId,
     })),
   }));
+}
+
+/**
+ * Raise alerts for theaters that came out of a scan in the "push here" band.
+ *
+ * Uses the existing NotifierProvider seam, so this is console-only (a dry run) until
+ * DATA_MODE_NOTIFIER flips to "live" — no new notification machinery.
+ *
+ * Deduped per (campaign, theater, scan-interval window) via the existing Alert table:
+ * a campaign scanned every 90 minutes would otherwise email the same "Palakkad is quiet"
+ * line 16 times a day, which trains the recipient to ignore it. Alert delivery failures
+ * are caught and logged rather than thrown — a mail outage must not fail a scan whose data
+ * landed correctly.
+ */
+export async function raiseCampaignAlerts(
+  campaignId: string,
+  opts: { now?: Date } = {},
+): Promise<{ raised: number; suppressed: number }> {
+  const now = opts.now ?? new Date();
+  const detail = await getTheaterCampaignDetail(campaignId, { now });
+  if (!detail) return { raised: 0, suppressed: 0 };
+
+  const targets = detail.theaters.filter((t) => t.priority.band === "high");
+  if (targets.length === 0) return { raised: 0, suppressed: 0 };
+
+  const windowStart = new Date(now.getTime() - detail.campaign.scanIntervalMinutes * 60_000);
+  const notifier = getNotifierProvider();
+  const channel = getNotifierChannel();
+
+  let raised = 0;
+  let suppressed = 0;
+
+  for (const theater of targets) {
+    const type = `bms_demand:${campaignId}:${theater.theaterId}`;
+    const recent = await prisma.alert.findFirst({
+      where: { type, createdAt: { gte: windowStart } },
+      select: { id: true },
+    });
+    if (recent) {
+      suppressed++;
+      continue;
+    }
+
+    const message = [
+      `${detail.campaign.movieName} — ${theater.name}, ${theater.cityName}`,
+      `${theater.priority.wideOpenShows} of ${theater.priority.eligibleShows} shows still wide open.`,
+      `Confidence: ${theater.priority.confidence}.`,
+      `Reasons: ${theater.priority.reasons.join(" ")}`,
+      // Never omitted. The recipient is being asked to spend money on the strength of an
+      // availability label, and must not read it as a sales figure.
+      `Based on BookMyShow availability labels, not ticket sales. BookMyShow publishes no seat counts.`,
+    ].join("\n");
+
+    const alert = await prisma.alert.create({
+      data: { type, message, channel, campaignId: null },
+    });
+
+    try {
+      await notifier.send({
+        id: alert.id,
+        type,
+        message,
+        createdAt: alert.createdAt.toISOString(),
+      });
+      await prisma.alert.update({ where: { id: alert.id }, data: { deliveredAt: new Date() } });
+    } catch (err) {
+      console.error(`${SCAN_LOG} alert delivery failed campaign=${campaignId} theater=${theater.theaterId}:`, err);
+    }
+    raised++;
+  }
+
+  console.log(`${SCAN_LOG} alerts campaign=${campaignId} raised=${raised} suppressed=${suppressed} channel=${channel}`);
+  return { raised, suppressed };
 }
 
 export async function getScanRun(scanRunId: string) {
