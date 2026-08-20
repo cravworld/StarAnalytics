@@ -80,10 +80,17 @@ Four states observed live across the Kerala sweep:
 
 | `availStatus` | Pill | Label | Reading |
 |---|---|---|---|
-| `3` | green | *(none)* | wide open |
-| `2` | orange | `fast_filling` | filling |
-| `1` | orange | *(none)* | tighter than `2` |
-| `0` | — | *(none)* | sold out / not sellable — **semantics unconfirmed** |
+| `3` | green | *(none)* | wide open — **confirmed** |
+| `2` | orange | `fast_filling` | filling — **confirmed** via analytics metadata |
+| `1` | orange | *(none)* | distinct from `2`; **position on the scale unverified** |
+| `0` | — | *(none)* | sold out / not sellable — **semantics unverified** |
+
+Only `3` and `2` are evidenced. For `1` the evidence supports *distinct from 2*, not
+*tighter than 2* — that ordering is inferred from the pill colour alone. Its
+distribution is also uneven (13/150 in Kochi, 1/158 in Thiruvananthapuram, 5/5 in
+Thalassery), so any headline number resting on it is provisional. The 48-hour delta
+test in §9 settles it: if `1` really is tighter than `2`, shows should transition
+2 → 1 and never 1 → 2.
 
 `availStatus` is the field to normalize on. It is finer-grained than the UI (1 and 2
 render the same colour) and far more stable than the styled-components class hashes
@@ -192,37 +199,30 @@ venue-*city* rows, not distinct theaters: BookMyShow city regions overlap
 geographically (a Mookkannoor/Angamaly venue appears under both Kochi and Angamaly), so
 the real distinct-theater count is lower and requires dedup by `venueCode`.
 
-### Coverage gap — the most important open item
+### Coverage — scope is BookMyShow-listed theaters only
 
-The confirmed real footprint is **285 Kerala theaters** playing this film. This sweep
-found **178 venue-city rows across 30 BookMyShow city regions**, and the deduped
-distinct-theater count is lower still (regions overlap — a Mookkannoor/Angamaly venue
-appears under both Kochi and Angamaly).
+The real Kerala footprint for this film is **285 theaters**. This sweep found **178
+venue-city rows across 30 BookMyShow city regions**; the deduped distinct-theater count
+is lower still, because BookMyShow city regions overlap geographically (a
+Mookkannoor/Angamaly venue appears under both Kochi and Angamaly).
 
-**So BookMyShow sees at best ~62% of the real Kerala footprint, and likely less.**
+**Confirmed with the campaign owner (2026-08-20): not all 285 theaters sell through
+BookMyShow, and the feature is intentionally scoped to those that do.** Many Kerala
+single screens use local or counter booking only and are structurally invisible to this
+data source. That is an accepted limitation, not a defect to engineer around.
 
-Three candidate explanations, in order of expected contribution:
+Two things still follow from it:
 
-1. **Theaters that do not sell through BookMyShow at all.** Many Kerala single screens
-   use local/counter booking only. These are structurally invisible to this data source
-   and always will be.
-2. **Incomplete region enumeration.** The 30 city regions came from
-   `sitemap/movie-shows.xml`, which is an SEO artifact and carries no completeness
-   guarantee. BookMyShow's own region list may contain Kerala regions the sitemap
-   omits. **A production collector should enumerate cities from BookMyShow's region
-   list, not from the sitemap**, and treat the sitemap purely as URL-shape confirmation.
-3. Venue-region overlap — this *reduces* the count further, so it widens the gap rather
-   than closing it.
+1. **Label aggregates honestly.** A rollup like "17.5% of shows filling" describes the
+   BookMyShow-listed subset, not the Kerala market. The UI should say so. A theater
+   absent from BookMyShow is not a theater with no audience.
+2. **Enumerate regions from BookMyShow, not the sitemap.** The 30 city regions here came
+   from `sitemap/movie-shows.xml`, an SEO artifact with no completeness guarantee. A
+   production collector should enumerate cities from BookMyShow's own region list and
+   use the sitemap only to confirm URL shape — otherwise theaters that *are* listed
+   could still be missed.
 
-**Consequence for the product, and it is not a small one.** A theater absent from
-BookMyShow is not a theater with no audience. Any Kerala-wide rollup ("X% of shows
-filling") computed over BookMyShow venues alone is a statement about the BookMyShow
-subset, not about Kerala, and must be labelled that way. Per-theater signals stay valid
-for covered theaters; aggregate market conclusions do not.
-
-**Before trusting any Kerala-wide number, reconcile the 285-theater list against
-`venueCode` coverage** and record which theaters are out of scope. That reconciliation
-is a prerequisite, not a nice-to-have.
+Deduping by `venueCode` is required before any distinct-theater count is displayed.
 
 ## 7. What this supports as a product
 
@@ -255,22 +255,54 @@ renders per scan, too much to run hourly. A realistic MVP is 6–10 target citie
 dates ≈ 18–30 renders per scan at 60–90 minute intervals. Cost needs sizing against real
 actor pricing before `BOOKMYSHOW_MONITORING_ENABLED` is flipped on.
 
+### Untested assumption: will a cloud IP get the same access?
+
+**This is the biggest open risk in the document.** Every observation above was made
+from a normal residential browser session. During the same spike, a server-side fetch
+from Claude Code's infrastructure was **blocked at BookMyShow's edge** — plain
+`curl` reached `robots.txt` and the sitemaps fine, but the tooling's own fetcher could
+not retrieve pages.
+
+An Apify browser actor runs from a datacenter IP: the same class of client. Nothing here
+demonstrates that `/buytickets/` loads and hydrates from cloud infrastructure. If it
+does not, the remedies are proxies and stealth fingerprinting — both ruled out under
+constraint #6 — and the recommendation flips from "proceed" to "proceed only via an
+authorized feed."
+
+**Phase 3 step zero, before any schema work:** one Apify browser-actor run against one
+Kochi URL, asserting that the region code comes back correct and `showtimeWidgets` is
+populated. That single run is worth more than any amount of further design.
+
+### Compliance guardrail for whoever implements this
+
+The collector reads `window.__INITIAL_STATE__` **from the rendered page**. It must not
+later be "optimized" into calling the underlying XHR endpoint directly. `/getJSData/`
+and `/getHTML*` are robots-disallowed, and rendering the permitted public page is the
+line the entire compliance position in §4 rests on. Do not drift across it.
+
 **Blocker on live verification:** the Apify account is past its monthly spend cap
 ($29.24 / $29) and self-heals around **2026-08-30**. Until then fixtures/mock are the
-only working path and the opt-in integration test cannot pass.
+only working path, the opt-in integration test cannot pass, and step zero above cannot
+run.
 
 ## 9. Recommendation
 
 Proceed, scoped as a demand-pressure and show-retention tracker.
 
-Three things still need confirming before the schema is fixed:
+Scope is settled: BookMyShow-listed theaters only (§6).
 
-1. The semantics of `availStatus: 0`.
-2. Whether `availStatus` moves observably within a day — a signal that never changes is
-   not a signal. Both (1) and (2) are answered by logging a sample of shows every 30
-   minutes for ~48 hours and reading the deltas. Cheap, and it de-risks the data model.
-3. **The 178-vs-285 coverage gap (§6).** This one is a go/no-go input, not a detail: it
-   sets whether this tool reports on Kerala or on the BookMyShow subset of Kerala.
+Three things still need confirming before the schema is fixed, in priority order:
+
+1. **Can an Apify cloud actor load these pages at all (§8)?** Go/no-go for the whole
+   collection approach. One run answers it. Blocked until the Apify cap clears
+   ~2026-08-30.
+2. **The semantics of `availStatus: 0`, and where `availStatus: 1` sits on the scale.**
+   Both currently inferred.
+3. **Whether `availStatus` moves observably within a day** — a signal that never changes
+   is not a signal.
+
+(2) and (3) are answered together by logging a sample of shows every 30 minutes for ~48
+hours and reading the deltas. Cheap, and it de-risks the entire data model.
 
 Do not ship the occupancy percentage, the seats-per-hour velocity metric, or any
 "tickets sold" wording from the original brief. The data does not support them.
