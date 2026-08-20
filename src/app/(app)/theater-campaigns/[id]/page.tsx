@@ -67,7 +67,7 @@ export default async function TheaterCampaignDetailPage({
           are <strong>estimated demand signals from public availability labels</strong> — BookMyShow publishes
           no seat counts, so this is not occupancy and not ticket sales.
         </div>
-        <TheaterPriorityTable campaignId={campaign.id} rows={theaters} />
+        <TheaterPriorityTable campaignId={campaign.id} rows={theaters} now={Date.now()} />
       </Card>
     </>
   );

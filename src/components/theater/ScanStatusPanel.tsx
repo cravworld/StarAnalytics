@@ -1,15 +1,11 @@
 import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
 import type { CampaignDetail } from "@/lib/data/theaterCampaigns";
+import { formatIstDateTime } from "@/lib/format";
 
 function when(d: Date | null | undefined): string {
   if (!d) return "–";
-  return new Date(d).toLocaleString(undefined, {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatIstDateTime(d);
 }
 
 /**

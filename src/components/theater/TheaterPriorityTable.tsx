@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { formatHoursUntil, formatIstDateTime } from "@/lib/format";
 import { ConfidencePill, PriorityPill } from "./DemandPill";
 import type { TheaterRow } from "@/lib/data/theaterCampaigns";
 
@@ -23,31 +24,27 @@ const TD: React.CSSProperties = {
   verticalAlign: "top",
 };
 
-function hoursUntilLabel(d: Date | null): string {
-  if (!d) return "–";
-  const hours = (new Date(d).getTime() - Date.now()) / 3_600_000;
-  if (hours < 0) return "started";
-  if (hours < 1) return "<1h";
-  if (hours < 48) return `${Math.round(hours)}h`;
-  return `${Math.round(hours / 24)}d`;
+// now is passed in from the server render rather than read here: Date.now() at render time
+// differs between the SSR pass and hydration, and a value near a boundary flips "1h" to
+// "<1h" between them. One timestamp for both passes removes the mismatch entirely.
+function hoursUntilLabel(d: Date | null, now: number): string {
+  return formatHoursUntil(d, now);
 }
 
 function showTime(d: Date | null): string {
   if (!d) return "–";
-  return new Date(d).toLocaleString(undefined, {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatIstDateTime(d);
 }
 
 export function TheaterPriorityTable({
   campaignId,
   rows,
+  now,
 }: {
   campaignId: string;
   rows: TheaterRow[];
+  /** Server render time. See hoursUntilLabel. */
+  now: number;
 }) {
   const [city, setCity] = useState("");
   const [band, setBand] = useState("");
@@ -156,7 +153,7 @@ export function TheaterPriorityTable({
                 </td>
                 <td style={TD}>{r.cityName}</td>
                 <td style={TD}>{showTime(r.nextShowAt)}</td>
-                <td style={TD}>{hoursUntilLabel(r.nextShowAt)}</td>
+                <td style={TD}>{hoursUntilLabel(r.nextShowAt, now)}</td>
                 <td style={TD}>{r.priority.eligibleShows}</td>
                 <td style={TD}>
                   {r.priority.wideOpenShows}

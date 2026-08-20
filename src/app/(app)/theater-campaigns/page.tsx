@@ -3,17 +3,13 @@ import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
 import { listTheaterCampaigns } from "@/lib/data/theaterCampaigns";
 import { isBookMyShowLive } from "@/lib/bookmyshow/providers";
+import { formatIstDateTime } from "@/lib/format";
 
 export const metadata = { title: "Theater Campaigns" };
 
 function when(d: Date | null | undefined): string {
   if (!d) return "never";
-  return new Date(d).toLocaleString(undefined, {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatIstDateTime(d);
 }
 
 export default async function TheaterCampaignsPage() {
