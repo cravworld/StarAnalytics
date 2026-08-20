@@ -50,6 +50,25 @@ export interface NormalizedScoutItem {
   raw: ActorItem;
 }
 
+// DPDP data minimization — same reasoning and same narrow scope as minimizeRaw() in
+// apify-normalize.ts (see that comment for why this is deliberately not an allowlist).
+// These three identify the candidate or their specific posts and are read by nothing:
+// `profile_url` is a URL form of `profile_username`, which is kept and is what the app
+// actually uses; the two post IDs point at individual pieces of a third party's content.
+// Every derived metric stays — dropping one here cannot be undone for future scrapes,
+// and ~20 of them are unused but harmless (DATA-PRIVACY.md open item 4).
+//
+// No Facebook counterpart: apify-scout-normalize-facebook.ts has no unused identifying
+// field of this kind, and that path has never run in production (zero Facebook
+// candidates as of 2026-08-20).
+const SCOUT_DROPPED = ["profile_url", "most_viral_post_id", "most_engaged_post_id"];
+
+function minimizeScoutRaw(item: ActorItem): ActorItem {
+  const out: ActorItem = { ...item };
+  for (const key of SCOUT_DROPPED) delete out[key];
+  return out;
+}
+
 export function normalizeScoutItem(item: ActorItem): NormalizedScoutItem {
   return {
     profileUsername: str(item, "profile_username"),
@@ -65,6 +84,6 @@ export function normalizeScoutItem(item: ActorItem): NormalizedScoutItem {
     contentMixImagePct: num(item, "content_mix_image_pct"),
     mostEngagedPostUrl: str(item, "most_engaged_post_link"),
     note: str(item, "note"),
-    raw: item,
+    raw: minimizeScoutRaw(item),
   };
 }

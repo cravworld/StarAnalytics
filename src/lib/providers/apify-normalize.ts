@@ -39,6 +39,41 @@ function mediaType(item: ActorItem): RawPost["mediaType"] {
   return t || "image";
 }
 
+// DPDP data minimization (DATA-PRIVACY.md, "What raw scrape payload actually contains").
+// The actor item is stored verbatim as an ingestion artifact, and the first real
+// audit:raw-payload run (2026-08-20) found it carries a commenter's real name and
+// profile photo URL at 100% presence — a materially larger data class than the
+// "comment text + author handle" this app is documented as collecting. Nothing reads
+// these fields. Dropped here at ingest rather than retained for
+// RAW_PAYLOAD_RETENTION_DAYS and pruned later.
+//
+// Deliberately narrow, and the narrowness is the point. Only fields that BOTH identify a
+// person AND have no code reference are removed; every derived metric stays, because
+// `raw` exists precisely to be the artifact you go back to, and a field dropped here
+// cannot be re-derived for anything scraped afterwards. `ownerUsername` also stays — it
+// is the handle, it is already its own column, and removing it would break nothing but
+// gain nothing.
+//
+// `hashtags` must survive: backfillCampaignLink() in apify-public-content.ts queries
+// `raw -> 'hashtags'` in SQL. It is the one field here that is genuinely read back.
+const RAW_DROPPED_TOP_LEVEL = ["ownerFullName", "ownerProfilePicUrl"];
+const RAW_DROPPED_OWNER = ["full_name", "profile_pic_url", "profile_pic_id"];
+
+function minimizeRaw(item: ActorItem): ActorItem {
+  const out: ActorItem = { ...item };
+  for (const key of RAW_DROPPED_TOP_LEVEL) delete out[key];
+
+  // The comment actor nests the commenter under `owner`; strip inside it without
+  // disturbing the rest of that object (id/username/is_verified and friends stay).
+  const owner = out.owner;
+  if (owner && typeof owner === "object" && !Array.isArray(owner)) {
+    const cleaned: ActorItem = { ...(owner as ActorItem) };
+    for (const key of RAW_DROPPED_OWNER) delete cleaned[key];
+    out.owner = cleaned;
+  }
+  return out;
+}
+
 // videoViewCount/videoPlayCount are NOT true reach (a private Insights metric) — map
 // them to null rather than let them masquerade as reach. See AGENTS.md Phase 1 §5.
 function toRawPost(item: ActorItem, source: RawPost["source"]): RawPost {
@@ -59,7 +94,7 @@ function toRawPost(item: ActorItem, source: RawPost["source"]): RawPost {
     comments: num(item, "commentsCount") ?? 0,
     saves: null,
     shares: null,
-    raw: item,
+    raw: minimizeRaw(item),
   };
 }
 
@@ -116,7 +151,7 @@ export function normalizeCommentItem(item: ActorItem, postId: string): Normalize
     authorHandle: str(item, "ownerUsername"),
     text: str(item, "text") ?? "",
     postedAt: str(item, "timestamp"),
-    raw: item,
+    raw: minimizeRaw(item),
   };
 }
 
