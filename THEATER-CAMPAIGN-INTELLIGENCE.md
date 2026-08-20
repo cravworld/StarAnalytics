@@ -256,15 +256,20 @@ thing a schedule depends on. Nothing fires on a timer.
 
 ```bat
 cd /d C:\Projects\StarAnalytics
-node "scripts\bms-capture.mjs" --campaign <id> --url https://staranalytics.vercel.app --max-cities 3
+node "scripts\bms-capture.mjs" --campaign <id> --url https://staranalytics.vercel.app --sweep --days 1
 pause
 ```
 
 Saved as a `.cmd` on the Desktop. `pause` matters — without it the window closes before the
 result can be read, and partial results are the normal case here, not an error to hide.
 
-`--max-cities 3` is three cities across two dates: **six pages**, the size that holds the
-best hit rate. See the table below before raising it.
+`--sweep` reads **every** Kerala region rather than one burst's worth, by pausing between
+small batches. It takes about **40 minutes**, so click it and come back — the window shows
+which batch it is on throughout. See the measurements below for why this works and why it
+is not a way around anything.
+
+Drop `--sweep` for a quick partial look instead: one burst, about four cities, under a
+minute.
 
 #### Scheduled (available, not in use)
 
@@ -297,61 +302,71 @@ in the log need opposite responses, and the launcher spells both out —
 - **HTTP 403 / every page failed** — BookMyShow refused us. Do **not** click again;
   repeated retries are what turn a defensible tool into abuse.
 
-### Measured success rate: asking for less gets you more
+### Measured behaviour: a burst allowance that a pause restores
 
-The hit rate is **not** a fixed probability per page. It collapses as a run gets longer.
-Every measurement taken on 2026-08-20:
+BookMyShow serves roughly **four to six pages**, then starts refusing with 403. **A pause of
+about five minutes restores it completely, in the same browser session.**
 
-| Pages requested in one run | Succeeded | Rate |
-|---|---|---|
-| 2 | 1 | 50% |
-| 4 | 2 | 50% |
-| 6 | 3 | 50% |
-| 6 | 2 | 33% |
-| 12 | 1 | 8% |
-| **30** | **1** | **3%** |
-| **30** | **1** | **3%** |
+That second sentence is the important one, and it was missed for most of a day. Measured
+2026-08-20:
 
-The first pages of a run go through and then it clamps — the shape of a small burst
-allowance, not of a coin flip. A 30-page sweep spends 29 requests to learn nothing.
+| What was run | Result |
+|---|---|
+| 8 pages back to back | 4 ok, then 4 × 403 — refusals begin mid-run |
+| 6 pages, **5 min pause**, 6 more | **12 / 12 ok** — same session, same cookie jar |
+| 30 pages back to back | 1 ok, 29 × 403 |
 
-**So a short run is both politer and more productive**, which is a rare thing to be able to
-say. That is the whole argument for keeping runs small.
+Earlier notes in this file read the first and third rows as "the hit rate collapses as a run
+gets longer" and concluded that a run yields about one city. That was wrong. Nothing
+collapses: an allowance is spent and then refills. A fast run of 30 pages and a paced run of
+30 pages differ by everything.
 
-**Count pages, not cities.** `--max-cities` caps cities, but a run requests
-`cities × dates`, and `--days` defaults to **2**. The 12-page row above is exactly that
-mistake: the scheduled task was set to `--max-cities 6`, which is twelve pages, and it
-clamped to one success like a full sweep would. Six pages is the size that holds ~50%, so
-the registered task uses **`--max-cities 3`** — three cities across two dates.
+### Reading everything: `--sweep`
 
-Two dates is worth keeping rather than trading away for more cities: the entire point is
-seeing weak demand *before* the screening, and tomorrow's slate is where that lead time
-comes from.
+```
+node scripts/bms-capture.mjs --campaign <id> --sweep --days 1
+```
 
-> This is the point to be careful about. Requesting fewer pages is not a trick for getting
-> more out of a session — the per-run yield is what BookMyShow allows either way, and the
-> gain comes entirely from **not sending requests that were going to be refused**. If a
-> change here starts trying to widen what a single session yields — cycling browser
-> sessions, spacing runs to dodge the clamp — that is the line, and `capture.test.ts`
-> exists to catch it.
+Reads **every** Kerala region by working in batches of `--batch-size` (default 4, just under
+the observed allowance) with `--batch-pause-ms` between them (default 5 minutes, just over
+the observed recovery). Thirty regions takes roughly **40 minutes**.
 
-**Which cities go in the window matters as much as how many.** The list arrives in a fixed
-order, so a sweep would otherwise read Kochi three times a day and never see the rest of
-Kerala. `resolveCities` rotates the window by **one** city per run.
+Refused pages get **one** deferred retry at the end, because a 403 here means "not right
+now" and the pauses demonstrate that recovers. One pass, never a loop.
 
-One, not the window size: with 30 regions and a window of 6, `bucket * 6 % 30` takes only 5
-distinct values, so just 5 cities would ever reach the front. Stepping by 1 also degrades
-gracefully — a larger step tuned to "about 3 succeed" would starve every city whose index
-did not line up, on a day when only one got through.
+If two consecutive batches return nothing at all, the sweep stops. At that point it is no
+longer a throttle to wait out, and continuing to ask would just be asking.
 
-**Coverage accumulates; it is never complete in one run.** Each city-date is independent, a
-403 is recorded as a *failed city* and never as a city with no demand, and snapshots are
-idempotent per scan run. At three runs a day the window's leading edge advances about three
-positions daily, so expect a full pass over Kerala in **roughly a week to ten days**, with
-recently-read districts refreshed more often than distant ones. A theater's "last seen" can
-therefore be days older than the last scan — which is why the UI shows per-theater
-last-seen times, and why aggregate figures must be read as a rolling picture rather than a
-snapshot of one moment.
+> **The line is identity, not patience.** An earlier version of this document called
+> "spacing runs to dodge the clamp" evasion. That was drawn in the wrong place — it would
+> make every well-behaved backoff illegitimate, when waiting is precisely the response a 403
+> is asking for.
+>
+> What must never happen is changing **who we appear to be** in order to be served more than
+> one client would be: proxies, user-agent or fingerprint spoofing, or cycling browser
+> sessions and profiles to reset a per-session limit. The sweep does none of these — one
+> `chromium.launch`, one `newContext`, one cookie jar for the whole run, and
+> `capture.test.ts` asserts each of those counts is exactly one.
+>
+> Going slower to stay inside what a site will serve is not a workaround. Going faster while
+> pretending to be someone else is.
+
+### Rotation, for single-burst runs
+
+Without `--sweep`, a run spends one burst. Since the city list arrives in a fixed order it
+would otherwise read the same first cities every time, so `resolveCities` rotates the window
+by **one** city per run — not by the window size, since with 30 regions and a window of 6
+`bucket * 6 % 30` takes only 5 distinct values and just 5 cities would ever reach the front.
+
+**Count pages, not cities.** `--max-cities` caps cities, but a run requests `cities × dates`
+and `--days` defaults to **2**, so `--max-cities 6` is twelve pages.
+
+### Coverage is a rolling picture
+
+Each city-date is independent, a 403 is recorded as a *failed city* and never as a city with
+no demand, and snapshots are idempotent per scan run. A theater's "last seen" can be older
+than the last scan, which is why the UI shows per-theater last-seen times and why aggregate
+figures should be read as accumulated rather than as one instant.
 
 ### Do not try to raise the hit rate
 

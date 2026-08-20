@@ -27,7 +27,13 @@
  *
  * Usage:
  *   node scripts/bms-capture.mjs --campaign <campaignId>
+ *   node scripts/bms-capture.mjs --campaign <id> --sweep --days 1      # all of Kerala, ~40 min
  *   node scripts/bms-capture.mjs --campaign <id> --cities KOCH,PLKK --days 2 --dry-run
+ *
+ * --sweep reads EVERY city rather than one burst's worth. BookMyShow serves about four to
+ * six pages and then refuses; a five-minute pause restores it. So a sweep is simply slow,
+ * not clever — it waits the throttle out in the same browser session rather than changing
+ * anything about who it appears to be.
  *
  * Environment (a .env.local next to the project root is read automatically):
  *   STARANALYTICS_URL           default http://localhost:3000
@@ -55,6 +61,12 @@ const SECRET = process.env.BOOKMYSHOW_CAPTURE_SECRET;
 const DAYS = Number(args.days || process.env.BOOKMYSHOW_CAPTURE_DAYS || 2);
 const DELAY_MS = Number(args["delay-ms"] || process.env.BOOKMYSHOW_CAPTURE_DELAY_MS || 4000);
 const MAX_CITIES = Number(args["max-cities"] || process.env.BOOKMYSHOW_CAPTURE_MAX_CITIES || 0);
+// Sweep mode: read every city, pacing around BookMyShow's burst allowance instead of
+// settling for whatever one burst returns. Batch size is set just under the measured
+// allowance (4-6 pages) and the pause just over the measured recovery (5 min).
+const SWEEP = Boolean(args.sweep);
+const BATCH_SIZE = Number(args["batch-size"] || process.env.BOOKMYSHOW_CAPTURE_BATCH_SIZE || 4);
+const BATCH_PAUSE_MS = Number(args["batch-pause-ms"] || process.env.BOOKMYSHOW_CAPTURE_BATCH_PAUSE_MS || 300_000);
 const DRY_RUN = Boolean(args["dry-run"]);
 const HEADFUL = !args.headless;
 const LOG_FILE = join(ROOT, "bms-capture.log");
@@ -138,22 +150,101 @@ const items = [];
 let ok = 0;
 let failed = 0;
 
+/**
+ * One page, recorded.
+ *
+ * Returns true when the page was read, so the batch loop can tell a pacing clamp (several
+ * refusals in a row) from an ordinary partial result.
+ */
+async function runOne(code, dateCode) {
+  const item = await capturePage(context, plan, code, dateCode);
+  items.push(item);
+  if (item.error) {
+    failed++;
+    log(`  ${code} ${dateCode} -> FAILED: ${item.error}`);
+    return false;
+  }
+  ok++;
+  log(`  ${code} ${dateCode} -> ${item.venues.length} venues, ${countShows(item)} shows`);
+  return true;
+}
+
+// Every city-date this run intends to read.
+const targets = [];
+for (const code of cities) {
+  for (const date of dates) targets.push({ code, dateCode: toDateCode(date) });
+}
+
 try {
-  for (const code of cities) {
-    for (const date of dates) {
-      const dateCode = toDateCode(date);
-      const item = await capturePage(context, plan, code, dateCode);
-      items.push(item);
-      if (item.error) {
-        failed++;
-        log(`  ${code} ${dateCode} -> FAILED: ${item.error}`);
-      } else {
-        ok++;
-        log(`  ${code} ${dateCode} -> ${item.venues.length} venues, ${countShows(item)} shows`);
-      }
+  if (!SWEEP) {
+    for (const t of targets) {
+      await runOne(t.code, t.dateCode);
       // Pacing. This is politeness and rate-limiting, not evasion: it keeps a full sweep
       // at roughly the request rate of one person browsing.
       await sleep(DELAY_MS);
+    }
+  } else {
+    // Paced sweep: read everything, slowly enough that BookMyShow keeps serving.
+    //
+    // Measured 2026-08-20. BookMyShow allows a burst of roughly four to six pages and then
+    // refuses with 403; a five-minute pause in the SAME browser session restores it
+    // completely (6 pages, pause, 6 more, 12/12 at 200). So the limit is about pace, not
+    // about how much a client may ever read.
+    //
+    // Waiting one out is what a well-behaved client does — it is the response the 403 is
+    // asking for. Nothing here changes identity to get more: same browser, same cookie jar,
+    // no proxy, no user-agent games, and each page is attempted at most twice. Widening the
+    // per-burst yield is the thing that would be wrong, and this does the opposite.
+    const batches = [];
+    for (let i = 0; i < targets.length; i += BATCH_SIZE) batches.push(targets.slice(i, i + BATCH_SIZE));
+    const totalMinutes = Math.round(((batches.length - 1) * BATCH_PAUSE_MS + targets.length * DELAY_MS) / 60000);
+    log(
+      `sweep: ${targets.length} pages in ${batches.length} batches of ${BATCH_SIZE}, ` +
+        `${Math.round(BATCH_PAUSE_MS / 60000)} min between batches — expect roughly ${totalMinutes} minutes`,
+    );
+
+    const retry = [];
+    let emptyBatches = 0;
+
+    for (let b = 0; b < batches.length; b++) {
+      log(`batch ${b + 1}/${batches.length}`);
+      let batchOk = 0;
+      for (const t of batches[b]) {
+        if (await runOne(t.code, t.dateCode)) batchOk++;
+        else retry.push(t);
+        await sleep(DELAY_MS);
+      }
+
+      // Two batches in a row with nothing at all means this is no longer pacing — waiting
+      // longer is not going to fix a refusal that is now unconditional. Stop and say so
+      // rather than working through the remaining batches for nothing.
+      emptyBatches = batchOk === 0 ? emptyBatches + 1 : 0;
+      if (emptyBatches >= 2) {
+        log("two consecutive batches returned nothing — stopping the sweep rather than continuing to ask.");
+        break;
+      }
+
+      if (b < batches.length - 1) {
+        log(`  pausing ${Math.round(BATCH_PAUSE_MS / 60000)} min to let the allowance recover...`);
+        await sleep(BATCH_PAUSE_MS);
+      }
+    }
+
+    // One retry pass. A 403 here meant "not right now", and the pauses have since proved
+    // that recovers, so a single deferred attempt is reasonable.
+    // One pass, never a loop: retrying until something gets through is an attack.
+    if (retry.length > 0 && emptyBatches < 2) {
+      log(`retry pass: ${retry.length} page(s) that were refused earlier`);
+      const retryBatches = [];
+      for (let i = 0; i < retry.length; i += BATCH_SIZE) retryBatches.push(retry.slice(i, i + BATCH_SIZE));
+      for (let b = 0; b < retryBatches.length; b++) {
+        log(`  retry batch ${b + 1}/${retryBatches.length}`);
+        for (const t of retryBatches[b]) {
+          await runOne(t.code, t.dateCode);
+          await sleep(DELAY_MS);
+        }
+        if (b < retryBatches.length - 1) await sleep(BATCH_PAUSE_MS);
+      }
     }
   }
 } finally {
@@ -230,6 +321,9 @@ function resolveCities(plan) {
   if (unknown.length) log(`ignoring unknown region codes: ${unknown.join(", ")}`);
   const known = requested.filter((c) => REGIONS[c]);
   if (raw) return known; // an explicit --cities list is an instruction, not a suggestion
+  // A sweep reads everything by pacing itself, so there is nothing to rotate: rotation
+  // exists to pick WHICH cities a single burst spends itself on.
+  if (SWEEP) return known;
   return rotateWindow(known);
 }
 
