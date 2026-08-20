@@ -10,6 +10,7 @@
 // either has a CommentSentiment row or it doesn't.
 import { prisma } from "@/lib/prisma";
 import { getSentimentProvider } from "@/lib/providers";
+import { isSentimentClassifyEnabled } from "@/lib/data/sentiment";
 import { runWithConcurrency } from "@/lib/concurrency";
 
 // Larger than classifyPostsForSentiment's BATCH_SIZE (20): each input here is one short
@@ -44,6 +45,19 @@ export async function classifyCommentsForSentiment(
     select: { id: true, text: true, authorHandle: true },
   });
   if (comments.length === 0) return { classified: 0, failedBatches: 0 };
+
+  // Same switch, same reason, as the post pipeline's — see isSentimentClassifyEnabled. This
+  // is the second and larger consumer of AI credit (one call per comment, not per post), so
+  // gating only the other one would leave "classification is off" half true and the provider
+  // errors still arriving. Comments themselves are untouched and stay in the table; the
+  // `sentiment: null` filter above means they requalify for classification automatically
+  // once this is switched back on.
+  if (!isSentimentClassifyEnabled()) {
+    console.log(
+      `comment sentiment pipeline: classification is OFF (SENTIMENT_CLASSIFY!=="on"), leaving ${comments.length} comment(s) unclassified`,
+    );
+    return { classified: 0, failedBatches: 0 };
+  }
 
   const handleById = new Map(comments.map((c) => [c.id, c.authorHandle]));
   const inputs = comments.map((c) => ({ id: c.id, text: c.text! }));

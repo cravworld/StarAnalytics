@@ -59,6 +59,32 @@ export function isCommentScrapeEnabled(): boolean {
   return process.env.COMMENT_SCRAPE === "on";
 }
 
+/**
+ * Master switch for CLASSIFICATION — the AI half of this pipeline, downstream of the scrape.
+ *
+ * Off by default, for the same "a deploy alone stops it" reason as the scrape switch above.
+ * As of 2026-08-20 all three sentiment providers are out of credit — Claude 400 "credit
+ * balance is too low", OpenAI 429 "no credits remaining", Gemini 429 "prepayment credits are
+ * depleted" — so every classification attempt walks the whole Claude -> OpenAI -> Gemini
+ * fallback chain, fails three times, and logs three errors. The fallback chain is working
+ * exactly as designed; there is simply nothing left to fall back to.
+ *
+ * Deliberately NOT done by pointing DATA_MODE_SENTIMENT at "mock". MockSentimentProvider
+ * labels every post "pos" at 0.78 with canned keywords, and those rows are written to the
+ * same Sentiment table the real ones go to, indistinguishable afterwards. Off has to mean
+ * "no rows", not "invented rows" — a screen reading 100% positive because a mock said so is
+ * worse than the failure it replaces, and un-picking it later means guessing which rows were
+ * real.
+ *
+ * Comments are unaffected: the scrape above still runs for callers that opt in, so text keeps
+ * accumulating and is there to classify the moment this is switched back on. Nothing is
+ * deleted, and already-classified posts keep their labels. Set SENTIMENT_CLASSIFY=on once any
+ * one of the three providers has balance.
+ */
+export function isSentimentClassifyEnabled(): boolean {
+  return process.env.SENTIMENT_CLASSIFY === "on";
+}
+
 /** Whether a given call should fetch new comments — explicit opt-in beats the global default. */
 export interface SentimentOptions {
   scrapeComments?: boolean;
@@ -185,6 +211,21 @@ export async function classifyPostsForSentiment(
       );
     }
   }
+  // Classification gate. Deliberately placed AFTER the scrape and before anything that
+  // costs an AI call, so "off" still means comments get pulled and stored — they just sit
+  // unclassified until this is switched back on. See isSentimentClassifyEnabled.
+  //
+  // Returning here leaves no Sentiment row, which is the honest outcome: the screens render
+  // their "not classified" empty states rather than a fabricated reading, and because the
+  // staleness filter at the top keys off those rows, every skipped post is picked up
+  // automatically on the first run after the switch flips — no backfill to remember.
+  if (!isSentimentClassifyEnabled()) {
+    console.log(
+      `sentiment pipeline: classification is OFF (SENTIMENT_CLASSIFY!=="on"), leaving ${workingIds.length} post(s) unclassified; comments already scraped are kept`,
+    );
+    return;
+  }
+
   // Re-fetch comments for the whole working set in one go — cheaper than tracking which
   // posts were freshly scraped vs already had comments, and always reflects reality.
   const allComments = await prisma.postComment.findMany({
