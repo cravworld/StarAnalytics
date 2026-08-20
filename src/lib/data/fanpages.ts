@@ -709,6 +709,25 @@ export async function stopTrackingFanPage(id: string): Promise<void> {
 // Returns the ids of any posts stored, for the caller to queue sentiment on. Empty for a
 // re-activated page, which stores nothing new.
 export async function addFanPage(handleInput: string, platform: PlatformId = "instagram"): Promise<string[]> {
+  return (await addFanPageDetailed(handleInput, platform)).postIds;
+}
+
+/** What adding a handle actually did — the three cases cost very different amounts. */
+export type AddFanPageStatus = "added" | "reactivated" | "already-tracked";
+
+/**
+ * The implementation behind addFanPage, with the outcome kept rather than flattened.
+ *
+ * The single-add form only needs the post ids, so addFanPage above still returns just those.
+ * The bulk path needs the distinction: a pasted list of thirty handles routinely contains ones
+ * that are already tracked, and reporting "30 added" when eleven of them were no-ops (and cost
+ * nothing) is both wrong and hides the number the user actually wants — how many real scrapes
+ * they just paid for.
+ */
+export async function addFanPageDetailed(
+  handleInput: string,
+  platform: PlatformId = "instagram",
+): Promise<{ status: AddFanPageStatus; postIds: string[] }> {
   const handle = handleInput.replace(/^@/, "").trim();
   if (!handle) throw new Error("handle is required");
   const validator = PLATFORM_HANDLE_VALIDATORS[platform];
@@ -718,12 +737,70 @@ export async function addFanPage(handleInput: string, platform: PlatformId = "in
   if (existing) {
     if (!existing.isActive) {
       await prisma.fanPage.update({ where: { id: existing.id }, data: { isActive: true } });
+      return { status: "reactivated", postIds: [] };
     }
-    return [];
+    return { status: "already-tracked", postIds: [] };
   }
 
   const { postIds } = await scrapeFanPageFull(platform, handle);
-  return postIds;
+  return { status: "added", postIds };
+}
+
+export interface BulkAddFanPageResult {
+  handle: string;
+  ok: boolean;
+  status?: AddFanPageStatus;
+  postCount?: number;
+  error?: string;
+}
+
+/**
+ * Add a batch of handles in one call — the paste-a-list path.
+ *
+ * Sequential, not `Promise.all`. Each Instagram handle is two Apify runs plus a fan-out of
+ * writes, and prod runs a 5-connection pool against a Mumbai database; fanning N of those out
+ * concurrently is the exact shape that has taken screens down here before (see the query-count
+ * regression pin on getFanPagesData). Sequential also means one bad handle in a pasted list
+ * cannot abort the twenty good ones behind it — same discipline as refreshFanPages, which this
+ * loop deliberately mirrors.
+ *
+ * Returns one result per handle rather than throwing, plus the ids of everything stored, so the
+ * caller can queue sentiment once for the whole batch instead of per page.
+ *
+ * NOTE ON BATCH SIZE: this loop has no internal time budget, and its caller is a Server Action
+ * bounded by the hosting page's maxDuration (800s on /fan-pages). One Instagram page can take
+ * up to ~600s in the worst case — two Apify runs at DEFAULT_WAIT_MS each — so the *client* is
+ * what chunks a long list into calls this can finish. MAX_BULK_ADD_HANDLES is the ceiling that
+ * stops a hand-made call from asking for more than that in one request.
+ */
+export async function addFanPages(
+  handleInputs: string[],
+  platform: PlatformId = "instagram",
+): Promise<{ results: BulkAddFanPageResult[]; postIds: string[] }> {
+  const results: BulkAddFanPageResult[] = [];
+  const postIds: string[] = [];
+  // Same account-wide short-circuit refreshFanPages uses: once Apify says the quota is gone,
+  // every remaining Instagram handle in this batch fails the same way, so they are reported as
+  // not-attempted rather than each burning another doomed (and billable) call.
+  let quotaExhausted = false;
+
+  for (const input of handleInputs) {
+    const handle = input.replace(/^@/, "").trim();
+    if (quotaExhausted && platform === "instagram") {
+      results.push({ handle, ok: false, error: "Apify quota exhausted — not attempted" });
+      continue;
+    }
+    try {
+      const { status, postIds: ids } = await addFanPageDetailed(input, platform);
+      postIds.push(...ids);
+      results.push({ handle, ok: true, status, postCount: ids.length });
+    } catch (err) {
+      if (isApifyQuotaFailure(err)) quotaExhausted = true;
+      results.push({ handle, ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return { results, postIds };
 }
 
 // Refreshes every tracked fan page past the TTL, on both platforms.

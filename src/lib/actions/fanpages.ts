@@ -4,6 +4,7 @@ import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import {
   addFanPage,
+  addFanPages,
   pullFanPageHistory,
   refreshFanPages,
   setFanPageVerified,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/data/fanpages";
 import { queueSentimentClassification } from "@/lib/data/sentiment";
 import { requireSession } from "@/lib/require-session";
+import { MAX_BULK_ADD_HANDLES } from "@/lib/providers/handle-input";
 import type { PlatformId } from "@/lib/providers/types";
 
 // Comments are opted into explicitly on both fan-page paths below, so the detail screen's
@@ -30,6 +32,43 @@ export async function addFanPageAction(handle: string, platform: PlatformId = "i
   // has classified everything it pulled.
   if (postIds.length > 0) after(() => queueSentimentClassification(postIds, FAN_PAGE_SENTIMENT_OPTS));
   revalidatePath("/fan-pages");
+}
+
+/**
+ * Bulk add — one chunk of a pasted list of handles.
+ *
+ * DELIBERATELY DOES NOT PASS FAN_PAGE_SENTIMENT_OPTS. The opt-in above is justified by "a human
+ * clicked, and the scrape is bounded to one page's most recent posts". Neither half survives a
+ * bulk paste: one click now stands for an arbitrary number of pages, and the bound becomes
+ * N × 50 posts. Handing that many post ids to classifyPostsForSentiment with comments forced on
+ * is finding A of the Apify audit (unbounded comment fan-out) reintroduced by the side door — at
+ * ~50 posts × 20 comments × $0.0023 it is roughly $2.30 per page against $0.08 for the profile
+ * and post pull alone, a ~30x multiplier on a plan whose monthly cap is $29. So this path
+ * inherits the global COMMENT_SCRAPE default like the cron does. Comments for a bulk-added page
+ * are one press of "Refresh data" on its detail screen away, at a price the user chose to pay.
+ *
+ * Chunking is the client's job (see BULK_ADD_CHUNK_SIZE) because the time budget belongs to the
+ * hosting page's maxDuration; the cap is enforced here because a Server Action is a public POST
+ * endpoint and cannot trust the caller for the size of its own input.
+ */
+export async function addFanPagesBulkAction(handles: string[], platform: PlatformId = "instagram") {
+  await requireSession();
+  if (!Array.isArray(handles) || handles.length === 0) throw new Error("no handles given");
+  if (handles.length > MAX_BULK_ADD_HANDLES) {
+    throw new Error(`too many handles in one call (max ${MAX_BULK_ADD_HANDLES})`);
+  }
+
+  const { results, postIds } = await addFanPages(handles, platform);
+  if (postIds.length > 0) after(() => queueSentimentClassification(postIds));
+  revalidatePath("/fan-pages");
+  return {
+    results,
+    added: results.filter((r) => r.ok && r.status === "added").length,
+    reactivated: results.filter((r) => r.ok && r.status === "reactivated").length,
+    alreadyTracked: results.filter((r) => r.ok && r.status === "already-tracked").length,
+    posts: results.reduce((s, r) => s + (r.postCount ?? 0), 0),
+    failures: results.filter((r) => !r.ok).map((r) => ({ handle: r.handle, error: r.error ?? "unknown error" })),
+  };
 }
 
 // The detail screen's refresh. Re-pulls the page's profile and its 50 most recent posts,
