@@ -94,7 +94,68 @@ export interface FanPagesData {
   suggestions: { handle: string; postCount: number }[];
 }
 
-async function fanPageRow(
+/**
+ * The columns fanPageRow needs, for one post. Fetched for every tracked page in a single
+ * query (see fetchFanPagePosts) rather than per page — see the note there.
+ */
+interface FanPagePostFacts {
+  fanPageId: string | null;
+  postedAt: Date | null;
+  likes: number | null;
+  comments: number | null;
+  campaignId: string | null;
+}
+
+/**
+ * Every post belonging to the given fan pages, newest first, grouped by page.
+ *
+ * This exists because the six per-page queries it replaces were a live incident. fanPageRow
+ * used to issue its own `Promise.all` of six queries, and getFanPagesData mapped it over
+ * every tracked page — so the list screen fired 6N concurrent queries against a pool of 5
+ * (Prisma's default; DATABASE_URL sets no connection_limit). At one tracked page that was
+ * six queries and fine. At ten it was sixty, and `GET /fan-pages` started failing in
+ * production with P2024 "Timed out fetching a new connection from the connection pool" —
+ * intermittently, because whether it tipped over depended on how warm the pool was.
+ *
+ * One query for the whole set keeps the screen's query count constant in the number of
+ * tracked pages, which is the property that actually matters; fanPagesQueryCount.test.ts
+ * pins it so the fan-out cannot come back by accident.
+ *
+ * Deliberately unbounded (no `take`): the callers below need "the 20 most recent", "any post
+ * ever linked to a campaign", and "the single latest post", which no one date range covers.
+ * The set is small and bounded in practice — a fan page only accrues posts through a capped
+ * 50-post refresh or an incidental hashtag-scrape hit (398 rows across 10 pages in prod as
+ * of writing). If that stops being true, the shape to reach for is a window function
+ * (`row_number() over (partition by fan_page_id order by posted_at desc)`), not a return to
+ * per-page queries.
+ *
+ * Ordering is done in SQL and preserved when grouping, so the folds below see rows in
+ * exactly the order the per-page `orderBy: { postedAt: "desc" }` queries returned them —
+ * including Postgres' NULLS FIRST default for DESC. That is intentional: this is a
+ * connection-pool fix, and reproducing the previous ordering exactly (rather than
+ * "correcting" it to sort nulls last) keeps the displayed numbers identical. No post in
+ * prod has a null postedAt today, so the distinction is currently academic either way.
+ */
+async function fetchFanPagePosts(fanPageIds: string[]): Promise<Map<string, FanPagePostFacts[]>> {
+  const byPage = new Map<string, FanPagePostFacts[]>();
+  if (fanPageIds.length === 0) return byPage;
+
+  const rows = await prisma.post.findMany({
+    where: { fanPageId: { in: fanPageIds } },
+    orderBy: { postedAt: "desc" },
+    select: { fanPageId: true, postedAt: true, likes: true, comments: true, campaignId: true },
+  });
+
+  for (const r of rows) {
+    if (!r.fanPageId) continue;
+    const list = byPage.get(r.fanPageId);
+    if (list) list.push(r);
+    else byPage.set(r.fanPageId, [r]);
+  }
+  return byPage;
+}
+
+function fanPageRow(
   page: {
     id: string;
     platform: PlatformId;
@@ -104,28 +165,23 @@ async function fanPageRow(
     isVerifiedFan: boolean;
   },
   trend: { values: number[]; deltaPct: number | null },
-): Promise<FanPageListRow> {
+  // Newest first — see fetchFanPagePosts.
+  pagePosts: FanPagePostFacts[],
+): FanPageListRow {
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const sparkStart = new Date(startOfToday.getTime() - (SPARK_DAYS - 1) * 24 * 60 * 60 * 1000);
   const activityStart = new Date(startOfToday.getTime() - (ACTIVITY_WINDOW_DAYS - 1) * 24 * 60 * 60 * 1000);
 
-  const [postsToday, recentPosts, sparkPosts, trackedTagPost, lastPost, postsInWindow] = await Promise.all([
-    prisma.post.count({ where: { fanPageId: page.id, postedAt: { gte: startOfToday } } }),
-    prisma.post.findMany({
-      where: { fanPageId: page.id },
-      orderBy: { postedAt: "desc" },
-      take: RECENT_POSTS_FOR_ENG_SAMPLE,
-      select: { likes: true, comments: true },
-    }),
-    prisma.post.findMany({
-      where: { fanPageId: page.id, postedAt: { gte: sparkStart } },
-      select: { postedAt: true },
-    }),
-    prisma.post.findFirst({ where: { fanPageId: page.id, campaignId: { not: null } }, select: { id: true } }),
-    prisma.post.findFirst({ where: { fanPageId: page.id }, orderBy: { postedAt: "desc" }, select: { postedAt: true } }),
-    prisma.post.count({ where: { fanPageId: page.id, postedAt: { gte: activityStart } } }),
-  ]);
+  // Each of these was its own query until the fan-out became a connection-pool incident.
+  // The null-postedAt guards are what the SQL `gte` filters did implicitly: a NULL never
+  // satisfies a comparison, so those posts were never counted, and are still not.
+  const postsToday = pagePosts.filter((p) => p.postedAt !== null && p.postedAt >= startOfToday).length;
+  const postsInWindow = pagePosts.filter((p) => p.postedAt !== null && p.postedAt >= activityStart).length;
+  const recentPosts = pagePosts.slice(0, RECENT_POSTS_FOR_ENG_SAMPLE);
+  const sparkPosts = pagePosts.filter((p) => p.postedAt !== null && p.postedAt >= sparkStart);
+  const trackedTagPost = pagePosts.some((p) => p.campaignId !== null);
+  const lastPost = pagePosts[0] ?? null;
 
   const engTotal = recentPosts.reduce((s, p) => s + (p.likes ?? 0) + (p.comments ?? 0), 0);
   const engRate =
@@ -205,9 +261,16 @@ export async function getFanPagesData(): Promise<FanPagesData> {
     }),
   ]);
 
-  const trends = await getFollowerTrends(activePages.map((p) => ({ platform: p.platform, igHandle: p.igHandle })));
-  const fanPages = await Promise.all(
-    activePages.map((p) => fanPageRow(p, lookupTrend(trends, p.platform, p.igHandle))),
+  // Both of these are one query for the whole set, not one per page. getFollowerTrends was
+  // already written that way; fetchFanPagePosts is the fix for the six-per-page fan-out that
+  // used to sit inside fanPageRow (see its comment). fanPageRow is now pure — it folds the
+  // rows it is handed and issues no queries of its own.
+  const [trends, postsByPage] = await Promise.all([
+    getFollowerTrends(activePages.map((p) => ({ platform: p.platform, igHandle: p.igHandle }))),
+    fetchFanPagePosts(activePages.map((p) => p.id)),
+  ]);
+  const fanPages = activePages.map((p) =>
+    fanPageRow(p, lookupTrend(trends, p.platform, p.igHandle), postsByPage.get(p.id) ?? []),
   );
 
   // fanPageAlerts.ts builds message as "<igHandle> posted ..." (no @ prefix) —
@@ -685,6 +748,8 @@ export async function addFanPage(handleInput: string, platform: PlatformId = "in
 // gets here, and without this every Instagram page would burn one more doomed call to
 // rediscover it. YouTube pages ignore the flag entirely: separate API, separate quota.
 export interface FanPageRefreshResult {
+  /** Lets callers revalidate the page's own detail route by its literal path. */
+  id: string;
   handle: string;
   ok: boolean;
   /** Set when the page was in date and deliberately not re-fetched (TTL runs only). */
@@ -724,7 +789,7 @@ export async function refreshFanPages(opts: RefreshFanPagesOptions = {}): Promis
   let quotaExhausted = apifyQuotaExhausted;
   for (const p of pages) {
     if (!force && !isStale(p.lastCheckedAt)) {
-      results.push({ handle: p.igHandle, ok: true, skipped: true });
+      results.push({ id: p.id, handle: p.igHandle, ok: true, skipped: true });
       continue;
     }
     // Same account-wide short-circuit as refreshStaleCompetitors: once Apify reports the
@@ -733,7 +798,7 @@ export async function refreshFanPages(opts: RefreshFanPagesOptions = {}): Promis
     // pages are unaffected — they run on the official Data API, not Apify — so they keep
     // going even after an Instagram page has tripped this.
     if (quotaExhausted && p.platform === "instagram") {
-      results.push({ handle: p.igHandle, ok: false, error: "Apify quota exhausted — not attempted" });
+      results.push({ id: p.id, handle: p.igHandle, ok: false, error: "Apify quota exhausted — not attempted" });
       continue;
     }
     try {
@@ -742,10 +807,10 @@ export async function refreshFanPages(opts: RefreshFanPagesOptions = {}): Promis
       // pulled by this path would sit unclassified until some unrelated sweep found them,
       // so the two refresh routes would disagree about what a refresh means.
       await queueSentimentClassification(postIds, sentimentOpts);
-      results.push({ handle: p.igHandle, ok: true, postCount: postIds.length });
+      results.push({ id: p.id, handle: p.igHandle, ok: true, postCount: postIds.length });
     } catch (err) {
       if (isApifyQuotaFailure(err)) quotaExhausted = true;
-      results.push({ handle: p.igHandle, ok: false, error: err instanceof Error ? err.message : String(err) });
+      results.push({ id: p.id, handle: p.igHandle, ok: false, error: err instanceof Error ? err.message : String(err) });
     }
   }
   return results;

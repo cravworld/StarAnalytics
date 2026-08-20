@@ -58,10 +58,14 @@ export async function refreshAllFanPagesAction() {
   await requireSession();
   const results = await refreshFanPages({ force: true, sentimentOpts: FAN_PAGE_SENTIMENT_OPTS });
   revalidatePath("/fan-pages");
-  // Every detail page at once, via the route pattern — the results carry handles, not ids,
-  // so there is nothing to build a literal path from, and `type: "page"` is required for a
-  // path containing a dynamic segment.
-  revalidatePath("/fan-pages/[id]", "page");
+  // One literal path per refreshed page, rather than the `("/fan-pages/[id]", "page")` route
+  // pattern this used to pass. The pattern form builds its cache tag from the string as
+  // given, and this route really lives at `(app)/fan-pages/[id]` — whether the tag needs the
+  // route group in it is exactly the kind of thing that fails silently, leaving detail pages
+  // stale after a refresh with nothing to notice. Literal paths have no such ambiguity, are
+  // what every other call site in this codebase uses, and are available now that the results
+  // carry ids.
+  for (const r of results) revalidatePath(`/fan-pages/${r.id}`);
   return {
     total: results.length,
     refreshed: results.filter((r) => r.ok).length,
