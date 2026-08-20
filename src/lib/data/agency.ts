@@ -144,7 +144,13 @@ export async function runAgencyBatchJob(runId: string, rows: AgencyUrlRow[]): Pr
     // fire-and-forget after() call), so by the time scoring below runs, comments for this
     // batch are already scraped and stored — which is what makes generic_comment_pattern
     // detection possible here without a separate re-scoring pass.
-    await queueSentimentClassification(scoredPosts.map((p) => p.id));
+    // Opts in explicitly, so the agency report keeps working while the Comment Sentiment
+    // pipeline is switched off (see isCommentScrapeEnabled). This scrape is a different
+    // proposition from the cron's: a human clicked Analyse, it is bounded to the one batch
+    // they uploaded, and generic_comment_pattern below is only honest if the comments were
+    // really fetched — with no comments the detector finds nothing and the UI would report
+    // "checked, clean" for a check that never happened.
+    await queueSentimentClassification(scoredPosts.map((p) => p.id), { scrapeComments: true });
 
     const commentRows = await prisma.postComment.findMany({
       where: { postId: { in: scoredPosts.map((p) => p.id) } },

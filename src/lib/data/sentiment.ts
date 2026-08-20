@@ -38,6 +38,32 @@ const COMMENT_SCRAPE_LOCK = "comment-scrape-pipeline";
 // tick's comment scrape for nothing.
 const COMMENT_SCRAPE_LOCK_TTL_SECONDS = 16 * 60 + 60;
 
+/**
+ * Master switch for the comment SCRAPE — the only part of this pipeline that spends Apify.
+ *
+ * Off by default, deliberately. Comment Sentiment is not in use right now, and the scrape is
+ * metered per comment ($0.0023 at our tier), so the pipeline should cost nothing while it sits
+ * idle. Defaulting to off rather than reading an "off" value means a deploy alone stops the
+ * spend — no Vercel dashboard change to remember, and no way to leave it running by forgetting
+ * to set something.
+ *
+ * Nothing is deleted: set COMMENT_SCRAPE=on to bring it straight back. Everything downstream
+ * (classification, the /campaigns/comments screen, repeat-critic detection) still works on
+ * comments already stored — this only stops fetching NEW ones.
+ *
+ * Callers that need comments regardless pass `{ scrapeComments: true }` explicitly. The agency
+ * report does: its scrape is user-initiated, bounded to one uploaded batch, and its
+ * generic_comment_pattern flag is only honest if the comments were actually fetched.
+ */
+export function isCommentScrapeEnabled(): boolean {
+  return process.env.COMMENT_SCRAPE === "on";
+}
+
+/** Whether a given call should fetch new comments — explicit opt-in beats the global default. */
+export interface SentimentOptions {
+  scrapeComments?: boolean;
+}
+
 function chunk<T>(xs: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < xs.length; i += size) out.push(xs.slice(i, i + size));
@@ -62,15 +88,21 @@ function buildClassifyText(
 // down the ingestion path it's attached to (hashtag tracking, the cron poll, the agency batch
 // job). Callers that need to know about failures (e.g. the backfill route) should call
 // classifyPostsForSentiment directly instead.
-export async function queueSentimentClassification(postIds: string[]): Promise<void> {
+export async function queueSentimentClassification(
+  postIds: string[],
+  opts: SentimentOptions = {},
+): Promise<void> {
   try {
-    await classifyPostsForSentiment(postIds);
+    await classifyPostsForSentiment(postIds, opts);
   } catch (err) {
     console.error("sentiment pipeline failed:", err);
   }
 }
 
-export async function classifyPostsForSentiment(postIds: string[]): Promise<void> {
+export async function classifyPostsForSentiment(
+  postIds: string[],
+  opts: SentimentOptions = {},
+): Promise<void> {
   if (postIds.length === 0) return;
 
   // 1. Staleness filter FIRST — drop posts with a sentiment row newer than the threshold
@@ -120,7 +152,19 @@ export async function classifyPostsForSentiment(postIds: string[]): Promise<void
   const needComments = posts.filter(
     (p) => p.postComments.length === 0 && p.externalUrl && p.comments !== 0 && p.commentsScrapedAt === null,
   );
-  if (needComments.length > 0) {
+  // Explicit opt-in wins; otherwise the global switch decides. See isCommentScrapeEnabled.
+  const scrapeComments = opts.scrapeComments ?? isCommentScrapeEnabled();
+  if (needComments.length > 0 && !scrapeComments) {
+    // Logged rather than silent: "0 comments stored" and "comment scraping is switched off"
+    // look identical downstream, and the difference matters — the first is a finding, the
+    // second is a config choice. Posts fall back to caption-only, exactly as they already do
+    // when a scrape fails, so classification still runs.
+    console.log(
+      `sentiment pipeline: comment scrape is OFF (COMMENT_SCRAPE!=="on"), skipping ${needComments.length} post(s) that would have been scraped; classifying caption-only`,
+    );
+  }
+
+  if (needComments.length > 0 && scrapeComments) {
     // See COMMENT_SCRAPE_LOCK above — this is what stops poll-hashtags and backfill-sentiment
     // from both paying Apify to scrape the same post at once. Losing the lock isn't an error:
     // this pass just falls back to caption-only for these posts, same as a scrape failure.
