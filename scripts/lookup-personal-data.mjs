@@ -199,7 +199,13 @@ async function main() {
     result = await lookupByHandle(normalizeHandle(raw));
   }
 
-  const total = Object.values(result.summary).reduce((a, b) => a + b, 0);
+  // scoutScoreRows counts a subset of scoutSnapshotRows (one score per snapshot at most),
+  // so it is excluded here to keep this an honest row count rather than a double-count.
+  // Only used to decide whether anything at all matched, but a number printed next to a
+  // regulatory response should still be the number it claims to be.
+  const total = Object.entries(result.summary)
+    .filter(([key]) => key !== "scoutScoreRows")
+    .reduce((sum, [, count]) => sum + count, 0);
   console.log(JSON.stringify({ ...result, totalRowsFound: total }, null, 2));
 
   if (total === 0) {
