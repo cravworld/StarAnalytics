@@ -16,7 +16,10 @@ import { mintSessionCookie } from "./auth/mintSession";
 type View = {
   name: string;
   path: string;
-  /** Clicks needed after navigation (the Agency Report sub-views are client state). */
+  /**
+   * Interaction needed after navigation to reach the state being captured. Must stay
+   * read-only — see pasteAgencyLinks; nothing in this suite may write to the database.
+   */
   setup?: (page: Page) => Promise<void>;
   /** Known mock values that must be visible. */
   text: string[];
@@ -59,6 +62,15 @@ async function waitForChartsSettled(page: Page) {
  * Goes through the real textarea + parsePastedText path rather than stubbing component
  * state, so the parser's own two-column contract is exercised too. Purely client-side:
  * no server action and no Apify call happens until "Analyse All Posts" is clicked.
+ *
+ * KEEP THIS PASTE-ONLY. Clicking through to the analysis from this suite would write real
+ * Agency rows to whatever database the harness is pointed at — phase0 is otherwise entirely
+ * read-only, and the default name here ("Pixelwave Media") reads like a genuine client, so
+ * those rows would surface in the app's own Agency Report as if they were a real customer.
+ * That exact pollution has happened before: three stray agencies were still sitting in
+ * production on 2026-08-07, which is why phase3-agency-verify.spec.ts uses throwaway
+ * "E2E Agency N" names and deletes them in an afterAll. The analysis flow is covered there,
+ * once, with that cleanup — not duplicated here.
  */
 const pasteAgencyLinks = async (page: Page, agency = "Pixelwave Media", count = 50) => {
   const lines = Array.from(
@@ -69,11 +81,6 @@ const pasteAgencyLinks = async (page: Page, agency = "Pixelwave Media", count = 
   await box.fill(lines);
   await box.blur(); // parsing is wired to onBlur, not onChange
   await expect(page.getByText(`${count} links`)).toBeVisible();
-};
-
-const analyse = async (page: Page) => {
-  await page.getByRole("button", { name: /Analyse All Posts/ }).click();
-  await expect(page.getByText("Agency Leaderboard — Overall Score")).toBeVisible();
 };
 
 const VIEWS: View[] = [
@@ -96,17 +103,39 @@ const VIEWS: View[] = [
     text: ["Top City", "Kochi", "25–34", "44% of followers", "64M / 36F", "Trivandrum"],
     canvases: 1, // age distribution bar
   },
+  // Retargeted onto page furniture for the same reason as 13-scoutline: /compare reads
+  // competitor_accounts from the DB (see src/lib/data/compare.ts), so "Dulquer Salmaan" was
+  // a row from the retired static fixture, not something the screen produces. A competitor
+  // appears only once a human adds one, so asserting a name made this suite depend on data
+  // no fresh database has. The own-page column and its metric labels DO survive — they come
+  // from the Instagram insights provider, which the harness pins to mock.
+  //
+  // The dropped "—" was the data-honesty check, and it was worth more than it looked, so:
+  // with no competitor on screen there is no unavailable metric to render, meaning the
+  // assertion could only ever have passed vacuously here. That guard now lives where it
+  // bites — phase3-agency-verify.spec.ts asserts the "Saves: N/A" and "Not Evaluated This
+  // Phase" markers against real scored posts that genuinely lack those fields.
   {
     name: "04-compare",
     path: "/compare",
-    text: ["Nivin Pauly", "Dulquer Salmaan", "Followers", "Story Response Rate", "—"],
+    text: ["Compare Pages", "Nivin Pauly", "Followers", "Story Response Rate", "Add account to compare"],
   },
-  // 05-campaigns-own and 06-campaigns-hashtag retired in Phase 2: both screens now
-  // read from the real `campaigns`/`hashtag_snapshots` tables unconditionally
-  // (mock and live mode alike — see src/lib/data/campaigns.ts), not the static
-  // CAMPAIGNS/TRACKED_HASHTAGS seed fixtures. A fresh DB has neither, so the
-  // fixed seed strings this test asserted on no longer appear by design. Covered
-  // instead by e2e/phase2-campaigns.spec.ts against real DB-backed data.
+  // 05 and 06 were retired in Phase 2 because both screens moved off the static
+  // CAMPAIGNS/TRACKED_HASHTAGS fixtures onto the real campaigns/hashtag_snapshots tables,
+  // so the seed strings they asserted stopped appearing. Retiring them was right for the
+  // assertions but threw out the screenshots too, leaving two re-skinned screens with no
+  // sign-off capture at all. Restored here on furniture only — the same treatment 04, 12
+  // and 13 get — so the design review set is complete without depending on any row.
+  {
+    name: "05-campaigns-own",
+    path: "/campaigns",
+    text: ["Own Campaigns", "Active Campaigns", "Total Engagement", "Hashtags Tracked", "New Campaign"],
+  },
+  {
+    name: "06-campaigns-hashtag",
+    path: "/campaigns/hashtag",
+    text: ["Track Hashtag", "Tracked Hashtags", "Hashtag Search"],
+  },
   {
     name: "07-agency-upload",
     path: "/campaigns/agency",
@@ -126,44 +155,56 @@ const VIEWS: View[] = [
       expect(Math.abs(icon.x + icon.width / 2 - (zone.x + zone.width / 2))).toBeLessThan(2);
     },
   },
-  {
-    name: "08-agency-scorecard",
-    path: "/campaigns/agency",
-    setup: analyse,
-    text: ["Posts Analysed", "84.2M", "Agency Leaderboard — Overall Score", "BuzzBridge", "23 flags", "Campaign Health"],
-  },
-  {
-    name: "09-agency-authenticity",
-    path: "/campaigns/agency",
-    setup: async (page) => {
-      await analyse(page);
-      await page.getByRole("button", { name: "Authenticity Audit" }).click();
-    },
-    text: ["Red Flags Detected", "Engagement velocity anomaly", "Low save-to-like ratio", "Positive Signals — What's Genuine"],
-  },
-  {
-    name: "10-agency-posts",
-    path: "/campaigns/agency",
-    setup: async (page) => {
-      await analyse(page);
-      await page.getByRole("button", { name: "All 500 Posts" }).click();
-    },
-    text: ["instagram.com/p/Cx1a…", "Showing 10 of 500 posts · sorted by score", "Velocity"],
-  },
+  // 08-agency-scorecard, 09-agency-authenticity and 10-agency-posts retired here — same
+  // reason as 05/06/11 above. These three post-analysis views no longer render a fixture:
+  // AgencyReportClient builds them from `result`, the live output of the scoring pipeline
+  // over whatever batch you uploaded. Every value they asserted is a leftover from the
+  // static seed — "84.2M", "23 flags", "BuzzBridge" and "instagram.com/p/Cx1a…" now exist
+  // only in src/lib/providers/seed.ts, "Positive Signals — What's Genuine" exists nowhere
+  // in the app at all, and the tab is labelled "All Posts", so 10 could not even reach its
+  // assertions: its setup clicked a button named "All 500 Posts" that no longer exists.
+  // There is no updated-string version of these tests, because there is no longer a fixed
+  // result to assert against.
+  //
+  // Not re-created here with a real upload, deliberately. Driving "Analyse All Posts" runs
+  // the actual scoring pipeline, and that writes permanent Agency rows to the database this
+  // harness points at (the same production DATABASE_URL — playwright.config.ts mocks the
+  // DATA_MODE_* providers, never the database). phase0 is a read-only screenshot walk and is
+  // worth keeping that way.
+  //
+  // Covered instead by e2e/phase3-agency-verify.spec.ts, which already performs this exact
+  // flow properly: it pastes through the real UI, runs the real analysis against the mock
+  // provider, asserts all three tabs plus the evidence drill-down, and deletes its own rows
+  // in an afterAll anchored to /^E2E Agency \d+$/. The sign-off screenshots these three
+  // views produced are now captured there, at those same three checkpoints, so the
+  // screenshot set stays complete without a second copy of a DB-writing flow.
   // 11-vijayam-detail retired in Phase 2: the fixed /campaigns/vijayam route was
   // replaced by a generic /campaigns/[id] detail view (build plan §1 explicitly
   // forbids hardcoding "vijayam" in component logic). The old mock-fixture route no
   // longer exists — this isn't a regression, it's the mandated shape change. A
   // Phase-2-specific e2e spec covers the generic detail view against real DB data
   // instead of the static seed fixture.
+  // Retargeted onto furniture, like 04 and 13: /fan-pages reads fan_pages from the DB, so
+  // "4.8M", "18/24", "Nivin Fanz Official" and "Verified fan" were fixture values describing
+  // a tracked network no fresh database has. Labels and section headings render regardless.
+  // "Suggested Fan Pages" is deliberately NOT asserted — that card is conditional on
+  // suggestions.length > 0, so it would reintroduce exactly the data dependency being removed.
   {
     name: "12-fan-pages",
     path: "/fan-pages",
-    text: ["Total Fan Reach", "4.8M", "18/24", "Nivin Fanz Official", "Verified fan", "Alerts"],
+    text: ["Total Fan Reach", "Active Today", "Posting Campaign Tags", "Add fan page to track", "Alerts"],
     extra: async (page) => {
-      // 24 tracked, 5 seeded as a sample. The tab must show the tracked total, not the
-      // seeded row count — "All (5)" next to an "18/24" KPI is self-contradictory.
-      await expect(page.locator(".itab.active")).toHaveText("All (24)");
+      // The original check here caught something real — the "All (n)" tab must count every
+      // tracked page, not just the rows rendered beneath it, so "All (5)" sitting next to an
+      // "18/24" KPI was self-contradictory. It asserted the fixture's literal "All (24)",
+      // which is what made it die with the fixture. The invariant it was actually testing is
+      // that the tab count agrees with the denominator of "Active Today" — both are rendered
+      // from totalTracked — so assert the agreement rather than the number. That survives any
+      // database while still failing if the two ever drift apart again.
+      const activeToday = await page.locator(".kpi", { hasText: "Active Today" }).locator(".kpi-val").innerText();
+      const tracked = activeToday.split("/")[1]?.trim();
+      expect(tracked, `"Active Today" should render as "n/total", got "${activeToday}"`).toMatch(/^\d+$/);
+      await expect(page.locator(".itab.active")).toHaveText(`All (${tracked})`);
     },
   },
   // Scoutline arrived after this suite was written and had no sign-off screenshot at
@@ -175,6 +216,43 @@ const VIEWS: View[] = [
     path: "/scout",
     text: ["Quick Scan", "Scan Batches", "Select 2-4 batches to compare"],
   },
+  // 14-16 had no sign-off capture at all. They were re-skinned along with everything else
+  // but were never in this walk, so the design review set silently covered 7 of the app's
+  // 17 routes. Furniture-only assertions, for the same reason as 04/05/06/12/13: every one
+  // of these screens is DB-backed.
+  {
+    name: "14-campaign-new",
+    path: "/campaigns/new",
+    text: ["New Campaign", "Name", "Hashtags (comma-separated)", "Start date", "Create Campaign"],
+  },
+  {
+    name: "15-keyword-trends",
+    path: "/campaigns/keywords",
+    // "All Campaigns" deliberately absent: it is an <option> inside the campaign filter, and
+    // Playwright treats options as hidden, so asserting it would fail on a screen that renders
+    // perfectly well. The filter itself is covered by the visible headings around it.
+    text: ["Classified Posts", "Keywords Tracked", "Top Keyword", "Trending Topics"],
+  },
+  {
+    name: "16-compare-campaigns",
+    path: "/campaigns/compare-own",
+    text: ["Compare at day", "Buzz Score", "Positive Sentiment", "Total Engagement", "Posts Tracked"],
+  },
+  // Two routes are deliberately NOT captured here.
+  //
+  // /campaigns/comments renders third-party commenters' handles and their full comment text.
+  // DATA-PRIVACY.md ("Retention") treats exactly those two columns as personal data and has
+  // the prune-raw-payloads cron null them after COMMENT_RETENTION_DAYS (default 90). A PNG
+  // of that screen committed to git would hold the same data permanently and outside any
+  // prune — git history is not erasable in the way a nulled column is — so a screenshot here
+  // would quietly defeat the retention policy the app implements. The screen's own layout is
+  // still exercised: phase2 asserts its pending states, and check-tokens.mjs covers its
+  // colours. If a capture is ever wanted for design review, take it against a scratch
+  // database rather than this one, and keep it out of the repo.
+  //
+  // /scout/compare renders an empty main region until batches are selected, so there is no
+  // populated state to capture without seeding scan batches — which this read-only walk
+  // must not do.
 ];
 
 test.describe("Phase 0 — authenticated screens render seeded mock data", () => {

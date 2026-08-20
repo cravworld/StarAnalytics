@@ -1,6 +1,23 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 import { mintSessionCookie } from "./auth/mintSession";
+
+/**
+ * Sign-off screenshots for the two campaign screens that need a campaign to exist before
+ * they render anything: the generic detail view and its media kit.
+ *
+ * They live here rather than in phase0's walk for the same reason the agency ones live in
+ * phase3 — phase0 is read-only, and these need a row created first. This test already
+ * creates one and cleans it up, so the captures cost nothing extra. 11 replaces the old
+ * 11-vijayam-detail.png, a capture of the fixed /campaigns/vijayam route that was replaced
+ * by this generic view and no longer exists.
+ */
+const captureScreen = async (page: Page, name: string) => {
+  // Dev-only Next.js badge floats over the sidebar footer; hidden for the capture only,
+  // app source untouched. Same treatment as phase0 and phase3.
+  await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
+  await page.screenshot({ path: `e2e/screens/${name}.png`, fullPage: true });
+};
 
 /**
  * Phase 2 DoD (automatable parts): create a campaign through the real UI/DB,
@@ -62,7 +79,12 @@ test.describe("Phase 2 — campaign CRUD and generic detail view", () => {
     // Redirects to /campaigns/[id] on success (a uuid — not "new", "hashtag", "agency").
     await expect(page).toHaveURL(/\/campaigns\/(?!new$|hashtag$|agency$)[^/]+$/);
     createdCampaignIds.push(new URL(page.url()).pathname.split("/").pop()!);
-    await expect(page.getByText(`#${TEST_HASHTAG}`)).toBeVisible();
+    // The detail view now renders the tag in two legitimate places — the hero (.vhero-tag)
+    // and the hashtag-breakdown row (.bar-label) — so a bare getByText resolves to two
+    // elements and fails Playwright's strict mode. That is an ambiguous locator, not a
+    // broken page. Anchor to the hero, which is the one that identifies the campaign, and
+    // assert its exact text so a partial match can't stand in for the real tag.
+    await expect(page.locator(".vhero-tag")).toHaveText(`#${TEST_HASHTAG}`);
 
     // Honest pending states, not fake numbers or a blank card.
     await expect(page.getByText("Sentiment analysis pending")).toBeVisible();
@@ -74,6 +96,20 @@ test.describe("Phase 2 — campaign CRUD and generic detail view", () => {
 
     // Tab bar stays generic (not special-cased to one campaign's slug).
     await expect(page.locator(".itab.active")).toHaveText("Own Campaigns");
+
+    // Captured in exactly this state on purpose: a brand-new campaign is the empty/pending
+    // case, which is the harder one to get right visually and the one a fixture-backed
+    // screenshot could never show.
+    await captureScreen(page, "11-campaign-detail");
+
+    // The media kit is a re-skinned screen that had no sign-off capture at all, and it can
+    // only render for a campaign that exists — so it piggybacks on the one created above.
+    const campaignId = createdCampaignIds[createdCampaignIds.length - 1];
+    await page.goto(`/campaigns/${campaignId}/media-kit`);
+    // Anchored to the title rather than a bare getByText: the campaign name also appears in
+    // the "← Back to <name>" link, so an unscoped match resolves to two elements.
+    await expect(page.locator(".mk-title")).toHaveText(name);
+    await captureScreen(page, "17-media-kit");
 
     await page.goto("/campaigns");
     await expect(page.getByText(name)).toBeVisible();
