@@ -11,7 +11,7 @@
 //     campaign from being scanned every tick.
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { raiseCampaignAlerts, runCampaignScan } from "@/lib/data/theaterCampaigns";
+import { markLatestRunFailed, raiseCampaignAlerts, runCampaignScan } from "@/lib/data/theaterCampaigns";
 import { isMonitoringEnabled, bookMyShowConfigError } from "@/lib/bookmyshow/providers";
 import { releaseCronLock, tryAcquireCronLock } from "@/lib/cronLock";
 import { isApifyQuotaFailure } from "@/lib/apify/quotaBreaker";
@@ -70,6 +70,9 @@ export async function GET(request: Request) {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         results.push({ campaignId: campaign.id, status: "error", error: message });
+        // The cron is unattended: without this the run row says `running` forever and the
+        // next tick sees a recent scan and skips the campaign entirely.
+        await markLatestRunFailed(campaign.id, message);
         // The spend cap is account-wide, so one quota rejection means the rest of this
         // tick cannot succeed either — same short-circuit the hashtag cron uses, and the
         // thing that turned ~120 doomed calls a day into ~24.

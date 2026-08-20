@@ -305,11 +305,33 @@ export async function ingestScrapeItems(args: {
       continue;
     }
 
+    // A write failure has to fail THIS city, the same way an unusable date or a region
+    // mismatch does. Letting it throw out of the loop is what wedged the 2026-08-20 scan:
+    // the first city's transaction blew its time limit, the throw escaped, and a 30-city
+    // run ended with zero rows and a run row stuck in `running` with no error on it.
+    let stored;
+    try {
+      stored = await ingestCityResult(campaignId, scanRunId, normalized);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(
+        `${SCAN_LOG} city ingest failed campaign=${campaignId} city=${normalized.cityCode}: ${message}`,
+      );
+      await prisma.bmsScanCityResult.update({
+        where: {
+          scanRunId_cityCode_showDate: { scanRunId, cityCode: normalized.cityCode, showDate },
+        },
+        // Overwrites the "ok" recorded a moment ago: the page was readable, but nothing
+        // from it was stored, so counting it as succeeded would claim coverage we lack.
+        data: { status: "error", error: `Could not store this city: ${message}` },
+      });
+      continue;
+    }
+
     citiesSucceeded++;
     succeededCityCodes.add(normalized.cityCode);
     succeededDates.add(normalized.showDateCode);
 
-    const stored = await ingestCityResult(campaignId, scanRunId, normalized);
     theatersStored += stored.theaters;
     screeningsStored += stored.screenings;
     snapshotsStored += stored.snapshots;
@@ -368,6 +390,56 @@ export async function ingestScrapeItems(args: {
   };
 }
 
+// A single Kerala city page carries ~30 venues and ~180 shows. Written one row at a time
+// that is ~390 sequential round trips to a pooled Supabase connection, which took the FIRST
+// city past Prisma's 5s interactive-transaction limit — the transaction rolled back, the
+// throw escaped the scan loop, and a Kerala-wide scan wrote exactly nothing while its run
+// row sat in `running` forever. See the run recorded at 2026-08-20T08:46Z.
+//
+// So ingest is bulk: a fixed handful of statements per city no matter how many shows it
+// carries. The timeout below is a backstop for a pathological page, not the fix — if a city
+// ever needs more than this, the shape of the writes is wrong again.
+const CITY_TX_TIMEOUT_MS = 20_000;
+const CITY_TX_MAX_WAIT_MS = 10_000;
+
+/** Element-wise, because comparing two arrays with !== is always true and would restore the N+1. */
+function sameStrings(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+function sameInstant(a: Date | null, b: Date | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.getTime() === b.getTime();
+}
+
+/** Last write wins within a page: BookMyShow can list the same venue or session twice. */
+function dedupeBy<T>(rows: T[], key: (row: T) => string): T[] {
+  const byKey = new Map<string, T>();
+  for (const row of rows) byKey.set(key(row), row);
+  return [...byKey.values()];
+}
+
+/**
+ * Collapse per-row updates into one updateMany per distinct payload.
+ *
+ * On a steady-state scan nothing has drifted and this issues zero statements. When a venue
+ * really is renamed it is one or two rows, not the whole page, so the statement count stays
+ * bounded either way.
+ */
+async function updateInGroups<T>(
+  rows: { id: string; data: T }[],
+  run: (ids: string[], data: T) => Promise<unknown>,
+): Promise<void> {
+  const groups = new Map<string, { ids: string[]; data: T }>();
+  for (const row of rows) {
+    const key = JSON.stringify(row.data);
+    const existing = groups.get(key);
+    if (existing) existing.ids.push(row.id);
+    else groups.set(key, { ids: [row.id], data: row.data });
+  }
+  for (const group of groups.values()) await run(group.ids, group.data);
+}
+
 /**
  * Persist one successfully-read city page.
  *
@@ -381,45 +453,65 @@ async function ingestCityResult(
   scanRunId: string,
   normalized: NormalizedCityResult,
 ): Promise<{ theaters: number; screenings: number; snapshots: number; unmapped: number }> {
-  return prisma.$transaction(async (tx) => {
-    const theaterIdByVenue = new Map<string, string>();
-    let unmapped = 0;
+  const theaters = dedupeBy(normalized.theaters, (t) => t.venueCode);
+  const screenings = dedupeBy(normalized.screenings, (s) => `${s.bmsSessionId}|${s.showDate.toISOString()}`);
+  if (theaters.length === 0 && screenings.length === 0) {
+    return { theaters: 0, screenings: 0, snapshots: 0, unmapped: 0 };
+  }
 
-    for (const t of normalized.theaters) {
-      const theater = await tx.theater.upsert({
-        where: { source_venueCode: { source: "bookmyshow", venueCode: t.venueCode } },
-        create: {
+  return prisma.$transaction(
+    async (tx) => {
+      const seenAt = new Date();
+
+      await tx.theater.createMany({
+        data: theaters.map((t) => ({
           source: "bookmyshow",
           venueCode: t.venueCode,
           name: t.name,
           cityCode: t.cityCode,
           cityName: t.cityName,
           chainCode: t.chainCode,
-        },
-        // cityCode/cityName are NOT updated: they record where the venue was first seen,
-        // and BookMyShow lists the same venue under several adjacent regions. Rewriting
-        // them each scan would make a theater appear to move between districts.
-        update: { name: t.name, chainCode: t.chainCode, lastSeenAt: new Date() },
+        })),
+        skipDuplicates: true,
       });
-      theaterIdByVenue.set(t.venueCode, theater.id);
-    }
 
-    let snapshots = 0;
-    for (const s of normalized.screenings) {
-      const theaterId = theaterIdByVenue.get(s.venueCode);
-      if (!theaterId) continue;
+      const storedTheaters = await tx.theater.findMany({
+        where: { source: "bookmyshow", venueCode: { in: theaters.map((t) => t.venueCode) } },
+        select: { id: true, venueCode: true, name: true, chainCode: true },
+      });
+      const theaterIdByVenue = new Map(storedTheaters.map((t) => [t.venueCode, t.id]));
 
-      const screening = await tx.screening.upsert({
-        where: {
-          campaignId_bmsSessionId_showDate: {
-            campaignId,
-            bmsSessionId: s.bmsSessionId,
-            showDate: s.showDate,
-          },
-        },
-        create: {
+      await tx.theater.updateMany({
+        where: { id: { in: storedTheaters.map((t) => t.id) } },
+        data: { lastSeenAt: seenAt },
+      });
+
+      // cityCode/cityName are deliberately absent here: they record where the venue was
+      // FIRST seen, and BookMyShow lists the same venue under several adjacent regions.
+      // Rewriting them each scan would make a theater appear to move between districts.
+      const incomingTheater = new Map(theaters.map((t) => [t.venueCode, t]));
+      await updateInGroups(
+        storedTheaters
+          .filter((stored) => {
+            const t = incomingTheater.get(stored.venueCode);
+            return t !== undefined && (t.name !== stored.name || t.chainCode !== stored.chainCode);
+          })
+          .map((stored) => {
+            const t = incomingTheater.get(stored.venueCode)!;
+            return { id: stored.id, data: { name: t.name, chainCode: t.chainCode } };
+          }),
+        (ids, data) => tx.theater.updateMany({ where: { id: { in: ids } }, data }),
+      );
+
+      const placeable = screenings.filter((s) => theaterIdByVenue.has(s.venueCode));
+      if (placeable.length === 0) {
+        return { theaters: theaters.length, screenings: screenings.length, snapshots: 0, unmapped: 0 };
+      }
+
+      await tx.screening.createMany({
+        data: placeable.map((s) => ({
           campaignId,
-          theaterId,
+          theaterId: theaterIdByVenue.get(s.venueCode)!,
           bmsSessionId: s.bmsSessionId,
           showDate: s.showDate,
           showDateTime: s.showDateTime,
@@ -427,53 +519,145 @@ async function ingestCityResult(
           language: s.language,
           format: s.format,
           priceBands: s.priceBands,
-        },
-        update: {
-          showDateTime: s.showDateTime,
-          cutOffAt: s.cutOffAt,
-          language: s.language,
-          format: s.format,
-          priceBands: s.priceBands,
-          lastSeenAt: new Date(),
-          // A show that reappears after vanishing is no longer gone. Without this a
-          // temporary blip would leave it permanently marked as disappeared.
-          disappearedAt: null,
-        },
+        })),
+        skipDuplicates: true,
       });
 
-      const reading = readDemand(s.availStatus);
-      if (reading.unmapped) unmapped++;
-      await tx.availabilitySnapshot.upsert({
-        // The idempotency guarantee: one observation per show per scan run, enforced by
-        // the database. A retried scan updates in place instead of doubling the history.
-        where: { screeningId_scanRunId: { screeningId: screening.id, scanRunId } },
-        create: {
-          screeningId: screening.id,
+      // Keyed on the full unique tuple, not on bmsSessionId alone — a session id repeats
+      // across dates and matching on it alone would attach today's reading to yesterday's
+      // show. The `in` filters are a superset; the map lookup is what is exact.
+      const storedScreenings = await tx.screening.findMany({
+        where: {
+          campaignId,
+          bmsSessionId: { in: placeable.map((s) => s.bmsSessionId) },
+          showDate: { in: [...new Set(placeable.map((s) => s.showDate.getTime()))].map((t) => new Date(t)) },
+        },
+        select: {
+          id: true,
+          bmsSessionId: true,
+          showDate: true,
+          showDateTime: true,
+          cutOffAt: true,
+          language: true,
+          format: true,
+          priceBands: true,
+        },
+      });
+      const screeningKey = (sessionId: string, showDate: Date) => `${sessionId}|${showDate.toISOString()}`;
+      const screeningIdByKey = new Map(
+        storedScreenings.map((s) => [screeningKey(s.bmsSessionId, s.showDate), s.id]),
+      );
+
+      const touchedIds = placeable
+        .map((s) => screeningIdByKey.get(screeningKey(s.bmsSessionId, s.showDate)))
+        .filter((id): id is string => id !== undefined);
+
+      await tx.screening.updateMany({
+        where: { id: { in: touchedIds } },
+        // A show that reappears after vanishing is no longer gone. Without clearing
+        // disappearedAt a temporary blip would leave it permanently marked as disappeared.
+        // lastSeenAt matters just as much: markDisappeared reads it, so a scan that failed
+        // to refresh it would mark the entire slate as pulled on the NEXT run.
+        data: { lastSeenAt: seenAt, disappearedAt: null },
+      });
+
+      const incomingScreening = new Map(
+        placeable.map((s) => [screeningKey(s.bmsSessionId, s.showDate), s]),
+      );
+      await updateInGroups(
+        storedScreenings
+          .filter((stored) => {
+            const s = incomingScreening.get(screeningKey(stored.bmsSessionId, stored.showDate));
+            return (
+              s !== undefined &&
+              (!sameInstant(s.showDateTime, stored.showDateTime) ||
+                !sameInstant(s.cutOffAt, stored.cutOffAt) ||
+                s.language !== stored.language ||
+                s.format !== stored.format ||
+                !sameStrings(s.priceBands, stored.priceBands))
+            );
+          })
+          .map((stored) => {
+            const s = incomingScreening.get(screeningKey(stored.bmsSessionId, stored.showDate))!;
+            return {
+              id: stored.id,
+              data: {
+                showDateTime: s.showDateTime,
+                cutOffAt: s.cutOffAt,
+                language: s.language,
+                format: s.format,
+                priceBands: s.priceBands,
+              },
+            };
+          }),
+        (ids, data) => tx.screening.updateMany({ where: { id: { in: ids } }, data }),
+      );
+
+      let unmapped = 0;
+      const snapshotRows = [];
+      for (const s of placeable) {
+        const screeningId = screeningIdByKey.get(screeningKey(s.bmsSessionId, s.showDate));
+        if (!screeningId) continue;
+        const reading = readDemand(s.availStatus);
+        if (reading.unmapped) unmapped++;
+        snapshotRows.push({
+          screeningId,
           scanRunId,
           availStatus: s.availStatus,
           demandLevel: reading.level,
           styleId: s.styleId,
           sourceLabel: s.sourceLabel,
           confidence: reading.confidence,
-        },
-        update: {
-          availStatus: s.availStatus,
-          demandLevel: reading.level,
-          styleId: s.styleId,
-          sourceLabel: s.sourceLabel,
-          confidence: reading.confidence,
-        },
-      });
-      snapshots++;
-    }
+        });
+      }
 
-    return {
-      theaters: normalized.theaters.length,
-      screenings: normalized.screenings.length,
-      snapshots,
-      unmapped,
-    };
-  });
+      // The idempotency guarantee — one observation per show per scan run — is still the
+      // database's, via the (screeningId, scanRunId) unique constraint. skipDuplicates
+      // rather than upsert means first-reading-wins where the previous code was
+      // last-reading-wins. That only bites when one run reads the same session on two city
+      // pages, and both readings are equally true observations of that run.
+      const created = await tx.availabilitySnapshot.createMany({
+        data: snapshotRows,
+        skipDuplicates: true,
+      });
+
+      return {
+        theaters: theaters.length,
+        screenings: screenings.length,
+        snapshots: created.count,
+        unmapped,
+      };
+    },
+    { timeout: CITY_TX_TIMEOUT_MS, maxWait: CITY_TX_MAX_WAIT_MS },
+  );
+}
+
+/**
+ * Close out a run that died on an unexpected throw.
+ *
+ * runCampaignScan records its own known failures, but anything it does not anticipate
+ * escapes with the run row still saying `running`. The scan status panel is the only place
+ * a user is told what went wrong, so a run that cannot say it failed is a silent failure.
+ *
+ * Best-effort and swallowing by design: this is called from a catch block, and if the
+ * database is what broke then this write breaks too. Masking the original error with a
+ * second one would lose the only useful diagnostic.
+ */
+export async function markLatestRunFailed(campaignId: string, message: string): Promise<void> {
+  try {
+    const running = await prisma.bmsScanRun.findFirst({
+      where: { campaignId, status: { in: ["queued", "running"] } },
+      orderBy: { startedAt: "desc" },
+      select: { id: true },
+    });
+    if (!running) return;
+    await prisma.bmsScanRun.update({
+      where: { id: running.id },
+      data: { status: "error", finishedAt: new Date(), error: message.slice(0, 500) },
+    });
+  } catch (err) {
+    console.error(`${SCAN_LOG} could not record scan failure campaign=${campaignId}:`, err);
+  }
 }
 
 /**
