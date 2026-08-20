@@ -54,6 +54,7 @@ const BASE_URL = (args.url || process.env.STARANALYTICS_URL || "http://localhost
 const SECRET = process.env.BOOKMYSHOW_CAPTURE_SECRET;
 const DAYS = Number(args.days || process.env.BOOKMYSHOW_CAPTURE_DAYS || 2);
 const DELAY_MS = Number(args["delay-ms"] || process.env.BOOKMYSHOW_CAPTURE_DELAY_MS || 4000);
+const MAX_CITIES = Number(args["max-cities"] || process.env.BOOKMYSHOW_CAPTURE_MAX_CITIES || 0);
 const DRY_RUN = Boolean(args["dry-run"]);
 const HEADFUL = !args.headless;
 const LOG_FILE = join(ROOT, "bms-capture.log");
@@ -209,7 +210,44 @@ function resolveCities(plan) {
       : Object.keys(REGIONS);
   const unknown = requested.filter((c) => !REGIONS[c]);
   if (unknown.length) log(`ignoring unknown region codes: ${unknown.join(", ")}`);
-  return requested.filter((c) => REGIONS[c]);
+  const known = requested.filter((c) => REGIONS[c]);
+  if (raw) return known; // an explicit --cities list is an instruction, not a suggestion
+  return rotateWindow(known);
+}
+
+/**
+ * Take a different slice of the city list on each run.
+ *
+ * WHY. Measured twice on 2026-08-20, 17 minutes apart: the first page of a run succeeds and
+ * every page after it returns 403. Because the city list arrives in a fixed order, that
+ * means a scheduled task requesting all 30 regions captures Kochi, three times a day,
+ * forever — and never sees the other 29. The campaign is supposed to cover Kerala.
+ *
+ * This does NOT try to get more pages than BookMyShow is willing to serve. The yield stays
+ * one city per run; all that changes is WHICH city gets that slot, and that 29 requests
+ * already known to be refused are no longer sent. Fewer requests, same result — the
+ * opposite of working around a rate limit.
+ *
+ * The offset comes from the clock rather than a state file so nothing has to be persisted
+ * between runs, and the 09:00/14:00/19:00 triggers are 5 hours apart, so each lands in its
+ * own bucket and the window advances every time.
+ */
+function rotateWindow(cities) {
+  if (cities.length === 0) return cities;
+  const size = MAX_CITIES > 0 ? Math.min(MAX_CITIES, cities.length) : cities.length;
+  // Advance by ONE city per run, not by the window size. Sliding by the window looks
+  // tidier and is wrong: with 30 regions and a window of 6, `bucket * 6 % 30` only ever
+  // takes 5 distinct values, so only 5 cities would ever lead — and since only the lead
+  // page succeeds, only those 5 would ever be captured. Stepping by 1 gives every region
+  // the leading slot in turn (gcd(1, n) = 1, so the cycle covers all of them).
+  const bucket = Math.floor(Date.now() / (5 * 60 * 60 * 1000));
+  const start = ((bucket % cities.length) + cities.length) % cities.length;
+  const window = [];
+  for (let i = 0; i < size; i++) window.push(cities[(start + i) % cities.length]);
+  if (size < cities.length) {
+    log(`city window ${start}..${start + size - 1} of ${cities.length}: ${window.join(", ")}`);
+  }
+  return window;
 }
 
 async function capturePage(context, plan, code, dateCode) {

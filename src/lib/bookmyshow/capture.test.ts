@@ -62,6 +62,24 @@ describe("the capture script does not disguise itself", () => {
     expect(SCRIPT).toMatch(/stop and reassess rather than retrying/i);
   });
 
+  it("does not request pages it already knows will be refused", () => {
+    // Measured twice on 2026-08-20: page one of a run succeeds, every page after it 403s.
+    // With a fixed city order that means a scheduled sweep captures Kochi three times a day
+    // and never sees the other 29 regions — while sending 29 requests already known to be
+    // refused. The window rotates so a different city gets the one slot that works.
+    //
+    // This is not evasion and must not become it: the yield stays one city per run. If a
+    // change here starts trying to get MORE pages out of a session, that is the line.
+    expect(code).toMatch(/rotateWindow/);
+    expect(code).toMatch(/MAX_CITIES/);
+    expect(SCRIPT).toMatch(/does NOT try to get more pages than BookMyShow is willing to serve/i);
+  });
+
+  it("still honours an explicit --cities list verbatim", () => {
+    // Rotation is a default for unattended sweeps. Someone who names cities means those.
+    expect(code).toMatch(/if \(raw\) return known;/);
+  });
+
   it("sets the region cookie per page, because the URL alone is not honoured", () => {
     expect(code).toMatch(/clearCookies\(\{ name: "rgn" \}\)/);
     expect(code).toMatch(/regionCode: code/);

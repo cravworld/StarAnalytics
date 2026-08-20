@@ -188,23 +188,43 @@ Schedule it once and it is unattended:
 The task runs interactively because Chrome needs a desktop session — the machine has to be
 on and logged in, and you will see the window appear.
 
-### Measured success rate: partial and unpredictable
+### Measured success rate: one city per run
 
-Verified 2026-08-20. BookMyShow serves some requests and 403s others, seemingly at random:
+Small early probes suggested a roughly 50% hit rate:
 
 | Run | Result |
 |---|---|
 | 2 cities, 4s apart | 1 ok, 1 × 403 |
 | 4 cities, 15s apart | 2 ok, 2 × 403 |
 
-Backing off further did **not** improve it, so this is not simple rate limiting — it is a
-probabilistic challenge. Expect roughly half the pages in any given run to fail.
+**Two full 30-city sweeps on 2026-08-20, 17 minutes apart, tell a sharper story:** each one
+returned **1 ok and 29 × 403** — the first page succeeded, and every page after it in the
+same run was refused. That is not a coin flip at ~50%; it reads as a **per-session budget of
+about one page**, and it means the earlier small samples were measuring the same thing from
+too few pages to see the shape.
 
-**This is survivable by design, and the reason the data model looks the way it does.** Each
-city-date is independent: a 403 is recorded as a *failed city*, never as a city with no
-demand, and snapshots are idempotent per scan run. Three runs a day across a week gives
-most cities repeated coverage even at a 50% per-run hit rate. Partial data that knows it is
-partial is the thing this feature was built to handle.
+Assume **one city per run**, not half of them.
+
+**Which city therefore matters more than how many.** The city list arrives in a fixed order,
+so a sweep that just asks for all 30 would capture Kochi three times a day and never see the
+rest of Kerala. `resolveCities` rotates the window by one city per run, so every region takes
+the leading slot in turn. Simulated over 10 days of the 09:00/14:00/19:00 triggers: 23
+distinct lead cities, every region appearing, none repeated within a day.
+
+Pair it with `--max-cities`, which caps how many are requested per run. The yield is
+unchanged — one city either way — but 29 requests already known to be refused are no longer
+sent. The registered task uses `--max-cities 6`.
+
+> Rotation is **not** a way around the limit, and must not become one. It does not try to
+> get more pages out of a session; it sends **fewer** requests for the same result and only
+> changes which city gets the slot that works. If a change here starts trying to widen the
+> per-session yield, that is the line — see below.
+
+**Partial coverage is survivable by design, and the reason the data model looks the way it
+does.** Each city-date is independent: a 403 is recorded as a *failed city*, never as a city
+with no demand, and snapshots are idempotent per scan run. But at one city per run, budget
+for coverage in **weeks, not days** — a theater's "last seen" can be many days older than
+the last scan, which is why the UI shows per-theater last-seen times.
 
 ### Do not try to raise the hit rate
 
