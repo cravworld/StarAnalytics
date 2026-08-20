@@ -53,6 +53,13 @@ const NAV_ICONS: Record<string, React.ReactNode> = {
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
     </svg>
   ),
+  theater: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M7 4v16M17 4v16" />
+      <path d="M2 9h5M2 15h5M17 9h5M17 15h5" />
+    </svg>
+  ),
 };
 
 const MY_PAGE = [
@@ -136,6 +143,16 @@ export function Sidebar({ fanPageCount }: { fanPageCount: number }) {
       >
         {NAV_ICONS.scout}
         Scoutline
+      </Link>
+
+      <div className="nav-sec">Theatrical</div>
+      <Link
+        href="/theater-campaigns"
+        aria-current={pathname.startsWith("/theater-campaigns") ? "page" : undefined}
+        className={`nav-item${pathname.startsWith("/theater-campaigns") ? " active" : ""}`}
+      >
+        {NAV_ICONS.theater}
+        Theater Campaigns
       </Link>
 
       <div className="nav-sec">Community</div>

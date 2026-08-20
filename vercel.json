@@ -19,6 +19,10 @@
     {
       "path": "/api/cron/poll-scout-runs",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/scan-theater-campaigns",
+      "schedule": "*/30 * * * *"
     }
   ]
 }
