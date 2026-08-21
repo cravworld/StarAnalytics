@@ -183,6 +183,22 @@ function readPill(pill: DemandPill | undefined): DemandReading {
   if (style.startsWith("green-pill")) {
     return { level: "wide_open", confidence: "high", unmapped: false };
   }
+  if (style.startsWith("grey-pill") || style.startsWith("gray-pill")) {
+    // Surfaced by the unmapped alarm on 2026-08-21: six shows across PVR Lulu (Kochi and
+    // Trivandrum), Vanitha Cineplex and Greenfield Moviemax came back grey.
+    //
+    // The obvious explanation — past their booking cutoff — was tested and is WRONG. All
+    // six were in the FUTURE at capture time (18:45–22:50 IST, captured 16:59), and a green,
+    // bookable show sat at 18:00, earlier than several of them. Do not re-derive that theory.
+    //
+    // What remains is sold out, not yet open for booking, or a held/blocked screen — and
+    // BookMyShow does not say which. Those are opposite in meaning (a sell-out is peak
+    // demand; not-yet-on-sale is no information), which is exactly the ambiguity
+    // `unavailable` exists to hold. It carries no rank and is excluded from demand signals,
+    // so a grey show can neither inflate nor deflate a theater's score — the honest outcome
+    // when the source will not tell us which of those it is.
+    return { level: "unavailable", confidence: "low", unmapped: false };
+  }
   if (style.startsWith("orange-pill")) {
     // "fast_filling" is BookMyShow's own word, which is what makes this one confirmed
     // rather than inferred — the same reason availStatus 2 outranked 1 on confidence.

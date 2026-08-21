@@ -104,6 +104,27 @@ describe("reading the pill when availStatus is absent", () => {
     );
   });
 
+  it("reads a grey pill as unavailable, not as demand", () => {
+    // Found by the unmapped alarm on 2026-08-21, six shows across four multiplexes.
+    //
+    // It must never be treated as a demand level. Grey could be a sell-out (peak demand) or
+    // a show not yet on sale (no information), and BookMyShow does not distinguish them —
+    // so it lands in `unavailable`, which carries no rank and is excluded from signals.
+    //
+    // The obvious theory — past its booking cutoff — was tested and rejected: all six were
+    // future shows at capture time, and a bookable green show sat earlier than several.
+    const grey = readDemand(null, { styleId: "grey-pill-with-border", sourceLabel: null });
+    expect(grey.level).toBe("unavailable");
+    expect(grey.unmapped).toBe(false);
+    expect(grey.confidence).toBe("low");
+    expect(demandRank(grey.level)).toBeNull();
+    expect(countsTowardDemandSignal(grey.level)).toBe(false);
+  });
+
+  it("accepts either spelling of grey", () => {
+    expect(readDemand(null, { styleId: "gray-pill-with-border" }).level).toBe("unavailable");
+  });
+
   it("is LOUD when neither channel says anything usable", () => {
     // The regression this exists for. readDemand(null) used to return unmapped:false,
     // treating a missing field as an ordinary absence — so when BookMyShow dropped

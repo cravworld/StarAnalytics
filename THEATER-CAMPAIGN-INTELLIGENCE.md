@@ -29,6 +29,18 @@ coloured pill and carries in its page data as `availStatus`:
 | 1 | Limited | More constrained than 2 | **Inferred** |
 | 0 | Not on sale | Not being offered | **Inferred** |
 
+Live BookMyShow no longer sends `availStatus`; the same states are read from the rendered
+pill instead (green = wide open, orange + `fast_filling` = filling, orange alone = limited).
+A fourth appeared on 2026-08-21 and was caught by the unmapped alarm rather than slipping
+through: **grey = not on sale**, read as `unavailable`.
+
+The obvious explanation for grey — past its booking cutoff — was **tested and rejected**.
+All six grey shows were in the future at capture time (18:45–22:50 IST, captured 16:59) and
+a green, bookable show sat at 18:00, earlier than several of them. What remains is sold out,
+not yet on sale, or a held screen — opposite in meaning, and BookMyShow does not say which.
+That is precisely what `unavailable` is for: it carries no rank and is excluded from demand
+signals, so a grey show can neither inflate nor deflate a theater score.
+
 Levels 1 and 0 are inferred, not confirmed. In particular **"Not on sale" is not "sold
 out"** — it could equally be a cancellation, a blocked screen, a held allocation, or a show
 past its booking cutoff. BookMyShow does not distinguish these, so neither do we, and
