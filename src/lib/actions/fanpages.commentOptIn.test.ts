@@ -19,7 +19,7 @@ const addFanPages = vi.fn(async () => ({
   postIds: ["post-4", "post-5"],
 }));
 const pullFanPageHistory = vi.fn(async () => ({ postIds: ["post-3"], postCount: 1 }));
-const refreshFanPages = vi.fn(async () => [{ handle: "a", ok: true, postCount: 2 }]);
+const refreshFanPages = vi.fn(async () => [{ id: "page-1", handle: "a", ok: true, postCount: 2 }]);
 
 vi.mock("@/lib/data/sentiment", () => ({ queueSentimentClassification }));
 vi.mock("@/lib/data/fanpages", () => ({
@@ -110,13 +110,34 @@ describe("fan-page actions and the comment scrape", () => {
     expect(queueSentimentClassification).toHaveBeenCalledWith(["post-3"], { scrapeComments: true });
   });
 
-  it("Refresh all opts in, and forces past the TTL", async () => {
-    const { refreshAllFanPagesAction } = await import("./fanpages");
-    await refreshAllFanPagesAction();
+  it("Refresh all opts in, forces past the TTL, and refreshes only the ids it was given", async () => {
+    // The `ids` filter is what keeps this request survivable. Refreshing every page in one action
+    // exceeded maxDuration at 33 tracked pages — killed mid-loop, 504 at the browser, some pages
+    // committed and no report of which. If this stopped passing ids the action would silently go
+    // back to refreshing the whole table on every chunk, which is both the old timeout and N
+    // times the work.
+    const { refreshFanPagesChunkAction } = await import("./fanpages");
+    await refreshFanPagesChunkAction(["page-1"]);
     expect(refreshFanPages).toHaveBeenCalledWith({
       force: true,
+      ids: ["page-1"],
       sentimentOpts: { scrapeComments: true },
     });
+  });
+
+  it("Refresh all revalidates only on the final chunk, and caps the batch", async () => {
+    const { refreshFanPagesChunkAction } = await import("./fanpages");
+    const { MAX_BULK_ADD_HANDLES } = await import("@/lib/providers/handle-input");
+    revalidatePathSpy.mockClear();
+    await refreshFanPagesChunkAction(["page-1"], false);
+    expect(revalidatePathSpy, "a non-final chunk must not re-render the route").not.toHaveBeenCalled();
+
+    await refreshFanPagesChunkAction(["page-1"], true);
+    expect(revalidatePathSpy).toHaveBeenCalledWith("/fan-pages");
+
+    const tooMany = Array.from({ length: MAX_BULK_ADD_HANDLES + 1 }, (_, i) => `page-${i}`);
+    await expect(refreshFanPagesChunkAction(tooMany)).rejects.toThrow(/too many pages/);
+    await expect(refreshFanPagesChunkAction([])).rejects.toThrow(/no pages/);
   });
 
   it("the cron refresh does NOT opt in — it inherits the global default", async () => {

@@ -846,6 +846,18 @@ export interface RefreshFanPagesOptions {
   force?: boolean;
   apifyQuotaExhausted?: boolean;
   /**
+   * Restrict the loop to these page ids instead of every active page.
+   *
+   * This is what lets "Refresh all" survive a real fan network. Refreshing every page in one
+   * Server Action is bounded by the hosting page's maxDuration (800s), while a single Instagram
+   * page can take ~600s of it — two Apify runs at DEFAULT_WAIT_MS each, plus the comment scrape.
+   * At 33 tracked pages that request cannot finish, so it is killed mid-loop and the browser gets
+   * a 504: the pages the loop had already reached are refreshed and committed, the rest are not,
+   * and the user is told nothing either way. The client now walks the ids a chunk at a time, so
+   * each request is the same size as the per-page refresh button that already works.
+   */
+  ids?: string[];
+  /**
    * Passed through to the sentiment pipeline. The manual paths opt into the comment scrape;
    * the cron leaves this undefined so it inherits the global (off) default — see
    * isCommentScrapeEnabled and the note in actions/fanpages.ts.
@@ -860,8 +872,11 @@ export interface RefreshFanPagesOptions {
  * differ only in the options above.
  */
 export async function refreshFanPages(opts: RefreshFanPagesOptions = {}): Promise<FanPageRefreshResult[]> {
-  const { force = false, apifyQuotaExhausted = false, sentimentOpts } = opts;
-  const pages = await prisma.fanPage.findMany({ where: { isActive: true }, orderBy: { igHandle: "asc" } });
+  const { force = false, apifyQuotaExhausted = false, sentimentOpts, ids } = opts;
+  const pages = await prisma.fanPage.findMany({
+    where: { isActive: true, ...(ids ? { id: { in: ids } } : {}) },
+    orderBy: { igHandle: "asc" },
+  });
   const results: FanPageRefreshResult[] = [];
   let quotaExhausted = apifyQuotaExhausted;
   for (const p of pages) {

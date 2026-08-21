@@ -113,19 +113,40 @@ export async function pullFanPageHistoryAction(id: string) {
 }
 
 /**
- * "Refresh all" on the Fan Pages list — the same pull the per-page button does, run across
- * every tracked page so nobody has to open them one at a time.
+ * "Refresh all" on the Fan Pages list — one chunk of it.
  *
- * Forced rather than TTL-gated: someone pressing this wants current numbers, and quietly
- * skipping the pages that were checked an hour ago would look like the button did nothing.
- * Runs sequentially and returns a per-page outcome, so one page failing (a dead handle, a
- * rate limit) neither aborts the rest nor gets reported as success — the same discipline the
- * cron uses, because it is literally the same loop.
+ * This used to refresh every tracked page inside a single Server Action, and that worked right
+ * up until there were enough pages to matter. The request is bounded by the hosting page's
+ * maxDuration (800s) while one Instagram page can take ~600s of it — two Apify runs at
+ * DEFAULT_WAIT_MS each, plus the comment scrape — so at 33 tracked pages the loop could not
+ * possibly finish. It was killed at the limit and the browser got a 504: pages the loop had
+ * already reached were refreshed and committed, the rest silently were not, and the outcome
+ * reported nothing either way because the response never arrived. Scale turned a working button
+ * into one that both failed and lied about it.
+ *
+ * So the client walks the ids a chunk at a time — the same shape the bulk-add path uses — and
+ * each request is now the size of the per-page refresh button that has always worked. The count
+ * and the cap are enforced here rather than trusted from the client, since a Server Action is a
+ * public POST endpoint.
+ *
+ * Forced rather than TTL-gated: someone pressing this wants current numbers, and quietly skipping
+ * the pages checked an hour ago would look like the button did nothing.
+ *
+ * Per-page failures are returned, not thrown, so one dead handle neither aborts the run nor gets
+ * reported as success — the same discipline the cron uses, because it is literally the same loop.
  */
-export async function refreshAllFanPagesAction() {
+export async function refreshFanPagesChunkAction(ids: string[], revalidate = true) {
   await requireSession();
-  const results = await refreshFanPages({ force: true, sentimentOpts: FAN_PAGE_SENTIMENT_OPTS });
-  revalidatePath("/fan-pages");
+  if (!Array.isArray(ids) || ids.length === 0) throw new Error("no pages given");
+  if (ids.length > MAX_BULK_ADD_HANDLES) {
+    throw new Error(`too many pages in one call (max ${MAX_BULK_ADD_HANDLES})`);
+  }
+
+  const results = await refreshFanPages({ force: true, ids, sentimentOpts: FAN_PAGE_SENTIMENT_OPTS });
+  // Same reasoning as the bulk-add path: revalidating makes the response carry a re-render of
+  // this whole route, so doing it on every chunk would re-run getFanPagesData once per page
+  // mid-run. The client asks for it on the last chunk only.
+  if (revalidate) revalidatePath("/fan-pages");
   // One literal path per refreshed page, rather than the `("/fan-pages/[id]", "page")` route
   // pattern this used to pass. The pattern form builds its cache tag from the string as
   // given, and this route really lives at `(app)/fan-pages/[id]` — whether the tag needs the
@@ -133,7 +154,13 @@ export async function refreshAllFanPagesAction() {
   // stale after a refresh with nothing to notice. Literal paths have no such ambiguity, are
   // what every other call site in this codebase uses, and are available now that the results
   // carry ids.
-  for (const r of results) revalidatePath(`/fan-pages/${r.id}`);
+  // Gated with the call above rather than run unconditionally: revalidating at all is what makes
+  // the response carry a re-render of the current route, so a per-chunk detail-path sweep would
+  // reintroduce exactly the churn this split exists to remove. Detail pages do not go stale as a
+  // result — `/fan-pages/[id]` is a dynamic route, so it is server-rendered on navigation
+  // regardless; this only clears the client router cache, which the final chunk's pass and the
+  // client's closing router.refresh() both cover.
+  if (revalidate) for (const r of results) revalidatePath(`/fan-pages/${r.id}`);
   return {
     total: results.length,
     refreshed: results.filter((r) => r.ok).length,
