@@ -21,6 +21,11 @@ import {
   postUrlKey,
   type NormalizedTrackedPost,
 } from "./apify-normalize";
+import {
+  normalizeFacebookPostItem,
+  type NormalizedFacebookPost,
+} from "./apify-normalize-facebook-posts";
+import { normalizeFacebookScoutItem } from "./apify-scout-normalize-facebook";
 import type { AccountSnapshot, PublicContentProvider, RawPost } from "./types";
 
 function actorEnv(name: string): string {
@@ -509,6 +514,83 @@ const TRACKED_POST_DATA_DETAIL_LEVEL = "detailedData";
  * path upsert into `posts` would collide with the agency pipeline over the same shortcode
  * (CAMPAIGN-POST-TRACKING.md §2a). Storage is the caller's job.
  */
+// How far back the first scrape of a page looks when we don't yet know the tracked post's
+// date. Once a post is stored we know exactly when it was published and bound the scrape to
+// that instead (see fetchTrackedFacebookPosts), so this only ever applies to a first
+// ingest. Three months is generous for a campaign post someone is pasting in by hand, and
+// cheap: influencer pages in this account's own Scoutline data post a median of ~1 post per
+// week, so three months is typically a dozen or so items.
+const FB_INITIAL_LOOKBACK = process.env.APIFY_FB_INITIAL_LOOKBACK || "3 months";
+
+// Hard ceiling on items per page run, whatever the date bound implies. A page that posts
+// far more often than the median (the same Scoutline data has a max of 112/week) would
+// otherwise turn one tracked post into a very large bill.
+const FB_MAX_POSTS_PER_PAGE = Number(process.env.APIFY_FB_MAX_POSTS_PER_PAGE) || 200;
+
+/**
+ * Current metrics for tracked Facebook posts on ONE page.
+ *
+ * Facebook has no post-URL actor (see apify-normalize-facebook-posts.ts for the full
+ * reasoning), so this scrapes the page and the caller matches posts out of the result by
+ * ID. `onlyPostsNewerThan` is what keeps that honest and cheap: bounded to just before the
+ * oldest post we are tracking on this page, the run is guaranteed to reach every one of
+ * them rather than hoping a fixed result count went deep enough.
+ *
+ * Persists nothing — same as the Instagram tracked-post path.
+ */
+export async function fetchTrackedFacebookPosts(
+  pageUrl: string,
+  oldestPostedAt: Date | null,
+): Promise<NormalizedFacebookPost[]> {
+  // One day of slack: the actor's date filter and the post's own timestamp can disagree by
+  // a few hours across timezones, and losing the oldest post to an off-by-one would look
+  // exactly like that post having been deleted.
+  const newerThan = oldestPostedAt
+    ? new Date(oldestPostedAt.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    : FB_INITIAL_LOOKBACK;
+
+  const items = await trackedRun<Record<string, unknown>>(
+    "tracked-posts-facebook",
+    // Defaulted rather than required via actorEnv(): that helper throws when unset, and
+    // nothing in the existing deployment sets this. Same pattern as Scoutline's
+    // FACEBOOK_ACTOR_ID — the env var exists to override, not to be mandatory.
+    process.env.APIFY_ACTOR_FACEBOOK_POSTS || "apify/facebook-posts-scraper",
+    {
+      startUrls: [{ url: pageUrl }],
+      onlyPostsNewerThan: newerThan,
+      resultsLimit: FB_MAX_POSTS_PER_PAGE,
+    },
+    { maxItems: FB_MAX_POSTS_PER_PAGE },
+  );
+  return items.map((item) => normalizeFacebookPostItem(item));
+}
+
+/**
+ * Follower count for a Facebook page.
+ *
+ * Reuses the same actor and normalizer Scoutline already runs for Facebook pages, rather
+ * than adding a second page-scraping path — the follower number is the same number, and
+ * that normalizer already encodes what this repo learned from live runs about how
+ * inconsistently Facebook pages come back.
+ */
+export async function fetchFacebookPageSnapshot(
+  pageUrl: string,
+): Promise<{ displayName: string | null; followers: number | null; raw: Record<string, unknown> | null }> {
+  const items = await trackedRun<Record<string, unknown>>(
+    "tracked-account-facebook",
+    process.env.APIFY_ACTOR_SCOUT_FACEBOOK || "apify/facebook-pages-scraper",
+    { startUrls: [{ url: pageUrl }] },
+    { maxItems: 1 },
+  );
+  if (items.length === 0) return { displayName: null, followers: null, raw: null };
+  const normalized = normalizeFacebookScoutItem(items[0]);
+  return {
+    displayName: normalized.pageUsername,
+    followers: normalized.followers,
+    raw: normalized.raw,
+  };
+}
+
 export async function fetchTrackedInstagramPosts(urls: string[]): Promise<NormalizedTrackedPost[]> {
   if (urls.length === 0) return [];
   const items = await trackedRun<Record<string, unknown>>(

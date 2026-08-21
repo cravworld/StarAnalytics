@@ -9,13 +9,15 @@
 
 import {
   fetchTrackedInstagramPosts,
+  fetchTrackedFacebookPosts,
+  fetchFacebookPageSnapshot,
   fetchProfileSnapshot,
 } from "@/lib/providers/apify-public-content";
 import {
   fetchTrackedYouTubeVideos,
   fetchYouTubeChannelById,
 } from "@/lib/providers/youtube-public-content";
-import type { TrackPlatformId } from "./postUrl";
+import { facebookPageFrom, type TrackPlatformId } from "./postUrl";
 
 /** Current metrics for one tracked post. Every metric nullable — see insights.ts. */
 export interface TrackedPostScrape {
@@ -50,30 +52,34 @@ export interface TrackedAccountScrape {
 }
 
 export interface TrackedPostProvider {
-  /** Batch-fetch current metrics. `urls` for Instagram/Facebook, video IDs for YouTube. */
+  /**
+   * Batch-fetch current metrics. `url` drives Instagram and Facebook, `postKey` YouTube.
+   *
+   * `postedAt` is optional and only Facebook reads it: it bounds that page's scrape to the
+   * oldest post being tracked there. Absent on a first ingest (we don't know the date until
+   * we've scraped it), present on every refresh.
+   */
   scrapePosts(
     platform: TrackPlatformId,
-    posts: { postKey: string; url: string }[],
+    posts: { postKey: string; url: string; postedAt?: string | null }[],
   ): Promise<TrackedPostScrape[]>;
 
   scrapeAccount(platform: TrackPlatformId, handle: string): Promise<TrackedAccountScrape>;
 }
 
 /**
- * Thrown for Facebook until an actor is chosen — see CAMPAIGN-POST-TRACKING.md §4a.
+ * Thrown when a platform has no scraping path at all.
  *
- * Deliberately an error rather than an empty result. A tracked Facebook post that silently
- * reports zero engagement is worse than one that refuses to be added: zero is
- * indistinguishable from a real measurement and would drag every campaign total down with
- * it, while an error is visible and fixable.
+ * All three of instagram/facebook/youtube are implemented, so this is now only reachable
+ * if TrackPlatform gains a fourth variant without a matching provider branch — which is
+ * exactly when it should be loud. Kept deliberately: an unhandled platform must throw
+ * rather than return an empty result, because a tracked post silently reporting zero
+ * engagement is indistinguishable from a real zero and would drag every campaign total
+ * down with it.
  */
 export class PlatformNotSupportedError extends Error {
   constructor(platform: TrackPlatformId) {
-    super(
-      platform === "facebook"
-        ? "Facebook tracking isn't enabled yet — no scraper has been chosen (see CAMPAIGN-POST-TRACKING.md §4a). Instagram and YouTube links work now."
-        : `${platform} is not a supported tracking platform.`,
-    );
+    super(`${platform} has no tracking provider — no scraper is wired up for it.`);
     this.name = "PlatformNotSupportedError";
   }
 }
@@ -81,7 +87,7 @@ export class PlatformNotSupportedError extends Error {
 class LiveTrackedPostProvider implements TrackedPostProvider {
   async scrapePosts(
     platform: TrackPlatformId,
-    posts: { postKey: string; url: string }[],
+    posts: { postKey: string; url: string; postedAt?: string | null }[],
   ): Promise<TrackedPostScrape[]> {
     if (posts.length === 0) return [];
 
@@ -102,6 +108,10 @@ class LiveTrackedPostProvider implements TrackedPostProvider {
         views: i.views,
         raw: i.raw,
       }));
+    }
+
+    if (platform === "facebook") {
+      return this.scrapeFacebook(posts);
     }
 
     if (platform === "youtube") {
@@ -127,7 +137,80 @@ class LiveTrackedPostProvider implements TrackedPostProvider {
     throw new PlatformNotSupportedError(platform);
   }
 
+  /**
+   * Facebook: group the tracked posts by the page they belong to, scrape each page once,
+   * and match our posts out of the results.
+   *
+   * One run per PAGE, not per post — three posts from the same influencer is one scrape.
+   * The date bound comes from the oldest post we track on that page, so the run is
+   * guaranteed to reach all of them.
+   *
+   * A post whose page cannot be derived from its URL (`/reel/{id}`, `/watch/?v={id}`,
+   * `/share/p/{hash}` name a post and nothing else) is skipped rather than guessed at. The
+   * caller reports it as not-found, which is honest: we genuinely cannot tell which page to
+   * ask.
+   */
+  private async scrapeFacebook(
+    posts: { postKey: string; url: string; postedAt?: string | null }[],
+  ): Promise<TrackedPostScrape[]> {
+    const byPage = new Map<string, typeof posts>();
+    for (const p of posts) {
+      const page = facebookPageFrom(p.url);
+      if (!page) continue;
+      const list = byPage.get(page) ?? [];
+      list.push(p);
+      byPage.set(page, list);
+    }
+
+    const out: TrackedPostScrape[] = [];
+    for (const [page, pagePosts] of byPage) {
+      const dates = pagePosts
+        .map((p) => (p.postedAt ? new Date(p.postedAt) : null))
+        .filter((d): d is Date => d !== null && !Number.isNaN(d.getTime()));
+      const oldest = dates.length ? new Date(Math.min(...dates.map((d) => d.getTime()))) : null;
+
+      const scraped = await fetchTrackedFacebookPosts(`https://www.facebook.com/${page}/`, oldest);
+
+      // Index every ID form each returned post could be matched by — a pasted link may use
+      // a pfbid permalink while the actor reports the numeric id, or the reverse. Matching
+      // on one form alone silently drops the other.
+      const byKey = new Map<string, (typeof scraped)[number]>();
+      for (const s of scraped) for (const k of s.postKeys) byKey.set(k, s);
+
+      for (const p of pagePosts) {
+        const match = byKey.get(p.postKey);
+        if (!match) continue; // caller reports not-found; never a fabricated zero
+        out.push({
+          postKey: p.postKey,
+          authorHandle: page,
+          authorDisplayName: match.pageName,
+          mediaType: match.mediaType,
+          caption: match.caption,
+          postedAt: match.postedAt,
+          likes: match.likes,
+          comments: match.comments,
+          shares: match.shares,
+          reactions: match.reactions,
+          views: match.views,
+          raw: match.raw,
+        });
+      }
+    }
+    return out;
+  }
+
   async scrapeAccount(platform: TrackPlatformId, handle: string): Promise<TrackedAccountScrape> {
+    if (platform === "facebook") {
+      const page = await fetchFacebookPageSnapshot(`https://www.facebook.com/${handle}/`);
+      return {
+        handle,
+        displayName: page.displayName,
+        followers: page.followers,
+        followersAvailable: page.followers !== null,
+        raw: page.raw,
+      };
+    }
+
     if (platform === "instagram") {
       // Reuses the existing profile call, which already keeps `includeAboutSection: false`
       // — APIFY-USAGE-AUDIT.md finding L: that add-on bills $0.006/profile, more than the
@@ -183,33 +266,58 @@ class MockTrackedPostProvider implements TrackedPostProvider {
 
   async scrapePosts(
     platform: TrackPlatformId,
-    posts: { postKey: string; url: string }[],
+    posts: { postKey: string; url: string; postedAt?: string | null }[],
   ): Promise<TrackedPostScrape[]> {
-    if (platform === "facebook") throw new PlatformNotSupportedError(platform);
-    return posts.map((p) => {
+    return posts.flatMap((p) => {
       const h = this.hash(p.postKey);
       const isVideo = h % 3 !== 0;
-      return {
-        postKey: p.postKey,
-        authorHandle: platform === "youtube" ? `UC${(h % 1000).toString().padStart(3, "0")}mock` : `mock_creator_${h % 5}`,
-        authorDisplayName: `Mock Creator ${h % 5}`,
-        mediaType: platform === "youtube" ? (isVideo ? "video" : "short") : isVideo ? "reel" : "image",
-        caption: `Mock tracked post ${p.postKey}`,
-        postedAt: new Date(Date.UTC(2026, 7, 1 + (h % 20))).toISOString(),
-        likes: 500 + (h % 4500),
-        comments: 10 + (h % 300),
-        shares: null,
-        reactions: null,
-        // Only video-ish posts get a play count, matching the real constraint that photos
-        // and carousels have none.
-        views: isVideo ? 10_000 + (h % 90_000) : null,
-        raw: { mock: true, postKey: p.postKey },
-      };
+
+      // Facebook posts whose URL doesn't name a page cannot be scraped at all — the live
+      // path skips them and the caller reports not-found. Mirrored here so that branch is
+      // exercised locally rather than discovered in production.
+      if (platform === "facebook" && !facebookPageFrom(p.url)) return [];
+
+      return [
+        {
+          postKey: p.postKey,
+          authorHandle:
+            platform === "youtube"
+              ? `UC${(h % 1000).toString().padStart(3, "0")}mock`
+              : platform === "facebook"
+                ? (facebookPageFrom(p.url) ?? `mock.page.${h % 5}`)
+                : `mock_creator_${h % 5}`,
+          authorDisplayName: `Mock Creator ${h % 5}`,
+          mediaType:
+            platform === "youtube"
+              ? isVideo
+                ? "video"
+                : "short"
+              : isVideo
+                ? platform === "facebook"
+                  ? "video"
+                  : "reel"
+                : "image",
+          caption: `Mock tracked post ${p.postKey}`,
+          postedAt: new Date(Date.UTC(2026, 7, 1 + (h % 20))).toISOString(),
+          likes: 500 + (h % 4500),
+          comments: 10 + (h % 300),
+          // Shares are Facebook-only in reality; the mock must not invent them elsewhere,
+          // or the "null is not zero" behaviour looks wrong in local work.
+          shares: platform === "facebook" ? 5 + (h % 200) : null,
+          reactions:
+            platform === "facebook"
+              ? { like: 400 + (h % 3000), love: h % 400, haha: h % 90 }
+              : null,
+          // Only video-ish posts get a play count, matching the real constraint that photos
+          // and carousels have none.
+          views: isVideo ? 10_000 + (h % 90_000) : null,
+          raw: { mock: true, postKey: p.postKey },
+        },
+      ];
     });
   }
 
   async scrapeAccount(platform: TrackPlatformId, handle: string): Promise<TrackedAccountScrape> {
-    if (platform === "facebook") throw new PlatformNotSupportedError(platform);
     const h = this.hash(handle);
     // One in seven mock accounts hides its follower count, so the "no engagement rate
     // available" path is exercised in local work rather than only in production.

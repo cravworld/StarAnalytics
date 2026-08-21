@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parsePostUrl, accountKeyFor, FB_SHARE_LINK_REASON } from "./postUrl";
+import { parsePostUrl, accountKeyFor, facebookPageFrom, FB_SHARE_LINK_REASON } from "./postUrl";
 
 function parsed(url: string) {
   const r = parsePostUrl(url);
@@ -85,6 +85,40 @@ describe("parsePostUrl — Facebook", () => {
     const r = parsePostUrl("https://www.facebook.com/share/p/aBcDeF12345/");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe(FB_SHARE_LINK_REASON);
+  });
+});
+
+// Facebook has no post-by-URL actor, so a post is found by scraping its PAGE and matching.
+// That makes this function the hinge of the whole Facebook path: get it wrong and posts
+// silently fail to resolve.
+describe("facebookPageFrom", () => {
+  it("takes the page slug out of a /posts/ or /videos/ permalink", () => {
+    expect(facebookPageFrom("https://www.facebook.com/thepage/posts/1234567890")).toBe("thepage");
+    expect(facebookPageFrom("https://www.facebook.com/thepage/videos/1234567890")).toBe("thepage");
+    expect(facebookPageFrom("https://www.facebook.com/thepage/posts/pfbid0AbC")).toBe("thepage");
+  });
+
+  it("uses the numeric id param on a permalink.php link, not the path", () => {
+    expect(facebookPageFrom("https://www.facebook.com/permalink.php?story_fbid=555&id=999")).toBe("999");
+  });
+
+  // Without the reserved-segment guard these would yield pages called "reel" and "watch",
+  // and every scrape would hit a nonexistent page.
+  it("returns null for links that name the post but not its page", () => {
+    expect(facebookPageFrom("https://www.facebook.com/reel/1234567890")).toBeNull();
+    expect(facebookPageFrom("https://www.facebook.com/watch/?v=1234567890")).toBeNull();
+    expect(facebookPageFrom("https://www.facebook.com/share/p/aBcDeF/")).toBeNull();
+    expect(facebookPageFrom("https://www.facebook.com/photo?fbid=123&set=a.1")).toBeNull();
+  });
+
+  it("survives m./www. prefixes and a missing scheme", () => {
+    expect(facebookPageFrom("m.facebook.com/thepage/posts/123")).toBe("thepage");
+    expect(facebookPageFrom("facebook.com/thepage/posts/123")).toBe("thepage");
+  });
+
+  it("returns null rather than throwing on junk", () => {
+    expect(facebookPageFrom("not a url at all")).toBeNull();
+    expect(facebookPageFrom("https://www.facebook.com/")).toBeNull();
   });
 });
 

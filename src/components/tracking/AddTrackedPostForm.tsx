@@ -44,8 +44,8 @@ export function AddTrackedPostForm({ campaignId }: { campaignId: string }) {
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="card-title">Track a post</div>
       <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 8 }}>
-        Paste an Instagram or YouTube post link — one per line. The account that posted it is
-        detected automatically.
+        Paste an Instagram, Facebook or YouTube post link — one per line. The account that
+        posted it is detected automatically.
       </div>
       <textarea
         rows={3}

@@ -95,6 +95,58 @@ const FB_PATTERNS: RegExp[] = [
 // the actors (unlike /share/p/), so it is captured whole rather than rejected.
 const FB_PFBID = /facebook\.com\/[^/]+\/posts\/(pfbid[A-Za-z0-9]+)/i;
 
+// Path segments that are Facebook's own routes, never a page slug. Without this,
+// "facebook.com/reel/123" would yield a page called "reel".
+const FB_RESERVED = new Set([
+  "reel",
+  "reels",
+  "watch",
+  "share",
+  "photo",
+  "photo.php",
+  "permalink.php",
+  "story.php",
+  "profile.php",
+  "pages",
+  "groups",
+  "events",
+  "marketplace",
+  "video.php",
+  "media",
+]);
+
+/**
+ * The page a Facebook post belongs to, derived from the post URL itself.
+ *
+ * This exists because Apify has no official actor that takes a Facebook post URL and
+ * returns that post's metrics — the whole official Facebook lineup is organised by
+ * container (page, group, event), not by post. So the only route to a post's numbers is to
+ * scrape its page and match the post out of the results, which means deriving the page from
+ * the link the operator pasted.
+ *
+ * Returns null when the URL genuinely doesn't name its page — `/reel/{id}`,
+ * `/watch/?v={id}` and `/share/p/{hash}` carry a post ID and nothing else. Those need the
+ * page supplied separately; callers must say so rather than guessing.
+ */
+export function facebookPageFrom(url: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`);
+  } catch {
+    return null;
+  }
+
+  // permalink.php?story_fbid=<post>&id=<page> — the page is the numeric `id` param.
+  const pageId = u.searchParams.get("id");
+  if (/^\d+$/.test(pageId ?? "")) return pageId;
+
+  const first = u.pathname.split("/").filter(Boolean)[0];
+  if (!first) return null;
+  if (FB_RESERVED.has(first.toLowerCase())) return null;
+  // A bare numeric first segment is a page ID, which is fine; a slug is fine too.
+  return first;
+}
+
 export function parsePostUrl(input: string): ParsePostUrlResult {
   const trimmed = input.trim();
   if (!trimmed) return { ok: false, reason: "Empty link." };
