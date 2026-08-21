@@ -17,7 +17,9 @@ import {
   normalizePostUrlItem,
   normalizeProfileItem,
   normalizeProfilePostItem,
+  normalizeTrackedPostItem,
   postUrlKey,
+  type NormalizedTrackedPost,
 } from "./apify-normalize";
 import type { AccountSnapshot, PublicContentProvider, RawPost } from "./types";
 
@@ -475,4 +477,51 @@ export class ApifyPublicContentProvider implements PublicContentProvider {
     await storePosts(posts);
     return posts;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Campaign Post Tracking
+// ---------------------------------------------------------------------------
+
+/**
+ * SCOPED EXCEPTION TO APIFY-USAGE-AUDIT.md FINDING K — DO NOT "FIX" THIS BACK.
+ *
+ * Finding K pinned `dataDetailLevel` to "basicData" everywhere because the paid tier
+ * (+$0.0008/post on top of $0.0015, a ~53% surcharge) bought a `videoPlayCount` that
+ * *nothing consumed*. That reasoning is still correct for every other call path in this
+ * file, and they all stay on POST_DATA_DETAIL_LEVEL.
+ *
+ * Campaign Post Tracking is the one consumer: view count is the most-asked-for number on an
+ * influencer deliverable, and without it Instagram — the platform most of the campaign runs
+ * on — reports likes and comments only. Direction 2026-08-21 was explicit that the cost is
+ * acceptable ("I don't mind paying extra, I need the data"); at ~100 tracked posts scanned
+ * daily the surcharge is about $2.40/month.
+ *
+ * See CAMPAIGN-POST-TRACKING.md §1a. If you are here to re-apply finding K, read that first.
+ */
+const TRACKED_POST_DATA_DETAIL_LEVEL = "detailedData";
+
+/**
+ * Fetch current metrics for a batch of tracked Instagram post URLs.
+ *
+ * Deliberately does NOT persist: unlike scrapeByUrls above, this writes nothing to `posts`.
+ * A tracked post lives in its own table with its own snapshot history, and letting this
+ * path upsert into `posts` would collide with the agency pipeline over the same shortcode
+ * (CAMPAIGN-POST-TRACKING.md §2a). Storage is the caller's job.
+ */
+export async function fetchTrackedInstagramPosts(urls: string[]): Promise<NormalizedTrackedPost[]> {
+  if (urls.length === 0) return [];
+  const items = await trackedRun<Record<string, unknown>>(
+    "tracked-posts",
+    actorEnv("APIFY_ACTOR_POST"),
+    {
+      // Same single `username` array the actor uses for usernames, profile URLs and post
+      // URLs alike — see scrapeByUrls for the confirmation note.
+      username: urls,
+      resultsLimit: 1,
+      dataDetailLevel: TRACKED_POST_DATA_DETAIL_LEVEL,
+    },
+    { maxItems: urls.length },
+  );
+  return items.map((item) => normalizeTrackedPostItem(item));
 }

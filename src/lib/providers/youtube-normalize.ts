@@ -14,6 +14,10 @@ export interface YouTubeVideoItem {
     title?: string;
     description?: string;
     channelTitle?: string;
+    // Stable channel identifier. channelTitle is a display name — mutable and not unique —
+    // so anything that groups or dedups by account must key on this instead. Added for
+    // Campaign Post Tracking, which groups tracked posts by the account that posted them.
+    channelId?: string;
     publishedAt?: string;
   };
   statistics?: {

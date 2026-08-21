@@ -110,6 +110,54 @@ export function normalizePostUrlItem(item: ActorItem, source: RawPost["source"] 
   return toRawPost(item, source);
 }
 
+// ---------------------------------------------------------------------------
+// Campaign Post Tracking — apify/instagram-post-scraper, PAID detail tier
+// ---------------------------------------------------------------------------
+
+/**
+ * Shape returned for a tracked campaign post. Deliberately NOT a `RawPost`: RawPost is the
+ * shape of the `posts` table, and a tracked post is a different table with a different
+ * lifecycle (see CAMPAIGN-POST-TRACKING.md §2a). Reusing RawPost here would drag along
+ * `source`, `reach` and `saves`, none of which mean anything for this feature.
+ */
+export interface NormalizedTrackedPost {
+  postKey: string;
+  authorHandle: string | null;
+  mediaType: string;
+  caption: string | null;
+  postedAt: string | null;
+  likes: number | null;
+  comments: number | null;
+  /**
+   * Instagram play count, from the actor's PAID detailedData tier — reels and videos only.
+   *
+   * `toRawPost` above maps this same field to null on purpose, and that stays correct for
+   * every other call path: nothing else in the app consumes it, and it must never reach a
+   * column named `reach`. This feature is the one consumer, so it reads the field here and
+   * stores it as `views` — a count of video starts, not of distinct people. See
+   * CAMPAIGN-POST-TRACKING.md §1a for why the surcharge is accepted on this path alone.
+   *
+   * Null for photos and carousels: they have no play count, which is not a zero-view post.
+   */
+  views: number | null;
+  raw: ActorItem;
+}
+
+export function normalizeTrackedPostItem(item: ActorItem): NormalizedTrackedPost {
+  const shortcode = str(item, "shortCode", "shortcode") ?? "";
+  return {
+    postKey: shortcode,
+    authorHandle: str(item, "ownerUsername", "username"),
+    mediaType: mediaType(item),
+    caption: str(item, "caption"),
+    postedAt: str(item, "timestamp"),
+    likes: num(item, "likesCount"),
+    comments: num(item, "commentsCount"),
+    views: num(item, "videoPlayCount", "videoViewCount"),
+    raw: item,
+  };
+}
+
 // apify/instagram-comment-scraper — field names confirmed against a live 2-URL sample run
 // (2026-07-16, resultsLimit 2, includeNestedComments false). The actor's own README sample
 // JSON omits the per-comment post-correlation field entirely (a real gap, not an oversight

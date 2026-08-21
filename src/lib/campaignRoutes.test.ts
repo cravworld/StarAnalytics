@@ -24,6 +24,14 @@ describe("isCampaignDetailRoute", () => {
     expect(isCampaignDetailRoute("/campaigns/agency/some-run-id")).toBe(false);
   });
 
+  // Post Tracker's detail route is /campaigns/tracker/[campaignId], so its path genuinely
+  // ends in a campaign uuid — the one shape most likely to be misread as /campaigns/[id]
+  // and light up the wrong nav tab. Pinned explicitly rather than relying on the loop above,
+  // which only checks the bare subroute hrefs.
+  it("classifies the post tracker's campaign detail route with the tracker, not as a campaign", () => {
+    expect(isCampaignDetailRoute("/campaigns/tracker/2f9d1c3a-4b7e-11f0-9cd6-0242ac120002")).toBe(false);
+  });
+
   it("ignores unrelated paths that merely share a prefix", () => {
     expect(isCampaignDetailRoute("/campaigns-archive")).toBe(false);
     expect(isCampaignDetailRoute("/compare")).toBe(false);
