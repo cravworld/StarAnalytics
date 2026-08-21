@@ -133,15 +133,25 @@ and clamps as badly as a full sweep.
 
 #### The daily cap is checked before the browser opens
 
-`BOOKMYSHOW_CAPTURE_MAX_PER_DAY` (default 6, rolling 24 hours) is enforced by the ingest
-route — that is the only thing that decides. But the capture plan also reports
-`capturesRemaining`, and the script stops on zero **before** launching Chrome.
+`BOOKMYSHOW_CAPTURE_MAX_PAGES_PER_DAY` (default 120, rolling 24 hours) is enforced by the
+ingest route — that is the only thing that decides. The capture plan also reports
+`pagesRemaining`, and the script stops on zero **before** launching Chrome.
 
-Without that, hitting the cap meant fetching every page from BookMyShow and then having the
-whole run rejected with a 429: requests spent, nothing learned. Two failures that look alike
-in the log need opposite responses, and the launcher spells both out —
+**It counts pages, not runs**, and that distinction matters. It used to cap runs at 6, sized
+when a run meant thirty to ninety pages. A district run is now three, so the old cap allowed
+eighteen pages a day — about a tenth of what it was written to permit — and it became the
+binding constraint rather than the backstop it was meant to be. Measured on 2026-08-21: the
+run cap left 3 runs, the page cap left 57 pages, roughly 19 district runs.
 
-- **"Daily capture limit already reached"** — our own cap. Nothing was requested from
+Volume is what the human-scale justification is about, so volume is what is counted. A
+sweep is charged for what it actually costs — two 30-page sweeps that read three districts
+between them spent 60 pages, and the ledger now says so.
+
+Without the pre-flight check, hitting the cap meant fetching every page from BookMyShow and
+then having the whole run rejected with a 429: requests spent, nothing learned. Two failures
+that look alike in the log need opposite responses, and the launcher spells both out —
+
+- **"Daily page limit already reached"** — our own cap. Nothing was requested from
   BookMyShow. Come back later.
 - **HTTP 403 / every page failed** — BookMyShow refused us. Do **not** click again;
   repeated retries are what turn a defensible tool into abuse.
