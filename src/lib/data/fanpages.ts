@@ -842,6 +842,9 @@ export interface RefreshFanPagesOptions {
    * The TTL exists to stop an hourly cron re-paying for data that has not moved. A person
    * pressing "Refresh all" is making the opposite request — they want current numbers now —
    * and silently skipping most of the list would look like the button did nothing.
+   *
+   * Mutually exclusive with `limit`, which selects pages *by* staleness: "ignore the TTL" and
+   * "give me the N stalest" are contradictory instructions. `limit` wins, and this is ignored.
    */
   force?: boolean;
   apifyQuotaExhausted?: boolean;
@@ -858,6 +861,19 @@ export interface RefreshFanPagesOptions {
    */
   ids?: string[];
   /**
+   * Refresh at most this many pages, chosen as the stalest first.
+   *
+   * This is what lets a cron keep every page current without any single invocation being long
+   * enough to be killed. One page is up to two Apify runs plus a comment scrape, so a run that
+   * tries to walk 33 of them cannot finish inside a function's time limit — the same wall the
+   * "Refresh all" button hit. A small batch on a frequent schedule walks the list instead, and
+   * because selection is by `lastCheckedAt` ascending, each run naturally picks up where the
+   * last one left off with no cursor to store.
+   *
+   * Implies TTL-gating (see the SQL note in refreshFanPages) and overrides `force`.
+   */
+  limit?: number;
+  /**
    * Passed through to the sentiment pipeline. The manual paths opt into the comment scrape;
    * the cron leaves this undefined so it inherits the global (off) default — see
    * isCommentScrapeEnabled and the note in actions/fanpages.ts.
@@ -872,10 +888,25 @@ export interface RefreshFanPagesOptions {
  * differ only in the options above.
  */
 export async function refreshFanPages(opts: RefreshFanPagesOptions = {}): Promise<FanPageRefreshResult[]> {
-  const { force = false, apifyQuotaExhausted = false, sentimentOpts, ids } = opts;
+  const { force = false, apifyQuotaExhausted = false, sentimentOpts, ids, limit } = opts;
+  // The TTL filter must move into SQL when `limit` is set, and this is the whole reason the
+  // batch cron works. The loop below skips fresh pages via isStale(), which is fine when the
+  // query returns every active page — but combined with `take`, the query would hand back the
+  // first N pages by whatever order, the loop would skip them all as fresh, and the run would
+  // refresh nothing. Forever, because the same N come back next time. Selecting *by* staleness
+  // and taking the oldest is what makes successive runs walk the whole list.
+  //
+  // nulls: "first" is load-bearing too: Postgres sorts NULLs last on ASC, so a never-checked
+  // page — the most stale thing there is — would be the last one this ever reached.
+  const staleCutoff = new Date(Date.now() - FAN_PAGE_SCRAPE_TTL_HOURS * 60 * 60 * 1000);
   const pages = await prisma.fanPage.findMany({
-    where: { isActive: true, ...(ids ? { id: { in: ids } } : {}) },
-    orderBy: { igHandle: "asc" },
+    where: {
+      isActive: true,
+      ...(ids ? { id: { in: ids } } : {}),
+      ...(limit ? { OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lt: staleCutoff } }] } : {}),
+    },
+    orderBy: limit ? { lastCheckedAt: { sort: "asc", nulls: "first" } } : { igHandle: "asc" },
+    ...(limit ? { take: limit } : {}),
   });
   const results: FanPageRefreshResult[] = [];
   let quotaExhausted = apifyQuotaExhausted;
@@ -908,7 +939,41 @@ export async function refreshFanPages(opts: RefreshFanPagesOptions = {}): Promis
   return results;
 }
 
-/** The hourly cron's entry point: TTL-gated, and no comment scrape. */
+/**
+ * The hourly cron's entry point: TTL-gated, and no comment scrape.
+ *
+ * NO LONGER SCHEDULED. Kept because it is the honest expression of "refresh everything stale in
+ * one pass" and costs nothing unused, but /api/cron/refresh-fan-pages now owns the background
+ * refresh — see refreshFanPagesBatch for why there must be exactly one scheduled writer here.
+ */
 export async function refreshStaleFanPages(apifyQuotaExhausted = false): Promise<FanPageRefreshResult[]> {
   return refreshFanPages({ apifyQuotaExhausted });
+}
+
+/**
+ * The batch cron's entry point: the N stalest pages, comments included.
+ *
+ * Two properties matter, and they are the reason this exists rather than the caller composing
+ * refreshFanPages itself.
+ *
+ * **It opts into the comment scrape, unlike refreshStaleFanPages directly above.** That looks
+ * like an inconsistency and is the point: this path exists so a background refresh produces the
+ * same data as pressing the button, comments included, and the user never has to keep a tab open
+ * to get it. The unattended-cost objection that keeps the scrape off by default does not apply —
+ * the batch is bounded to `limit` pages per run by construction, and comments are scraped at most
+ * once per post ever (see commentsScrapedAt), so this cannot fan out with time.
+ *
+ * **It must be the only scheduled writer of these rows.** scrapeFanPageFull stamps lastCheckedAt
+ * when the profile and posts land, which is *before* the comment scrape runs and independently of
+ * whether it succeeds. So a second scheduled refresher that does not scrape comments — which is
+ * exactly what refreshStaleFanPages inside poll-hashtags was — would keep marking pages fresh,
+ * dropping them out of this batch's stale set, and their comments would never be fetched at all.
+ * Two writers here do not merely duplicate work; they silently defeat the feature. poll-hashtags
+ * no longer refreshes fan pages for that reason.
+ */
+export async function refreshFanPagesBatch(
+  limit: number,
+  apifyQuotaExhausted = false,
+): Promise<FanPageRefreshResult[]> {
+  return refreshFanPages({ limit, apifyQuotaExhausted, sentimentOpts: { scrapeComments: true } });
 }

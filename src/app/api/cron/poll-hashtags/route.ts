@@ -20,7 +20,6 @@ import { prisma } from "@/lib/prisma";
 import { trackHashtag } from "@/lib/data/campaigns";
 import { queueSentimentClassification } from "@/lib/data/sentiment";
 import { refreshStaleCompetitors } from "@/lib/data/compare";
-import { refreshStaleFanPages } from "@/lib/data/fanpages";
 import { tryAcquireCronLock, releaseCronLock } from "@/lib/cronLock";
 import { isApifyQuotaFailure } from "@/lib/apify/quotaBreaker";
 
@@ -141,28 +140,25 @@ export async function GET(request: Request) {
     // stale list to fail on every entry.
     const competitorResults = quotaExhausted ? [] : await refreshStaleCompetitors();
 
-    // And any tracked fan page past its TTL, on either platform. NB this whole route is
-    // currently absent from vercel.json's cron list, so none of this runs on a schedule
-    // today — fan pages refresh only when someone presses "Refresh data" on a detail
-    // screen. This covers Instagram as
-    // well as YouTube now: the hashtag scrape above only links a fan page's post when that
-    // post carries a tracked tag and never revisits the profile, so without this an
-    // Instagram page's follower count never moved after the day it was added (see
-    // fanpages.ts's refreshStaleFanPages).
+    // FAN PAGES ARE DELIBERATELY NOT REFRESHED HERE ANY MORE. This used to call
+    // refreshStaleFanPages, and /api/cron/refresh-fan-pages now owns that job instead. Two
+    // scheduled refreshers of the same rows is not merely duplicated work here — it silently
+    // breaks the new one. scrapeFanPageFull stamps lastCheckedAt when the profile and posts land,
+    // before the comment scrape runs and regardless of whether it succeeds. This route's refresh
+    // does not scrape comments (it inherits the global default), so every page it touched would
+    // be marked fresh, drop out of the batch cron's stale set, and never have its comments
+    // fetched at all — the exact data the batch cron exists to keep current.
     //
-    // Deliberately NOT skipped wholesale when quotaExhausted, unlike the competitor refresh
-    // above: YouTube channels go through the YouTube Data API and its separate quota, so
-    // skipping the whole call during an Apify outage would freeze YouTube fan-channel data
-    // and save exactly zero Apify credit. The flag is passed through instead, so the
-    // Instagram half is skipped and the YouTube half still runs.
-    const fanPageResults = await refreshStaleFanPages(quotaExhausted);
+    // The other half of the old reasoning still holds and now lives there: the hashtag scrape
+    // above only links a fan page's post when that post carries a tracked tag and never revisits
+    // the profile, so an Instagram page's follower count would otherwise never move after the day
+    // it was added.
 
     return NextResponse.json({
       polled: results.length,
       quotaExhausted,
       results,
       competitorsRefreshed: competitorResults,
-      fanPagesRefreshed: fanPageResults,
     });
   } finally {
     await releaseCronLock(LOCK_NAME);
