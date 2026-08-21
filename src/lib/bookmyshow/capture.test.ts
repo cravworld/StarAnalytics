@@ -74,16 +74,43 @@ describe("the capture script does not disguise itself", () => {
   });
 
   it("does not request pages it already knows will be refused", () => {
-    // Measured twice on 2026-08-20: page one of a run succeeds, every page after it 403s.
-    // With a fixed city order that means a scheduled sweep captures Kochi three times a day
-    // and never sees the other 29 regions — while sending 29 requests already known to be
-    // refused. The window rotates so a different city gets the one slot that works.
-    //
-    // This is not evasion and must not become it: the yield stays one city per run. If a
-    // change here starts trying to get MORE pages out of a session, that is the line.
+    // A burst gets four to six pages before BookMyShow starts refusing. With a fixed city
+    // order, a single-burst run would spend itself on the same first cities every time and
+    // never see the rest of Kerala, while sending requests already known to be refused.
     expect(code).toMatch(/rotateWindow/);
     expect(code).toMatch(/MAX_CITIES/);
-    expect(SCRIPT).toMatch(/does NOT try to get more pages than BookMyShow is willing to serve/i);
+  });
+
+  it("waits the throttle out rather than disguising itself around it", () => {
+    // The sweep reads every city by pausing between batches. That is compliance, not
+    // evasion, and the distinction is worth stating precisely because an earlier version of
+    // this file drew the line in the wrong place — it called "spacing runs" evasion, which
+    // would make every well-behaved backoff illegitimate.
+    //
+    // The line is IDENTITY, not patience. Waiting for a throttle to lift is the response a
+    // 403 is asking for. What must never happen is changing who we appear to be in order to
+    // get more than one client is served: proxies, user-agent or fingerprint spoofing, or
+    // cycling browser sessions/profiles to dodge a per-session limit. Those are asserted
+    // against in the tests above and must stay that way.
+    expect(code).toMatch(/BATCH_PAUSE_MS/);
+    // One browser session for the whole sweep — a new context per batch would be exactly
+    // the session-cycling this is not allowed to become.
+    expect(code.match(/chromium\.launch/g) ?? []).toHaveLength(1);
+    expect(code.match(/newContext/g) ?? []).toHaveLength(1);
+  });
+
+  it("retries a refused page at most once, and never in a loop", () => {
+    // A 403 here means "not right now", and the pauses prove that recovers, so one deferred
+    // attempt is fair. Retrying until something gets through is how a legitimate tool
+    // becomes an attack.
+    expect(SCRIPT).toMatch(/One retry pass/i);
+    expect(SCRIPT).toMatch(/never a loop: retrying until something gets through is an attack/i);
+  });
+
+  it("abandons a sweep that has stopped being about pacing", () => {
+    // Two batches yielding nothing is no longer a throttle to wait out.
+    expect(code).toMatch(/emptyBatches >= 2/);
+    expect(SCRIPT).toMatch(/stopping the sweep rather than continuing to ask/i);
   });
 
   it("still honours an explicit --cities list verbatim", () => {
