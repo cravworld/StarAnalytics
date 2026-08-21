@@ -49,219 +49,51 @@ neither should anyone reading the output.
 The useful signal is **movement**: a show going 3 → 2 → 1 as showtime approaches is demand
 arriving. A show sitting at 3 twelve hours before screening is the thing worth acting on.
 
-**Coverage.** Only theaters that sell through BookMyShow are visible. For the reference
-campaign, ~178 venue-city rows were found against a real footprint of 285 Kerala theaters.
-That gap is expected and accepted — the feature is scoped to BookMyShow-listed theaters.
-But it means **aggregate figures describe the BookMyShow subset, not the Kerala market**,
-and a theater absent from the table is not a theater with no audience.
+**Coverage, against a real denominator.** The campaign owner supplied the actual footprint
+on 2026-08-21: **285 theatres** playing the film across Kerala, kept at
+`reference/bethlehem-kudumba-unit-theatres.txt`. Coverage should be stated against that,
+not against however many rows happen to be captured — a row count says nothing about what
+is missing.
 
-## 2. Setup
+Only theatres that sell through BookMyShow are visible, and not all 285 do. So the feature
+can never reach 285, and **aggregate figures describe the BookMyShow subset, not the Kerala
+market**. A theatre absent from the table is not a theatre with no audience.
 
-### Environment variables
+Beware naive matching: the distributor’s town names are not BookMyShow’s region names.
+TRIVANDRUM is THIRUVANANTHAPURAM, ERNAKULAM is KOCH, KANJAHGAD is KANHANGAD. A token match
+that ignores this undercounts badly.
 
-All server-side. `APIFY_TOKEN` is never exposed to the browser.
+One district per run, three days deep. **Three pages** — comfortably under the handful
+BookMyShow serves before it starts refusing, so a run completes instead of being cut off
+partway.
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `DATA_MODE_BOOKMYSHOW` | `mock` | `mock` \| `live`. Keep on `mock` until §6 passes. |
-| `BOOKMYSHOW_MONITORING_ENABLED` | `false` | Allows the scheduled cron to run. Separate from the mode switch on purpose. |
-| `APIFY_ACTOR_BOOKMYSHOW` | `apify/web-scraper` | Must be a JS-rendering actor (see §5). |
-| `APIFY_TOKEN` | — | Existing project variable, reused. |
-| `BOOKMYSHOW_SCAN_HORIZON_DAYS` | `3` | Days ahead each scan covers. |
-| `BOOKMYSHOW_SCAN_CONCURRENCY` | `3` | Pages rendered in parallel. Kept low deliberately. |
-| `BOOKMYSHOW_RUN_WAIT_MS` | `480000` | Wait budget per run. Must stay below the scan route's `maxDuration` (800s). |
-| `BOOKMYSHOW_CHARGE_PER_PAGE_USD` | `0.02` | Used to size the per-run Apify spend cap. |
-| `BOOKMYSHOW_MAX_CHARGE_USD` | `10` | Hard ceiling per run, enforced by Apify. |
-| `BOOKMYSHOW_MOCK_FAIL_CITY` | unset | Mock mode only. Set to a region code (e.g. `GOOL`) to simulate a city that always fails, exercising the partial-scan UI. |
-| `DATA_MODE_NOTIFIER` | `mock` | Existing project variable. `mock` = alerts log to console (dry run); `live` = email via Resend. |
-| `BOOKMYSHOW_ALERT_DEDUP_MINUTES` | `720` | Floor on how often one theater can alert (§3a). Must outlast the gap between captures. |
-| `BOOKMYSHOW_CAPTURE_MAX_PER_DAY` | `6` | Server-side cap on capture ingests per campaign per 24h. |
-| `BOOKMYSHOW_CAPTURE_SECRET` | — | Shared secret for the capture ingest endpoint (§5a). No default: unset means the endpoint is closed. |
-| `RUN_BOOKMYSHOW_INTEGRATION_TEST` | `false` | Opt-in live test (§6). |
-| `RUN_BMS_DB_TEST` | `false` | Opt-in database test (§10). |
-
-### Database migration
-
-Additive only — it creates six new tables and touches nothing existing.
-
-```
-npm run db:migrate          # local (prisma migrate dev)
+```bat
+cd /d C:ProjectsStarAnalytics
+node "scriptsms-capture.mjs" --campaign <id> --url https://staranalytics.vercel.app --max-cities 1 --days 3
+pause
 ```
 
-In deployment, `npm run build` already runs `prisma migrate deploy`.
+Saved as a `.cmd` on the Desktop. `pause` matters — without it the window closes before the
+result can be read, and partial results are the normal case here.
 
-New tables: `theater_campaigns`, `theaters`, `screenings`, `availability_snapshots`,
-`bms_scan_runs`, `bms_scan_city_results`.
+**The server chooses the district, not the script.** `capture-plan` returns them ordered by
+how long since each was last read SUCCESSFULLY, oldest first, so each run continues where
+the last stopped without anything being remembered locally. A district whose last read was
+refused does not count as read, so it comes back around quickly rather than waiting a full
+cycle — which matters when BookMyShow refuses a few pages of most runs.
 
-### Running with no Apify account at all
+Three days rather than one is the point of the shape: the whole purpose is seeing weak
+demand **before** the screening, and one day gives almost no lead time. It also sidesteps
+the evening rollover (§3), where today’s slate is already past its booking cutoff.
 
-Mock mode is fully functional and is the default. It replays the real Kerala measurements
-taken on 2026-08-20 across all 30 regions, so every screen works, the ranking is
-exercisable against realistic data, and no traffic reaches BookMyShow. Scans served this
-way are stamped `provider="mock"` and the UI shows a **Mock data** badge — a fixture-backed
-number can never be mistaken for a live one.
+At six runs a day that is roughly a full pass over Kerala every five days, with three days
+of forward visibility per district. Run it more often for a faster cycle — the cap is the
+ceiling, not a target.
 
-## 3. Using it
-
-1. **Theater Campaigns → New campaign.**
-2. Enter the film's BookMyShow event code (e.g. `et00502829`) or paste an
-   `in.bookmyshow.com` movie URL. Nothing else is accepted — this is an allowlist, not a
-   convenience (§7).
-3. Leave all cities unticked to scan **every Kerala region** BookMyShow lists, or tick
-   specific ones.
-4. Set the scan interval and thresholds:
-   - **Flag a theater at (% shows wide open)** — default 80.
-   - **Minimum shows before judging** — default 3. Small venues run few shows; one quiet
-     slot is not a signal.
-5. Collect data with the **local capture** (§5a). "Run scan now" is not that — see below.
-
-The campaign page ranks theaters worst-first, with the reasons for each score written out.
-Click a theater for its individual shows, their demand history, and a source-data panel
-showing the raw `availStatus` behind every reading.
-
-### What "Run scan now" actually does — and why it refuses
-
-It runs a **server-side** scan through whatever `DATA_MODE_BOOKMYSHOW` selects. That is
-`mock` in every deployment, because BookMyShow blocks server-side collection (§6). It cannot
-drive the Chrome on your machine, so it can never fetch live showtimes.
-
-So on a campaign built from real captures, the button would inject **fabricated** theaters
-and readings — mock venue codes look like `KOCH01`, where a real one is `ZTKC` — into the
-exact table used to decide where campaign money goes. Synthetic codes never merge with real
-venues, so they persist as phantoms, and the detail page reads snapshots across *all* runs,
-so the ranking would blend invented numbers with measured ones.
-
-**It now refuses**, with a 409 and an explanation, whenever the campaign already holds real
-captured data. The cron applies the same rule, which matters more there: nobody is watching
-an unattended tick dilute real data.
-
-Mock scanning stays fully available on a campaign with **no** real data — that is what makes
-the feature demoable without an Apify account. The rule is about *mixing fixtures into
-measurements*, not about mock being bad.
-
-To actually collect data, use the local capture (§5a).
-
-### Reading the scan status panel
-
-It is there to make failure loud. A scan that could not read some cities lists them
-explicitly as **not scanned** — never as cities with no demand.
-
-**The date column is the date REQUESTED, not necessarily the date returned.** Late in the
-day BookMyShow stops listing today's remaining shows — they are past their booking cutoff —
-and serves the next available date instead. Observed 2026-08-20 at 17:26 IST: a request for
-`20260820` came back with fourteen shows all running 09:00–23:59 on the **21st**, and a
-second request for `20260821` returned the same fourteen.
-
-Nothing is corrupted by this, and it is worth being precise about why: every screening
-carries its own `showDate`, derived from the show's own start time in IST, and that value
-was verified correct against the raw instants. The ranking is computed from screenings, so
-the ranking is right. Only the scan-result row's date can mislead — reading it as proof that
-a particular date was read is the mistake to avoid. **Trust the screening's date, not the
-request's.**
-
-Two practical consequences:
-
-- An evening run asking for two dates spends both on the same slate. The morning and
-  midday runs are the ones that get today *and* tomorrow. This is one reason the daily
-  triggers are spread rather than clustered.
-- A repeat is not wasted data: the snapshot unique constraint means the second read updates
-  nothing and adds no duplicate history.
-
-Two counters matter:
-
-- **Rows skipped** — rows that could not be read at all (missing show id, unparseable
-  time). A jump means BookMyShow changed a field shape.
-- **Unrecognised availability codes** — rendered as a red alert, and the more serious of
-  the two. It means BookMyShow returned an `availStatus` outside the documented `0–3`
-  vocabulary. Because unrecognised readings are excluded from demand signals, the symptom
-  of ignoring this is a priority table that *quietly empties* rather than an error. Any
-  non-zero value means stop and re-read `demand.ts` before acting on the ranking.
-
-## 3a. Alerts
-
-After each scheduled scan that read something, theaters in the **push here** band raise an
-`Alert` row and are sent through the existing `NotifierProvider`. No new notification
-machinery — the same seam the fan-page alerts use.
-
-- `DATA_MODE_NOTIFIER=mock` (default) logs to console. That is the dry-run mode.
-- `DATA_MODE_NOTIFIER=live` sends email via Resend, using the existing
-  `RESEND_API_KEY` / `ALERT_EMAIL_FROM` / `ALERT_EMAIL_TO`.
-
-Alerts are **never** raised off a failed scan, and every alert body carries the line stating
-it is based on availability labels rather than ticket sales.
-
-Alerts fire from the cron and from a **capture ingest** — not from a manual "Scan now", since
-clicking scan to look at data should not mail anyone. Delivery failures are logged, not
-thrown: a mail outage must not fail a scan whose data landed correctly.
-
-### One alert per theater per 12 hours
-
-Deduped per theater, over `max(campaign.scanIntervalMinutes, BOOKMYSHOW_ALERT_DEDUP_MINUTES)`
-— default **720 minutes**. The campaign's own interval is a **floor**, not the whole rule.
-
-It used to be the interval alone, which was right while the Vercel cron was the only caller:
-scans and alerts shared a cadence, so "once per scan interval" meant "once per scan". The
-local capture path broke that. Captures run three times a day, five hours apart, against a
-90-minute campaign interval — so every run fell outside the window and re-alerted every
-flagged theater. Measured 2026-08-20: **32 flagged theaters × 3 runs ≈ 96 notifications a
-day**, heading for ~530 at full Kerala coverage. Exactly what the dedup existed to prevent.
-
-Set `BOOKMYSHOW_ALERT_DEDUP_MINUTES` higher for a quieter inbox, or lower to be told sooner.
-Note it is a floor: a campaign that already asks for less frequent alerts keeps its own
-interval.
-
-> **Still one email per theater.** At full coverage that is up to ~178 separate messages in a
-> day even at one per theater. If that proves too noisy in practice, the fix is a **digest** —
-> one message listing the flagged theaters — rather than a longer window, since a longer
-> window delays the signal this feature exists to deliver. That is a product decision and has
-> not been made.
-
-## 4. Scheduled scans
-
-Registered in `vercel.json` at `*/30 * * * *`, hitting
-`/api/cron/scan-theater-campaigns`. Requires `CRON_SECRET` (existing pattern) and
-`BOOKMYSHOW_MONITORING_ENABLED=true`.
-
-The cron ticks every 30 minutes but scans each campaign only once its own
-`scanIntervalMinutes` has elapsed. A `cronLock` prevents overlapping ticks, and a
-per-campaign lock prevents a manual scan racing a scheduled one.
-
-**Volume.** 30 Kerala regions × 3 dates ≈ 90 page renders per scan. At 90-minute intervals
-that is roughly 1,400 renders/day. Treat the interval as the politeness lever.
-
-## 5. Why a browser actor is required
-
-A plain HTTP GET of a BookMyShow showtime page returns an empty React shell — the JSON-LD
-is generic boilerplate and there are no showtimes in the HTML. The data only exists after
-client-side hydration, so the collector must execute JavaScript and read
-`window.__INITIAL_STATE__` from the rendered page.
-
-**Two things that will break it if changed:**
-
-1. **Region is resolved from an `rgn` cookie, not the URL.** Three different city URLs
-   returned Kochi data during investigation, and the URL silently rewrote itself. The
-   collector sets `rgn` per request via `preNavigationHooks` and then **asserts** the
-   region code the payload echoes back. A mismatch is recorded as a failed city.
-2. **Do not "optimize" this into a direct API call.** `/getJSData/` and `/getHTML*` are
-   robots-disallowed. Rendering the permitted public page is the line the entire
-   compliance position rests on.
-
-## 5a. Local capture — the working collection path
-
-`scripts/bms-capture.mjs` drives the **real Chrome installed on the operator's machine**,
-over that machine's own connection, and POSTs its findings to
-`/api/theater-campaigns/{id}/ingest`. That endpoint runs the same `ingestScrapeItems()`
-pipeline a provider-driven scan would, so both routes share one definition of the truth.
-
-```
-node scripts/bms-capture.mjs --campaign <campaignId>
-node scripts/bms-capture.mjs --campaign <id> --cities KOCH,PLKK --days 1 --dry-run
-```
-
-Either way it runs on a **machine**, not on Vercel: Chrome needs a desktop session, so the
-laptop has to be on and logged in, and the window is visible while it works.
-
-#### On demand (how this is actually run)
+> Why not one big sweep? `--sweep` reads everything in paced batches (~40 min), but a long
+> run also spends the slower day-scale budget (below) and tends to stop early once that is
+> exhausted. Several small runs get further, and each one lands its data immediately rather
+> than risking the whole run.
 
 A double-clickable launcher, because a laptop that may be closed at 19:00 cannot be the
 thing a schedule depends on. Nothing fires on a timer.
