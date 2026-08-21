@@ -89,6 +89,29 @@ export async function GET(request: Request) {
     data: { raw: Prisma.DbNull },
   });
 
+  // Campaign Post Tracking's two raw columns, same cutoff and same reasoning. Wired up in
+  // the same PR that created the tables rather than left for someone to notice later —
+  // which is exactly how scout_snapshots.raw went unpruned for three months (see above).
+  //
+  // Both hold a third party's payload: tracked_post_snapshots.raw is the full actor item
+  // for an influencer's post, and one row is written per post PER SCAN, so this is the
+  // fastest-growing raw column in the schema — a tracked post re-scanned daily produces a
+  // new payload every day. tracked_account_snapshots.raw is the profile payload behind a
+  // follower count.
+  //
+  // As everywhere else, only the raw blob is pruned. The structured metrics stay: they are
+  // the campaign's own performance record, and the trend they form is the whole point of
+  // the table being append-only.
+  const trackedPostSnapshots = await prisma.trackedPostSnapshot.updateMany({
+    where: { capturedAt: { lt: rawCutoff }, raw: { not: Prisma.DbNull } },
+    data: { raw: Prisma.DbNull },
+  });
+
+  const trackedAccountSnapshots = await prisma.trackedAccountSnapshot.updateMany({
+    where: { capturedAt: { lt: rawCutoff }, raw: { not: Prisma.DbNull } },
+    data: { raw: Prisma.DbNull },
+  });
+
   const commentTextCutoff = cutoffFrom("COMMENT_RETENTION_DAYS", DEFAULT_COMMENT_RETENTION_DAYS);
 
   const commentText = await prisma.postComment.updateMany({
@@ -101,6 +124,8 @@ export async function GET(request: Request) {
     postsPruned: posts.count,
     commentsRawPruned: comments.count,
     scoutSnapshotsRawPruned: scoutSnapshots.count,
+    trackedPostSnapshotsRawPruned: trackedPostSnapshots.count,
+    trackedAccountSnapshotsRawPruned: trackedAccountSnapshots.count,
     commentTextCutoff: commentTextCutoff.toISOString(),
     commentTextPruned: commentText.count,
   });

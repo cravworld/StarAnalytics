@@ -8,8 +8,11 @@
 // username-mode and post-URL-mode (shortCode, likesCount, commentsCount, timestamp,
 // ownerUsername, type — same shape as the hashtag scraper). No item sampled included
 // a reach/impressions-labeled field; a videoViewCount-style field only appears under
-// the post scraper's paid "detailedData" tier (video play count), which this
-// integration does not request — reach/saves stay null, never backfilled from it.
+// the post scraper's paid "detailedData" tier (video play count). No RawPost path requests
+// that tier — reach/saves stay null and are never backfilled from it. The one exception is
+// normalizeTrackedPostItem below, which serves Campaign Post Tracking: it does request the
+// paid tier and does read the play count, but stores it as `views`, never as reach. See
+// CAMPAIGN-POST-TRACKING.md §1a.
 
 import type { RawPost } from "./types";
 
@@ -154,7 +157,11 @@ export function normalizeTrackedPostItem(item: ActorItem): NormalizedTrackedPost
     likes: num(item, "likesCount"),
     comments: num(item, "commentsCount"),
     views: num(item, "videoPlayCount", "videoViewCount"),
-    raw: item,
+    // Minimized exactly like toRawPost's. This path scrapes the same actor and stores the
+    // same item shape, so skipping it would quietly reintroduce the identifying fields
+    // (ownerFullName, ownerProfilePicUrl) that the 2026-08-20 data-minimization pass
+    // removed — on a brand-new table the audit script does not yet cover.
+    raw: minimizeRaw(item),
   };
 }
 
