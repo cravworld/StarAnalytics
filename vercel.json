@@ -6,6 +6,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/cron/refresh-fan-pages",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/prune-raw-payloads",
       "schedule": "0 7 * * *"
     },
