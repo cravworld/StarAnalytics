@@ -73,6 +73,17 @@ describe("the capture script does not disguise itself", () => {
     expect(budgetAt, "budget check runs after the browser is opened").toBeLessThan(launchAt);
   });
 
+  it("continues from where the last run stopped, using the server's order", () => {
+    // A small run only works if it picks up the districts the last one did not reach. That
+    // ordering comes from the server, which knows what actually landed — a clock-derived
+    // rotation drifts out of step the moment a run fails or is skipped.
+    expect(code).toMatch(/plan\.orderedByStaleness/);
+    expect(PLAN).toMatch(/orderedByStaleness/);
+    // Failed reads must not count as read, or a district BookMyShow refused would wait a
+    // whole cycle before being tried again.
+    expect(stripComments(PLAN)).toMatch(/status: "ok"/);
+  });
+
   it("does not request pages it already knows will be refused", () => {
     // A burst gets four to six pages before BookMyShow starts refusing. With a fixed city
     // order, a single-burst run would spend itself on the same first cities every time and

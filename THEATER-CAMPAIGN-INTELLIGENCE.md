@@ -263,6 +263,38 @@ laptop has to be on and logged in, and the window is visible while it works.
 
 #### On demand (how this is actually run)
 
+One district per run, three days deep. **Three pages** — comfortably under the handful
+BookMyShow serves before it starts refusing, so a run completes instead of being cut off
+partway.
+
+```bat
+cd /d C:ProjectsStarAnalytics
+node "scriptsms-capture.mjs" --campaign <id> --url https://staranalytics.vercel.app --max-cities 1 --days 3
+pause
+```
+
+Saved as a `.cmd` on the Desktop. `pause` matters — without it the window closes before the
+result can be read, and partial results are the normal case here.
+
+**The server chooses the district, not the script.** `capture-plan` returns them ordered by
+how long since each was last read SUCCESSFULLY, oldest first, so each run continues where
+the last stopped without anything being remembered locally. A district whose last read was
+refused does not count as read, so it comes back around quickly rather than waiting a full
+cycle — which matters when BookMyShow refuses a few pages of most runs.
+
+Three days rather than one is the point of the shape: the whole purpose is seeing weak
+demand **before** the screening, and one day gives almost no lead time. It also sidesteps
+the evening rollover (§3), where today’s slate is already past its booking cutoff.
+
+At six runs a day that is roughly a full pass over Kerala every five days, with three days
+of forward visibility per district. Run it more often for a faster cycle — the cap is the
+ceiling, not a target.
+
+> Why not one big sweep? `--sweep` reads everything in paced batches (~40 min), but a long
+> run also spends the slower day-scale budget (below) and tends to stop early once that is
+> exhausted. Several small runs get further, and each one lands its data immediately rather
+> than risking the whole run.
+
 A double-clickable launcher, because a laptop that may be closed at 19:00 cannot be the
 thing a schedule depends on. Nothing fires on a timer.
 

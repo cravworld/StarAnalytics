@@ -321,9 +321,23 @@ function resolveCities(plan) {
   if (unknown.length) log(`ignoring unknown region codes: ${unknown.join(", ")}`);
   const known = requested.filter((c) => REGIONS[c]);
   if (raw) return known; // an explicit --cities list is an instruction, not a suggestion
-  // A sweep reads everything by pacing itself, so there is nothing to rotate: rotation
-  // exists to pick WHICH cities a single burst spends itself on.
+  // A sweep reads everything by pacing itself, so there is nothing to choose between.
   if (SWEEP) return known;
+
+  // The server orders districts stalest-first, so taking the front of the list continues
+  // where the last run stopped — no state kept here, and a district whose last read failed
+  // comes back around quickly instead of waiting a full cycle.
+  //
+  // rotateWindow is the fallback for when there is no plan to order (an --event-code run
+  // with no server reachable). A clock-derived rotation cannot know what actually landed.
+  if (plan.orderedByStaleness) {
+    const take = MAX_CITIES > 0 ? Math.min(MAX_CITIES, known.length) : known.length;
+    const picked = known.slice(0, take);
+    if (take < known.length) {
+      log(`districts (stalest first, ${take} of ${known.length}): ${picked.join(", ")}`);
+    }
+    return picked;
+  }
   return rotateWindow(known);
 }
 

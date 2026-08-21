@@ -58,12 +58,47 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   });
   const maxPerDay = Number(process.env.BOOKMYSHOW_CAPTURE_MAX_PER_DAY) || 6;
 
+  // Resolved, so an empty configuration (meaning "all Kerala") arrives as the explicit list
+  // rather than as an empty array the script would have to interpret.
+  const allCodes = resolveRegions(campaign.targetCityCodes).map((r) => r.code);
+
   return NextResponse.json({
     eventCode: campaign.bmsEventCode,
     movieSlug: movieSlugFor(campaign.movieName),
-    // Resolved, so an empty configuration (meaning "all Kerala") arrives as the explicit
-    // list rather than as an empty array the script would have to interpret.
-    cityCodes: resolveRegions(campaign.targetCityCodes).map((r) => r.code),
+    cityCodes: await stalestFirst(id, allCodes),
+    // Tells the script the order means something, so it can take the first N rather than
+    // rotating through the list on its own guess.
+    orderedByStaleness: true,
     capturesRemaining: Math.max(0, maxPerDay - capturesToday),
   });
+}
+
+/**
+ * Districts ordered by how long since one was last read successfully, oldest first.
+ *
+ * This is what lets a small run continue where the last one stopped without the script
+ * remembering anything. The server already knows which districts have data and how old it
+ * is; a client-side rotation was guessing at that from a clock, which drifts out of step the
+ * moment a run fails or is skipped.
+ *
+ * Never-read districts sort first. A district whose last read FAILED does not count as read,
+ * so it comes back around quickly instead of waiting a full cycle — which matters when
+ * BookMyShow refuses a few pages of every run.
+ */
+async function stalestFirst(campaignId: string, codes: string[]): Promise<string[]> {
+  const reads = await prisma.bmsScanCityResult.findMany({
+    where: { status: "ok", scanRun: { campaignId } },
+    select: { cityCode: true, scanRun: { select: { startedAt: true } } },
+  });
+
+  const lastOk = new Map<string, number>();
+  for (const r of reads) {
+    const at = r.scanRun.startedAt.getTime();
+    const seen = lastOk.get(r.cityCode);
+    if (seen === undefined || at > seen) lastOk.set(r.cityCode, at);
+  }
+
+  // Stable within a tie so the order does not shuffle between calls: never-read districts
+  // keep the campaign's configured order rather than an arbitrary one.
+  return [...codes].sort((a, b) => (lastOk.get(a) ?? 0) - (lastOk.get(b) ?? 0));
 }
