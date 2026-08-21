@@ -20,7 +20,7 @@ import {
   viewRate,
   type AggregateTotals,
 } from "@/lib/tracking/insights";
-import { accountKeyFor, parsePostUrl, type TrackPlatformId } from "@/lib/tracking/postUrl";
+import { accountKeyFor, facebookPageFrom, parsePostUrl, type TrackPlatformId } from "@/lib/tracking/postUrl";
 import { profileUrlKey } from "@/lib/scout/ingest";
 import {
   getTrackedPostProvider,
@@ -48,6 +48,26 @@ export interface IngestResult {
   duplicates: number;
   rejected: number;
   outcomes: IngestOutcome[];
+}
+
+/**
+ * Why a scrape came back without this post.
+ *
+ * Facebook gets its own answers because its failures are different in kind and usually
+ * fixable by the operator. There is no Facebook actor that takes a post URL, so a post is
+ * found by scraping its page and matching — which means a link that doesn't name its page
+ * (`/reel/{id}`, `/watch/?v={id}`) can't be looked up at all. Telling someone their post
+ * "may have been deleted" when the real problem is the URL format sends them to check the
+ * wrong thing.
+ */
+function notFoundReason(platform: TrackPlatformId, url: string): string {
+  if (platform === "facebook") {
+    if (!facebookPageFrom(url)) {
+      return "That Facebook link names the post but not the page it's on, and Facebook has no post-by-URL scraper — so there's no page to look it up in. Open the post on facebook.com and copy the URL from the address bar (it should look like facebook.com/thepage/posts/...).";
+    }
+    return "Not found among that page's recent posts. It may have been deleted, made non-public, or posted by a different page than the URL suggests.";
+  }
+  return "The platform returned nothing for that link — it may be deleted, private, or age-restricted.";
 }
 
 function chunk<T>(xs: T[], size: number): T[][] {
@@ -147,11 +167,7 @@ export async function ingestTrackedPostUrls(
       for (const b of batch) {
         const scrape = byKey.get(b.postKey);
         if (!scrape) {
-          outcomes.push({
-            url: b.url,
-            status: "rejected",
-            reason: "The platform returned nothing for that link — it may be deleted, private, or age-restricted.",
-          });
+          outcomes.push({ url: b.url, status: "rejected", reason: notFoundReason(platform, b.canonicalUrl) });
           continue;
         }
         await storeTrackedPost(campaignId, platform, b.canonicalUrl, scrape);
@@ -519,7 +535,17 @@ export async function getTrackedCampaigns() {
 export async function refreshCampaignTracking(campaignId: string): Promise<{ refreshed: number; failed: number }> {
   const posts = await prisma.trackedPost.findMany({
     where: { campaignId, isActive: true },
-    select: { id: true, platform: true, postKey: true, url: true, curLikes: true, curComments: true, curViews: true },
+    select: {
+      id: true,
+      platform: true,
+      postKey: true,
+      url: true,
+      // Facebook needs this: it bounds the page scrape to the oldest post tracked there.
+      postedAt: true,
+      curLikes: true,
+      curComments: true,
+      curViews: true,
+    },
   });
 
   let refreshed = 0;
@@ -540,7 +566,11 @@ export async function refreshCampaignTracking(campaignId: string): Promise<{ ref
       try {
         scrapes = await provider.scrapePosts(
           platform,
-          batch.map((b) => ({ postKey: b.postKey, url: b.url })),
+          batch.map((b) => ({
+            postKey: b.postKey,
+            url: b.url,
+            postedAt: b.postedAt ? b.postedAt.toISOString() : null,
+          })),
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -560,7 +590,7 @@ export async function refreshCampaignTracking(campaignId: string): Promise<{ ref
             where: { id: b.id },
             data: {
               lastScrapedAt: new Date(),
-              lastError: "Not returned by the platform — may have been deleted or made private.",
+              lastError: notFoundReason(platform, b.url),
             },
           });
           failed++;

@@ -15,9 +15,9 @@ influencer is the post link. No Insights screenshots, no exports, no cooperation
 kind. Everything this feature knows, it scrapes. That makes §1's ceiling permanent rather
 than provisional — see §1c.
 
-**Status: Phase 1 built, not yet deployed.** Instagram and YouTube work end to end; Facebook
-is stubbed and fails loudly (§4a). The migration has NOT been applied — it lands the moment a
-PR's preview build goes green, which is also the moment the tables exist in production.
+**Status: Phase 1 shipped (PR #52, merged 2026-08-21).** All three platforms are wired; Facebook
+is built but not yet run against a real page (§4a). The migration is applied and verified at
+zero drift against the schema.
 
 | Piece | Where |
 |---|---|
@@ -45,7 +45,7 @@ plus the Facebook actor schemas checked 2026-08-21:
 | Likes / reactions | ✅ `likesCount` | ✅ + reaction breakdown | ✅ `likeCount` |
 | Comments | ✅ `commentsCount` | ✅ | ✅ `commentCount` |
 | Shares | ❌ never exposed | ✅ | ❌ |
-| Views / plays | ✅ **video/reel only**, paid tier — see §1a | ✅ (page actor) / ❌ (post-URL actor) | ✅ `viewCount` |
+| Views / plays | ✅ **video/reel only**, paid tier — see §1a | ✅ `viewsCount` (video posts) | ✅ `viewCount` |
 | **Reach / impressions** | ❌ **never** | ❌ **never** | ❌ **never** |
 | Saves | ❌ | ❌ | ❌ |
 
@@ -389,53 +389,92 @@ do not let it fall through as an unparseable URL.
 Batch at 200 URLs per run, reusing `AGENCY_SCRAPE_BATCH_SIZE` rather than inventing a
 second ceiling.
 
-### 4a. Facebook actor — genuinely undecided, and a test decides it
+### 4a. Facebook — BUILT via page-scrape-and-match (2026-08-21)
 
-Verified 2026-08-21. Neither option is clean, and there is no safe armchair pick:
+**There is no Apify actor that takes a Facebook post URL and returns that post's metrics.**
+Not a gap in the search — a gap in Facebook's tooling. Apify's official collection has ~17
+Facebook actors and every one is organised by *container*: page, group, event, hashtag,
+search, marketplace, reels, reviews.
 
-| | `apify/facebook-posts-scraper` (official) | `scrapyspider/facebook-post-scraper` |
-|---|---|---|
-| Input | **Page URLs only** — no post URLs | Direct post URLs (`urls`) |
-| Returns | likes, comments, shares, reaction breakdown, **views** | likes, comments, shares — **no views** |
-| Cost per *tracked* post | see below — **not** the headline rate | ~$0.001 |
-| Risk | Official, maintained | Community, 206 total users, no ratings |
+Two official actors do accept post URLs, and neither helps:
 
-**The cost row is the trap.** The official actor bills ~$0.005–0.008 per *scraped* post, and
-it can only be pointed at a page. To refresh one tracked post you scrape that influencer's
-whole recent feed. Track 3 posts from an account whose `resultsLimit` is 50 and each refresh
-costs ~$0.25–0.40, not ~$0.02 — and §6 wants that daily. Per tracked post that's roughly
-20–50× the community actor, not 5×.
+- `apify/facebook-comments-scraper` returns the comment list, not counts.
+- `apify/facebook-likes-scraper` sounds exactly right and is a trap. It returns **one row
+  per person who reacted** — name, profile URL, profile picture, Facebook ID — and by its
+  own docs only a ~20-row *preview* per post, so it cannot produce a true count at all. It
+  bills $2.60/1,000 rows, and it would harvest the personal data of thousands of uninvolved
+  third parties, which is the exact inverse of the data-minimization pass in
+  `apify-normalize.ts`. Disqualified three times over.
 
-**The feasibility problem is worse than the cost problem.** A page scraper walks *recent*
-posts. A tracked post that ages out of the scrape window simply stops appearing in the
-results — and a re-scan that returns nothing is indistinguishable, to §6's taper logic, from
-a post whose engagement has flattened. The feature would quietly stop measuring old posts
-while reporting that they had settled.
+This asymmetry with Instagram is structural, not incidental: an Instagram post has one
+canonical shortcode URL, so `apify/instagram-post-scraper` can key on it. A Facebook post
+has six URL shapes, some of which resolve only behind a login redirect.
 
-So the decision rests on one empirical question, not on maintenance quality:
+**So the route is: scrape the post's page, match our post ID out of the results.**
 
-> At a sane `resultsLimit`, can `apify/facebook-posts-scraper` still see a post that is
-> 30+ days old on a normally-active influencer page?
+#### What makes that precise rather than a guess
 
-**Test before committing to either.** Take 3–5 real Facebook campaign URLs — deliberately
-including at least one 30+ days old — and run both actors against them. If the official
-actor can't reach the old post, page-scraping is disqualified for *tracking* regardless of
-how well maintained it is, and the real choice becomes community-actor-versus-no-Facebook —
-at which point the 206-user actor's risk has to be weighed on its own terms (pin the build,
-treat its output as untrusted, fail loudly rather than writing zeros).
+`apify/facebook-posts-scraper` takes **`onlyPostsNewerThan`**, accepting a date or a
+relative expression ("2 months"). Each run is therefore bounded to just before the oldest
+post we track on that page — guaranteed to reach every one of them, and nothing older.
 
-**Until that test runs, Facebook ingest is stubbed and throws an explicit "no Facebook actor
-selected" error.** It does not return empty metrics. A tracked Facebook post that silently
-reports zero engagement is worse than one that refuses to be added, because zero is
-indistinguishable from a real result and would drag every campaign total down with it.
-`TrackPlatform` carries `facebook` from day one so enabling it later is a provider change,
-not a migration.
+The original worry was that a page scraper walks only *recent* posts, so a tracked post
+could age out of the window and vanish silently. Two things killed that objection:
+
+1. **The date bound removes the guesswork.** We are not hoping a fixed `resultsLimit` went
+   deep enough; we state the cutoff.
+2. **Measured posting frequency says the window is generous.** Across this account's own
+   2,113 Scoutline snapshots, influencers post a **median of 1.06 posts/week** (p90 3.8).
+   To still reach a 30-day-old post takes ~5 items at the median and ~17 at p90; 60 days
+   takes ~10 and ~33. These are not brands posting five times a day.
+
+`APIFY_FB_INITIAL_LOOKBACK` (default "3 months") covers the first ingest, when the post's
+date isn't known yet. `APIFY_FB_MAX_POSTS_PER_PAGE` (default 200) is the ceiling for the
+outlier case — the same dataset has a maximum of 112 posts/week, and one tracked post should
+not become an unbounded bill.
+
+#### One run per page, not per post
+
+Three posts from the same influencer is one scrape, not three. Posts are grouped by the page
+derived from their own URL (`facebookPageFrom`), so cost scales with accounts, not posts.
+
+#### Where it still can't reach, and why that's said out loud
+
+`/reel/{id}`, `/watch/?v={id}` and `/share/p/{hash}` name a post and nothing else — there is
+no page in the URL to scrape. Those are **not** silently skipped: the operator gets
+"That Facebook link names the post but not the page it's on… copy the URL from the address
+bar", which is fixable in ten seconds. A post that scrapes but isn't found gets a different
+message again ("Not found among that page's recent posts"), because "your URL is the wrong
+shape" and "your post may have been deleted" send someone to check very different things.
+
+Nothing anywhere returns a fabricated zero.
+
+#### Matching on every ID form
+
+A pasted link may key on a `pfbid…` permalink token while the actor reports the numeric ID —
+or the reverse. `facebookPostKeys()` indexes every form a returned post could be matched by,
+because matching on one alone silently drops the other.
+
+#### Not chosen: `scrapyspider/facebook-post-scraper`
+
+The community post-URL actor works and is cheap (~$0.001/post), but returns no view counts
+and has 206 total users with no ratings. It stays the documented fallback if the official
+actor disappoints on real pages — the provider seam makes that a one-file swap.
+
+#### Still unverified
+
+The field names above come from the actor's documentation, not from a live run against a
+real page. `apify-scout-normalize-facebook.ts` records this repo's own hard-won lesson that
+Facebook scrapes come back less consistently shaped than Instagram's — one of three live
+test pages returned an empty dataset outright. The normalizer is therefore written with
+fallbacks on every field and returns null rather than 0 for anything absent, and
+`apify-normalize-facebook-posts.test.ts` pins that behaviour. **The first real Facebook link
+is still the test that matters.**
 
 Note this is a different question from Scoutline's. Scoutline runs
-`apify/facebook-pages-scraper` deliberately page-only, because it scores *accounts*. Tracking
-scores *posts*, so the same publisher's page-level approach doesn't transfer.
-
-Whichever wins, it lands behind the provider seam, so swapping later is a one-file change.
+`apify/facebook-pages-scraper` deliberately page-only because it scores *accounts*; tracking
+scores *posts*. The follower-count path here reuses that same actor and normalizer, since
+the follower number is the same number.
 
 ---
 
@@ -606,8 +645,13 @@ Once it is live, in this order:
 
 ## 11. Known gaps
 
-- **Facebook is not covered.** Stubbed, fails loudly (§4a). Needs 3–5 real URLs including
-  one 30+ days old to settle the actor choice.
+- **Facebook is built but never run against a real page** (§4a). Field names come from the
+  actor's docs, not a live run, and this repo already knows Facebook payloads are
+  inconsistently shaped. The normalizer has fallbacks everywhere and returns null rather
+  than 0, but the first real link is the test.
+- **Facebook `/reel/` and `/watch/` links can't be tracked** — they name the post but not
+  its page, and there is no post-by-URL actor to fall back on. The operator is told to paste
+  the address-bar permalink instead (§4a).
 - **No re-scan cron yet** (§6). Metrics move only when someone presses Refresh, so velocity
   stays blank until a post is scanned twice.
 - **No bulk upload yet** (Phase 3). The ingest function already takes an array and the form
