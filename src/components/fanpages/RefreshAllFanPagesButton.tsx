@@ -4,6 +4,19 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { refreshFanPagesChunkAction } from "@/lib/actions/fanpages";
 
+/** Enough to name a page in a failure line — the id to refresh it, the handle to report it. */
+interface FanPageRef {
+  id: string;
+  handle: string;
+}
+
+/**
+ * Consecutive failures that mean "something systemic is wrong" rather than "this page is slow".
+ * One page failing is routine; three in a row is an expired session or a down deploy, and
+ * grinding through the remaining thirty requests would just repeat it thirty times.
+ */
+const CONSECUTIVE_FAILURE_LIMIT = 3;
+
 interface Tally {
   refreshed: number;
   posts: number;
@@ -39,7 +52,7 @@ interface Tally {
  * - No confirmation dialog: this is additive and repeatable, nothing is destroyed, and the
  *   pre-click count already carries the weight.
  */
-export function RefreshAllFanPagesButton({ pageIds }: { pageIds: string[] }) {
+export function RefreshAllFanPagesButton({ pages }: { pages: FanPageRef[] }) {
   const router = useRouter();
   const [done, setDone] = useState<number | null>(null);
   const [tally, setTally] = useState<Tally | null>(null);
@@ -48,7 +61,7 @@ export function RefreshAllFanPagesButton({ pageIds }: { pageIds: string[] }) {
   // copy for its whole run.
   const stopRequested = useRef(false);
 
-  const total = pageIds.length;
+  const total = pages.length;
   const pending = done !== null;
 
   if (total === 0) return null;
@@ -61,6 +74,11 @@ export function RefreshAllFanPagesButton({ pageIds }: { pageIds: string[] }) {
 
     const running: Tally = { refreshed: 0, posts: 0, failures: [], stopped: false };
 
+    // Consecutive, not total. One page timing out is normal on a slow profile and must not end
+    // the run; the whole session having expired, or the deploy being down, makes every remaining
+    // request fail the same way and should stop rather than grind through 30 more.
+    let consecutiveFailures = 0;
+
     try {
       for (let i = 0; i < total; i++) {
         if (stopRequested.current) {
@@ -68,19 +86,41 @@ export function RefreshAllFanPagesButton({ pageIds }: { pageIds: string[] }) {
           break;
         }
         setDone(i);
-        // Revalidate on the final page only — see the note on refreshFanPagesChunkAction.
-        const outcome = await refreshFanPagesChunkAction([pageIds[i]], i === total - 1);
-        running.refreshed += outcome.refreshed;
-        running.posts += outcome.posts;
-        running.failures.push(...outcome.failures);
+        // Per page, NOT around the loop. The action can still throw for reasons the server-side
+        // per-page handling cannot convert into a result — a request that exceeds maxDuration
+        // (one very slow page is ~600s of scrape plus up to ~600s of comment scrape, and the
+        // budget is 800s), a dropped connection, an expired session. Caught around the loop,
+        // any one of those abandoned every page after it, which is the same "half the work
+        // silently missing" failure this whole change exists to remove.
+        try {
+          // Revalidate on the final page only — see the note on refreshFanPagesChunkAction.
+          const outcome = await refreshFanPagesChunkAction([pages[i].id], i === total - 1);
+          running.refreshed += outcome.refreshed;
+          running.posts += outcome.posts;
+          running.failures.push(...outcome.failures);
+          consecutiveFailures = 0;
+        } catch (e) {
+          running.failures.push({
+            handle: pages[i].handle,
+            error: e instanceof Error ? e.message : String(e),
+          });
+          if (++consecutiveFailures >= CONSECUTIVE_FAILURE_LIMIT) {
+            running.stopped = true;
+            setError(
+              `Stopped after ${CONSECUTIVE_FAILURE_LIMIT} failures in a row — the remaining pages were not attempted. Reload and try again.`,
+            );
+            setTally({ ...running, failures: [...running.failures] });
+            break;
+          }
+        }
         // Committed per page, so a stop or a mid-run failure still shows what was achieved.
         setTally({ ...running, failures: [...running.failures] });
       }
-      router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      router.refresh();
     } finally {
+      // Runs on every exit path — the list must end up showing whatever did get refreshed.
+      router.refresh();
       setDone(null);
     }
   }
