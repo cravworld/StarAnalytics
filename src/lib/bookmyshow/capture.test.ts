@@ -66,9 +66,9 @@ describe("the capture script does not disguise itself", () => {
     // Discovering the cap at ingest means the pages were already fetched from BookMyShow
     // and the run is then thrown away with a 429 — requests spent, nothing learned. The
     // check has to come before chromium.launch.
-    const budgetAt = code.indexOf("capturesRemaining");
+    const budgetAt = code.indexOf("pagesRemaining");
     const launchAt = code.indexOf("chromium.launch");
-    expect(budgetAt, "capture script never reads capturesRemaining").toBeGreaterThan(-1);
+    expect(budgetAt, "capture script never reads pagesRemaining").toBeGreaterThan(-1);
     expect(launchAt).toBeGreaterThan(-1);
     expect(budgetAt, "budget check runs after the browser is opened").toBeLessThan(launchAt);
   });
@@ -156,8 +156,8 @@ describe("capture endpoints fail closed", () => {
   });
 
   it("enforces a server-side daily cap that the client cannot raise", () => {
-    expect(INGEST).toMatch(/BOOKMYSHOW_CAPTURE_MAX_PER_DAY/);
-    expect(stripComments(INGEST)).toMatch(/capturesToday >= MAX_CAPTURES_PER_DAY/);
+    expect(INGEST).toMatch(/BOOKMYSHOW_CAPTURE_MAX_PAGES_PER_DAY/);
+    expect(stripComments(INGEST)).toMatch(/pagesToday >= MAX_PAGES_PER_DAY/);
     expect(stripComments(INGEST)).toMatch(/status: 429/);
   });
 
@@ -173,13 +173,13 @@ describe("capture endpoints fail closed", () => {
   });
 
   it("returns only what is needed to build public URLs and pace the run", () => {
-    // A leaked secret should expose as little as possible. capturesRemaining is a bare
+    // A leaked secret should expose as little as possible. pagesRemaining is a bare
     // count with no campaign detail in it, which is why it is allowed here.
     const returned = stripComments(PLAN);
     expect(returned).toMatch(/eventCode/);
     expect(returned).toMatch(/movieSlug/);
     expect(returned).toMatch(/cityCodes/);
-    expect(returned).toMatch(/capturesRemaining/);
+    expect(returned).toMatch(/pagesRemaining/);
     expect(returned).not.toMatch(/wideOpenAlertPct|minShowsForAlert|bmsSourceUrl/);
   });
 
@@ -187,7 +187,7 @@ describe("capture endpoints fail closed", () => {
     // The plan reports the budget so the script can stop early; the ingest route is what
     // actually refuses. If enforcement ever moved to the advisory number, an edited script
     // could ignore it and the cap would be decoration.
-    expect(stripComments(INGEST)).toMatch(/capturesToday >= MAX_CAPTURES_PER_DAY/);
+    expect(stripComments(INGEST)).toMatch(/pagesToday >= MAX_PAGES_PER_DAY/);
     expect(stripComments(INGEST)).toMatch(/status: 429/);
   });
 });

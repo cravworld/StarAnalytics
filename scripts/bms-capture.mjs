@@ -128,9 +128,9 @@ const plan = await fetchPlan();
 //
 // Advisory only. The server remains the thing that enforces the cap, so editing this out
 // buys nothing except a wasted run.
-if (!DRY_RUN && typeof plan.capturesRemaining === "number" && plan.capturesRemaining <= 0) {
+if (!DRY_RUN && typeof plan.pagesRemaining === "number" && plan.pagesRemaining <= 0) {
   fail(
-    "Daily capture limit already reached for this campaign, so this run would be rejected. " +
+    "Daily page limit already reached for this campaign, so this run would be rejected. " +
       "Nothing was requested from BookMyShow. Try again later — the limit is a rolling 24 hours, " +
       "not a calendar day, so the earliest slot frees up 24h after the oldest run.",
   );

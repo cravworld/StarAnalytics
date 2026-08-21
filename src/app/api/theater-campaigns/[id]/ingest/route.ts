@@ -23,14 +23,22 @@ export const maxDuration = 300;
 const MAX_ITEMS = 500;
 
 /**
- * Daily cap on captures per campaign, enforced server-side.
+ * Daily cap per campaign, counted in PAGES rather than runs.
  *
  * The script has its own pacing, but a client-side limit is a suggestion — this is the one
  * that holds. It exists because the whole justification for this collection path is that it
  * stays at human-scale volume; a runaway scheduled task that ran every minute would destroy
  * that justification, and nobody would notice until BookMyShow did.
+ *
+ * It used to count RUNS, capped at 6. That was sized when a run meant thirty to ninety
+ * pages. A run is now three — one district over three days — so the old cap allowed
+ * eighteen pages a day, roughly a tenth of what it was written to permit, and it became the
+ * binding constraint instead of the backstop it was meant to be.
+ *
+ * Volume is what the justification is about, so volume is what is counted. Many small runs
+ * and one large sweep now cost what they actually cost.
  */
-const MAX_CAPTURES_PER_DAY = Number(process.env.BOOKMYSHOW_CAPTURE_MAX_PER_DAY) || 6;
+const MAX_PAGES_PER_DAY = Number(process.env.BOOKMYSHOW_CAPTURE_MAX_PAGES_PER_DAY) || 120;
 
 function secretMatches(provided: string | null): boolean {
   const expected = process.env.BOOKMYSHOW_CAPTURE_SECRET;
@@ -90,13 +98,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const capturesToday = await prisma.bmsScanRun.count({
+  const spent = await prisma.bmsScanRun.aggregate({
     where: { campaignId: id, provider: "capture", startedAt: { gte: since } },
+    _sum: { citiesRequested: true },
   });
-  if (capturesToday >= MAX_CAPTURES_PER_DAY) {
+  const pagesToday = spent._sum.citiesRequested ?? 0;
+  if (pagesToday >= MAX_PAGES_PER_DAY) {
     return NextResponse.json(
       {
-        error: `daily capture limit reached (${MAX_CAPTURES_PER_DAY} in the last 24h). This cap keeps collection at human-scale volume, which is the basis on which it is done at all.`,
+        error: `daily page limit reached (${pagesToday} of ${MAX_PAGES_PER_DAY} in the last 24h). This cap keeps collection at human-scale volume, which is the basis on which it is done at all.`,
       },
       { status: 429 },
     );
