@@ -23,6 +23,13 @@ interface Tally {
 
 const EMPTY_TALLY: Tally = { added: 0, reactivated: 0, alreadyTracked: 0, posts: 0, failures: [], stopped: false };
 
+/**
+ * Consecutive failures that mean "something systemic is wrong" rather than "this page is slow".
+ * One handle failing is routine; three in a row is an expired session or a down deploy, and
+ * grinding through the rest of a long paste would just repeat it for every remaining handle.
+ */
+const CONSECUTIVE_FAILURE_LIMIT = 3;
+
 const PLACEHOLDERS: Record<PlatformId, string> = {
   instagram: "@fanpage_one\n@fanpage_two\nhttps://instagram.com/fanpage_three\nfanpage_four, fanpage_five",
   youtube: "@channel_one\nhttps://youtube.com/@channel_two\nyoutube.com/c/ChannelThree",
@@ -77,6 +84,9 @@ export function BulkAddFanPagesForm() {
     const chunkSize = BULK_ADD_CHUNK_SIZE[platform];
     const running: Tally = { ...EMPTY_TALLY, failures: [] };
     const total = parsed.handles.length;
+    // Consecutive, not total: one handle failing is routine, three in a row means the session
+    // expired or the deploy is down and the rest of the list would fail identically.
+    let consecutiveFailures = 0;
     setProgress({ done: 0, total, current: parsed.handles[0] });
 
     try {
@@ -91,23 +101,43 @@ export function BulkAddFanPagesForm() {
         // revalidation makes every chunk's response carry a re-render of this whole route, which
         // is both wasted database work and a commit into the tree holding this component's state.
         const isFinalChunk = i + chunkSize >= total;
-        const outcome = await addFanPagesBulkAction(chunk, platform, isFinalChunk);
-        running.added += outcome.added;
-        running.reactivated += outcome.reactivated;
-        running.alreadyTracked += outcome.alreadyTracked;
-        running.posts += outcome.posts;
-        running.failures.push(...outcome.failures);
+        // Per chunk, NOT around the loop. addFanPages already converts per-handle problems into
+        // results, but the call itself can still throw for reasons it never sees: a request that
+        // exceeds maxDuration, a dropped connection, an expired session. Caught around the loop,
+        // any one of those abandoned every handle after it — silently losing most of a paste.
+        try {
+          const outcome = await addFanPagesBulkAction(chunk, platform, isFinalChunk);
+          running.added += outcome.added;
+          running.reactivated += outcome.reactivated;
+          running.alreadyTracked += outcome.alreadyTracked;
+          running.posts += outcome.posts;
+          running.failures.push(...outcome.failures);
+          consecutiveFailures = 0;
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          for (const handle of chunk) running.failures.push({ handle, error: message });
+          if (++consecutiveFailures >= CONSECUTIVE_FAILURE_LIMIT) {
+            running.stopped = true;
+            setError(
+              `Stopped after ${CONSECUTIVE_FAILURE_LIMIT} failures in a row — the remaining pages were not attempted. Reload and try again.`,
+            );
+            setTally({ ...running, failures: [...running.failures] });
+            break;
+          }
+        }
         // Committed after every chunk rather than at the end, so a run that is stopped or that
         // dies mid-way still shows what it managed to do.
         setTally({ ...running, failures: [...running.failures] });
       }
       // Handles that succeeded are already in the database whether or not the rest ran, so the
       // list is refreshed on the way out of every exit path, including the stopped one.
-      router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      router.refresh();
     } finally {
+      // Runs on every exit path — normal completion, stop, systemic failure. Handles that
+      // succeeded are already in the database regardless, so the list must always end up showing
+      // them rather than only when the run finished tidily.
+      router.refresh();
       setProgress(null);
     }
   }

@@ -36,7 +36,7 @@ export default async function FanPagesPage() {
         {/* Ids rather than a count: the button walks the pages one request at a time, because
             refreshing all of them in a single Server Action exceeds maxDuration once there are
             more than a couple — see the note on refreshFanPagesChunkAction. */}
-        <RefreshAllFanPagesButton pageIds={fanPages.map((p) => p.id)} />
+        <RefreshAllFanPagesButton pages={fanPages.map((p) => ({ id: p.id, handle: p.handle }))} />
       </div>
 
       {suggestions.length > 0 ? (
