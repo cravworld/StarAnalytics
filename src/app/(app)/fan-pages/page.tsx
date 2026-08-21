@@ -33,7 +33,10 @@ export default async function FanPagesPage() {
       {/* Sits directly above the list it acts on, right-aligned so it reads as a control for
           the whole list rather than another field on the add form above it. */}
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-        <RefreshAllFanPagesButton totalTracked={totalTracked} />
+        {/* Ids rather than a count: the button walks the pages one request at a time, because
+            refreshing all of them in a single Server Action exceeds maxDuration once there are
+            more than a couple — see the note on refreshFanPagesChunkAction. */}
+        <RefreshAllFanPagesButton pageIds={fanPages.map((p) => p.id)} />
       </div>
 
       {suggestions.length > 0 ? (
