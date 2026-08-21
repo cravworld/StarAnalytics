@@ -12,12 +12,15 @@ import {
   fetchTrackedFacebookPosts,
   fetchFacebookPageSnapshot,
   fetchProfileSnapshot,
+  discoverInstagramAccountPosts,
+  discoverFacebookPagePosts,
 } from "@/lib/providers/apify-public-content";
 import {
   fetchTrackedYouTubeVideos,
   fetchYouTubeChannelById,
+  discoverYouTubeChannelVideos,
 } from "@/lib/providers/youtube-public-content";
-import { facebookPageFrom, type TrackPlatformId } from "./postUrl";
+import { accountUrlFor, facebookPageFrom, type TrackPlatformId } from "./postUrl";
 
 /** Current metrics for one tracked post. Every metric nullable — see insights.ts. */
 export interface TrackedPostScrape {
@@ -65,6 +68,19 @@ export interface TrackedPostProvider {
   ): Promise<TrackedPostScrape[]>;
 
   scrapeAccount(platform: TrackPlatformId, handle: string): Promise<TrackedAccountScrape>;
+
+  /**
+   * Recent posts from a whole account — what a page subscription pulls.
+   *
+   * `since` bounds Facebook's page scrape; Instagram and YouTube have no date filter on
+   * their actors and are bounded by a result count instead, so the caller must filter by
+   * date afterwards rather than assuming the provider did.
+   */
+  discoverAccountPosts(
+    platform: TrackPlatformId,
+    handle: string,
+    since: Date | null,
+  ): Promise<TrackedPostScrape[]>;
 }
 
 /**
@@ -199,6 +215,76 @@ class LiveTrackedPostProvider implements TrackedPostProvider {
     return out;
   }
 
+  async discoverAccountPosts(
+    platform: TrackPlatformId,
+    handle: string,
+    since: Date | null,
+  ): Promise<TrackedPostScrape[]> {
+    if (platform === "instagram") {
+      const items = await discoverInstagramAccountPosts(handle);
+      return items.map((i) => ({
+        postKey: i.postKey,
+        authorHandle: i.authorHandle ?? handle,
+        authorDisplayName: null,
+        mediaType: i.mediaType,
+        caption: i.caption,
+        postedAt: i.postedAt,
+        likes: i.likes,
+        comments: i.comments,
+        shares: null,
+        reactions: null,
+        views: i.views,
+        raw: i.raw,
+      }));
+    }
+
+    if (platform === "facebook") {
+      const posts = await discoverFacebookPagePosts(accountUrlFor("facebook", handle), since);
+      return posts.flatMap((p) => {
+        // A discovered post with no usable id can't be stored or re-scanned later, so it is
+        // dropped rather than given a synthetic key that would never match again.
+        const key = p.postKeys[0];
+        if (!key) return [];
+        return [
+          {
+            postKey: key,
+            authorHandle: handle,
+            authorDisplayName: p.pageName,
+            mediaType: p.mediaType,
+            caption: p.caption,
+            postedAt: p.postedAt,
+            likes: p.likes,
+            comments: p.comments,
+            shares: p.shares,
+            reactions: p.reactions,
+            views: p.views,
+            raw: p.raw,
+          },
+        ];
+      });
+    }
+
+    if (platform === "youtube") {
+      const videos = await discoverYouTubeChannelVideos(handle);
+      return videos.map((v) => ({
+        postKey: v.postKey,
+        authorHandle: v.channelId ?? handle,
+        authorDisplayName: v.channelTitle,
+        mediaType: v.mediaType,
+        caption: v.caption,
+        postedAt: v.postedAt,
+        likes: v.likes,
+        comments: v.comments,
+        shares: null,
+        reactions: null,
+        views: v.views,
+        raw: v.raw,
+      }));
+    }
+
+    throw new PlatformNotSupportedError(platform);
+  }
+
   async scrapeAccount(platform: TrackPlatformId, handle: string): Promise<TrackedAccountScrape> {
     if (platform === "facebook") {
       const page = await fetchFacebookPageSnapshot(`https://www.facebook.com/${handle}/`);
@@ -315,6 +401,32 @@ class MockTrackedPostProvider implements TrackedPostProvider {
         },
       ];
     });
+  }
+
+  /**
+   * A deterministic set of recent posts for a page.
+   *
+   * Deliberately returns a MIX: some captions carry a campaign hashtag and some don't, so
+   * the "campaign post vs other post from this page" split is exercised locally rather than
+   * first discovered against a real account.
+   */
+  async discoverAccountPosts(
+    platform: TrackPlatformId,
+    handle: string,
+    _since: Date | null,
+  ): Promise<TrackedPostScrape[]> {
+    const base = this.hash(handle);
+    const posts = Array.from({ length: 6 }, (_, i) => ({
+      postKey: `mock${base % 10_000}_${i}`,
+      url: accountUrlFor(platform, handle),
+    }));
+    const scraped = await this.scrapePosts(platform, posts);
+    return scraped.map((s, i) => ({
+      ...s,
+      authorHandle: handle,
+      // Two in three mention a campaign hashtag; the rest are the influencer's own content.
+      caption: i % 3 === 0 ? `Just a normal post ${i}` : `Loving this #np50 #pluto post ${i}`,
+    }));
   }
 
   async scrapeAccount(platform: TrackPlatformId, handle: string): Promise<TrackedAccountScrape> {

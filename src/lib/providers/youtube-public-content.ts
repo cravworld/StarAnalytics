@@ -190,6 +190,33 @@ export async function fetchYouTubeChannelById(
   };
 }
 
+// Videos pulled per channel when discovering a subscribed page's recent uploads.
+const TRACKED_DISCOVERY_LIMIT = Number(process.env.YOUTUBE_TRACKED_DISCOVERY_LIMIT) || 50;
+
+/**
+ * Recent uploads from ONE channel, for page subscriptions.
+ *
+ * Accepts either a channel ID ("UC…") or an "@handle", because parseAccountUrl produces
+ * both: /channel/UC… carries the ID directly and /@name is resolvable via forHandle. Legacy
+ * /c/ and /user/ vanity URLs are rejected upstream — they resolve through neither lookup,
+ * only through search.list, which costs 100 quota units against a 10,000/day budget.
+ *
+ * Returns the same shape as fetchTrackedYouTubeVideos so the caller treats a discovered
+ * video and a pasted one identically.
+ */
+export async function discoverYouTubeChannelVideos(handleOrId: string): Promise<TrackedYouTubeVideo[]> {
+  const res = await ytGet<ChannelListResponse>(
+    "/channels",
+    handleOrId.startsWith("@")
+      ? { part: "contentDetails", forHandle: handleOrId.replace(/^@/, "") }
+      : { part: "contentDetails", id: handleOrId },
+  );
+  const uploads = res.items[0]?.contentDetails?.relatedPlaylists?.uploads;
+  if (!uploads) return [];
+  const videoIds = await uploadsVideoIds(uploads, TRACKED_DISCOVERY_LIMIT);
+  return fetchTrackedYouTubeVideos(videoIds);
+}
+
 export class YouTubePublicContentProvider implements PublicContentProvider {
   async scrapeByHashtag(): Promise<RawPost[]> {
     // No accessible cheap primitive exists — YouTube's nearest equivalent, search.list,

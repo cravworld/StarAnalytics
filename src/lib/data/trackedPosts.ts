@@ -20,7 +20,14 @@ import {
   viewRate,
   type AggregateTotals,
 } from "@/lib/tracking/insights";
-import { accountKeyFor, facebookPageFrom, parsePostUrl, type TrackPlatformId } from "@/lib/tracking/postUrl";
+import {
+  accountKeyFor,
+  facebookPageFrom,
+  parseAccountUrl,
+  parsePostUrl,
+  postUrlFor,
+  type TrackPlatformId,
+} from "@/lib/tracking/postUrl";
 import { profileUrlKey } from "@/lib/scout/ingest";
 import {
   getTrackedPostProvider,
@@ -39,14 +46,42 @@ const ACCOUNT_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export interface IngestOutcome {
   url: string;
-  status: "added" | "duplicate" | "rejected";
+  status: "added" | "duplicate" | "rejected" | "page-subscribed";
   reason?: string;
+}
+
+/**
+ * Does this caption mention one of the campaign's hashtags?
+ *
+ * This is the automatic half of deciding whether a page-discovered post counts toward the
+ * campaign. It is deliberately the ONLY automatic signal, and deliberately not trusted to be
+ * complete: an influencer who forgets the hashtag produces a false negative, which is why
+ * non-matching posts are still stored and shown under "other posts from this page" with a
+ * one-click include, rather than being filtered away where nobody could see them.
+ *
+ * Matched with a word boundary so #np50 doesn't match #np500, and case-insensitively
+ * because nobody types hashtags consistently.
+ */
+export function captionMentionsCampaign(caption: string | null, hashtags: string[]): boolean {
+  if (!caption || hashtags.length === 0) return false;
+  const text = caption.toLowerCase();
+  return hashtags.some((tag) => {
+    const clean = tag.replace(/^#/, "").toLowerCase();
+    if (!clean) return false;
+    return new RegExp(`#${clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9_])`, "i").test(text);
+  });
 }
 
 export interface IngestResult {
   added: number;
   duplicates: number;
   rejected: number;
+  /**
+   * Subscriptions created by this submission, for the caller to run discovery on OFF the
+   * request. A page yields up to TRACKED_DISCOVERY_LIMIT posts at ~6 sequential queries
+   * each; scraping inline would time out and leave partial rows. See the server action.
+   */
+  pageSubscriptionIds: string[];
   outcomes: IngestOutcome[];
 }
 
@@ -97,9 +132,29 @@ export async function ingestTrackedPostUrls(
   // Dedup within the submitted batch itself by postKey, not by URL string — the same post
   // pasted as /p/ and /reel/, or twice with different tracking params, is one post.
   const seen = new Set<string>();
+  const pageSubscriptions: string[] = [];
   for (const url of urls) {
     const result = parsePostUrl(url);
     if (!result.ok) {
+      // Not a post link — try it as a page/profile link before rejecting. The operator
+      // pastes whatever they have into one box and never has to declare which kind it is.
+      const asAccount = parseAccountUrl(url);
+      if (asAccount.ok) {
+        const { subscriptionId } = await subscribeToPage(
+          campaignId,
+          asAccount.value.platform,
+          asAccount.value.handle,
+        );
+        pageSubscriptions.push(subscriptionId);
+        outcomes.push({
+          url,
+          status: "page-subscribed",
+          reason: `Tracking @${asAccount.value.handle} — pulling their posts now, and new ones automatically from here on.`,
+        });
+        continue;
+      }
+      // Report the POST-parse reason, not the account one: "that's a story link" is more
+      // useful than "that's not a valid profile" for something that looks like a post.
       outcomes.push({ url, status: "rejected", reason: result.reason });
       continue;
     }
@@ -180,8 +235,142 @@ export async function ingestTrackedPostUrls(
     added: outcomes.filter((o) => o.status === "added").length,
     duplicates: outcomes.filter((o) => o.status === "duplicate").length,
     rejected: outcomes.filter((o) => o.status === "rejected").length,
+    pageSubscriptionIds: pageSubscriptions,
     outcomes,
   };
+}
+
+/**
+ * Subscribe a campaign to a whole page. Idempotent — re-pasting the same page link
+ * reactivates the subscription rather than creating a second one.
+ *
+ * Only records the intent; the scrape happens in runPageDiscovery, which the caller runs
+ * off-request. A page yields up to TRACKED_DISCOVERY_LIMIT posts and each one is ~6
+ * sequential queries through storeTrackedPost, so doing this inline would time out on the
+ * first real page and leave partial rows with no record of where it stopped.
+ */
+export async function subscribeToPage(
+  campaignId: string,
+  platform: TrackPlatformId,
+  handle: string,
+): Promise<{ subscriptionId: string; accountId: string }> {
+  const accountKey = accountKeyFor(platform, handle);
+  const existing = await prisma.trackedAccount.findUnique({ where: { accountKey }, select: { id: true } });
+  const account =
+    existing ??
+    (await prisma.trackedAccount.create({
+      data: {
+        platform: platform as TrackPlatform,
+        handle,
+        accountKey,
+        scoutCandidateId: await findScoutCandidateId(platform, handle),
+      },
+      select: { id: true },
+    }));
+
+  const sub = await prisma.trackedPageSubscription.upsert({
+    where: { campaignId_accountId: { campaignId, accountId: account.id } },
+    create: { campaignId, accountId: account.id },
+    // Re-pasting a page that was previously stopped turns it back on. lastDiscoveryAt is
+    // deliberately NOT reset: the discovery that follows will set it, and clearing it here
+    // would make a failed run look like a page that had never been scanned.
+    update: { isActive: true, lastError: null },
+    select: { id: true },
+  });
+
+  return { subscriptionId: sub.id, accountId: account.id };
+}
+
+export interface DiscoveryResult {
+  found: number;
+  added: number;
+  campaignPosts: number;
+  otherPosts: number;
+  alreadyTracked: number;
+}
+
+/**
+ * Pull a subscribed page's recent posts and store them.
+ *
+ * Every post the page returns is stored — campaign work and the influencer's own content
+ * alike. What differs is `isCampaignPost`: hashtag matches count toward campaign totals,
+ * everything else is kept as "other posts from this page" so the operator can see what
+ * isn't being counted and include it in one click. Storing only the matches would make a
+ * forgotten hashtag indistinguishable from a post that never existed.
+ *
+ * A post already tracked is never re-classified. If someone clicked "count this one too",
+ * `includedByUserAt` records a human decision, and a later discovery pass must not quietly
+ * overrule it with a hashtag guess.
+ */
+export async function runPageDiscovery(subscriptionId: string): Promise<DiscoveryResult> {
+  const sub = await prisma.trackedPageSubscription.findUnique({
+    where: { id: subscriptionId },
+    include: {
+      account: { select: { id: true, platform: true, handle: true } },
+      campaign: { select: { id: true, hashtags: true } },
+    },
+  });
+  if (!sub) throw new Error(`subscription ${subscriptionId} not found`);
+
+  const platform = sub.account.platform as TrackPlatformId;
+  const result: DiscoveryResult = { found: 0, added: 0, campaignPosts: 0, otherPosts: 0, alreadyTracked: 0 };
+
+  try {
+    const scrapes = await getTrackedPostProvider(platform).discoverAccountPosts(
+      platform,
+      sub.account.handle,
+      sub.discoverFrom,
+    );
+    result.found = scrapes.length;
+
+    // One query for the whole batch — not a lookup per discovered post.
+    const keys = scrapes.map((s) => s.postKey);
+    const known = keys.length
+      ? await prisma.trackedPost.findMany({
+          where: { platform: platform as TrackPlatform, postKey: { in: keys } },
+          select: { postKey: true },
+        })
+      : [];
+    const knownKeys = new Set(known.map((k) => k.postKey));
+
+    for (const scrape of scrapes) {
+      if (knownKeys.has(scrape.postKey)) {
+        result.alreadyTracked++;
+        continue;
+      }
+      const isCampaignPost = captionMentionsCampaign(scrape.caption, sub.campaign.hashtags);
+      // A discovered post has no pasted URL — it arrived as an item in a page scrape — so
+      // its public URL is rebuilt from the key. For Facebook that URL must keep the page in
+      // its path, because a later refresh reads the page back out of it.
+      const url = postUrlFor(platform, scrape.postKey, sub.account.handle);
+      await storeTrackedPost(sub.campaign.id, platform, url, scrape, {
+        discoveredVia: "page-scan",
+        isCampaignPost,
+      });
+      result.added++;
+      if (isCampaignPost) result.campaignPosts++;
+      else result.otherPosts++;
+    }
+
+    await prisma.trackedPageSubscription.update({
+      where: { id: subscriptionId },
+      data: { lastDiscoveryAt: new Date(), lastError: null },
+    });
+  } catch (err) {
+    // lastDiscoveryAt is set on the failure path too — it records when discovery was
+    // ATTEMPTED, not when it succeeded. Without that, a page that consistently fails would
+    // re-qualify as the stalest subscription on every cron pass and starve every other page.
+    await prisma.trackedPageSubscription.update({
+      where: { id: subscriptionId },
+      data: {
+        lastDiscoveryAt: new Date(),
+        lastError: err instanceof Error ? err.message : String(err),
+      },
+    });
+    throw err;
+  }
+
+  return result;
 }
 
 /**
@@ -196,7 +385,12 @@ async function storeTrackedPost(
   platform: TrackPlatformId,
   url: string,
   scrape: TrackedPostScrape,
+  opts: { discoveredVia?: string; isCampaignPost?: boolean } = {},
 ): Promise<void> {
+  // Defaults describe a pasted link, which is the only way posts arrived before page
+  // subscriptions existed: the operator pasting it IS the statement that it's campaign work.
+  const discoveredVia = opts.discoveredVia ?? "pasted";
+  const isCampaignPost = opts.isCampaignPost ?? true;
   const handle = scrape.authorHandle?.trim() || "unknown";
   const accountKey = accountKeyFor(platform, handle);
 
@@ -238,6 +432,8 @@ async function storeTrackedPost(
       caption: scrape.caption,
       postedAt: scrape.postedAt ? new Date(scrape.postedAt) : null,
       lastScrapedAt: new Date(),
+      discoveredVia,
+      isCampaignPost,
       curLikes: scrape.likes,
       curComments: scrape.comments,
       curShares: scrape.shares,
@@ -245,6 +441,11 @@ async function storeTrackedPost(
     },
     // On a re-scrape the current figures shift into prev* so the UI can show movement
     // without reading the snapshot table for every card.
+    //
+    // isCampaignPost and discoveredVia are NOT in this update. Once a post is tracked, what
+    // it counts as has either been decided by a human or set at first sight, and a later
+    // pass must not silently overrule it — a hashtag edited out of a caption would
+    // otherwise drop a post out of the campaign totals with no trace.
     update: {
       lastScrapedAt: new Date(),
       lastError: null,
@@ -328,6 +529,20 @@ async function refreshAccountSnapshotIfStale(
   }
 }
 
+/**
+ * Include or exclude a post from its campaign's totals.
+ *
+ * Stamps includedByUserAt so the decision is recorded as a human's, not a hashtag match —
+ * storeTrackedPost deliberately never updates isCampaignPost on a re-scrape, so nothing
+ * downstream can quietly overrule this later.
+ */
+export async function setPostCampaignInclusion(trackedPostId: string, include: boolean): Promise<void> {
+  await prisma.trackedPost.update({
+    where: { id: trackedPostId },
+    data: { isCampaignPost: include, includedByUserAt: new Date() },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
@@ -354,6 +569,12 @@ export interface TrackedPostView {
   percentile: number | null;
   accountId: string;
   accountHandle: string;
+  /** Counts toward campaign totals. False = "other post from this page" (§13). */
+  isCampaignPost: boolean;
+  /** "pasted" | "page-scan" — why this post is here, so the UI can explain itself. */
+  discoveredVia: string;
+  /** Set when a human clicked "count this one too", rather than a hashtag deciding it. */
+  includedByUser: boolean;
 }
 
 export interface TrackedAccountView {
@@ -369,14 +590,28 @@ export interface TrackedAccountView {
   /** This account's campaign posts' mean ER vs that baseline, as a percentage difference. */
   baselineDeltaPct: number | null;
   totals: AggregateTotals;
+  /** Campaign posts — what totals are built from. */
   posts: TrackedPostView[];
+  /** Everything else this page posted. Visible, never counted, one click from counting. */
+  otherPosts: TrackedPostView[];
+  /** True when this page is subscribed: new posts arrive automatically. */
+  isSubscribed: boolean;
+  /**
+   * Follower count over time, oldest first — the one page-level metric that isn't a rollup
+   * of its posts. Comes free from the snapshots already written on every scan.
+   *
+   * Points where the platform hid the follower count are omitted rather than plotted as
+   * zero, which would draw a cliff that never happened.
+   */
+  followerHistory: { at: Date; followers: number }[];
 }
 
 export interface CampaignTrackingView {
-  campaign: { id: string; name: string };
+  campaign: { id: string; name: string; hashtags: string[] };
   totals: AggregateTotals;
   accounts: TrackedAccountView[];
   posts: TrackedPostView[];
+  otherPosts: TrackedPostView[];
 }
 
 /**
@@ -390,7 +625,9 @@ export interface CampaignTrackingView {
 export async function getCampaignTracking(campaignId: string): Promise<CampaignTrackingView | null> {
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
-    select: { id: true, name: true },
+    // hashtags come along so the UI can say WHY a post was auto-counted, and what an
+    // influencer would have to include for the next one to be.
+    select: { id: true, name: true, hashtags: true },
   });
   if (!campaign) return null;
 
@@ -416,6 +653,18 @@ export async function getCampaignTracking(campaignId: string): Promise<CampaignT
   const latestSnapshot = new Map<string, (typeof snapshotRows)[number]>();
   for (const s of snapshotRows) if (!latestSnapshot.has(s.accountId)) latestSnapshot.set(s.accountId, s);
 
+  // Full follower history per account, built from the SAME rows already fetched above — no
+  // extra query. Reversed to oldest-first for plotting; unavailable points are dropped
+  // rather than zeroed, so a hidden follower count doesn't draw a cliff to zero.
+  const historyByAccount = new Map<string, { at: Date; followers: number }[]>();
+  for (let i = snapshotRows.length - 1; i >= 0; i--) {
+    const s = snapshotRows[i];
+    if (!s.followersAvailable || s.followers === null) continue;
+    const list = historyByAccount.get(s.accountId) ?? [];
+    list.push({ at: s.capturedAt, followers: s.followers });
+    historyByAccount.set(s.accountId, list);
+  }
+
   // Scoutline baselines, also in one query. See the baseline caveats in insights.ts.
   const scoutIds = accountRows.map((a) => a.scoutCandidateId).filter((id): id is string => Boolean(id));
   const scoutRows = scoutIds.length
@@ -427,6 +676,16 @@ export async function getCampaignTracking(campaignId: string): Promise<CampaignT
     : [];
   const latestScout = new Map<string, (typeof scoutRows)[number]>();
   for (const s of scoutRows) if (!latestScout.has(s.candidateId)) latestScout.set(s.candidateId, s);
+
+  // Which of these pages are subscribed. One set-wide query, indexed in memory — not a
+  // lookup per account, which is the shape that breaks screens here (see the query-count
+  // test). Scoped to this campaign: the same influencer can be subscribed for NP50 and not
+  // for Pluto.
+  const subRows = await prisma.trackedPageSubscription.findMany({
+    where: { campaignId, isActive: true },
+    select: { accountId: true },
+  });
+  const subscribedAccountIds = new Set(subRows.map((s) => s.accountId));
 
   const accountById = new Map(accountRows.map((a) => [a.id, a]));
   const allEngagement = postRows.map((p) => engagement({ likes: p.curLikes, comments: p.curComments }));
@@ -458,6 +717,9 @@ export async function getCampaignTracking(campaignId: string): Promise<CampaignT
       percentile: percentileRank(current, allEngagement),
       accountId: p.accountId,
       accountHandle: account?.handle ?? "unknown",
+      isCampaignPost: p.isCampaignPost,
+      discoveredVia: p.discoveredVia,
+      includedByUser: p.includedByUserAt !== null,
     };
   });
 
@@ -470,13 +732,21 @@ export async function getCampaignTracking(campaignId: string): Promise<CampaignT
 
   const accounts: TrackedAccountView[] = accountRows
     .map((a) => {
-      const own = postsByAccount.get(a.id) ?? [];
+      const all = postsByAccount.get(a.id) ?? [];
+      // Split, not filtered. `own` drives every campaign number; `other` is the influencer's
+      // non-campaign content, kept visible so a forgotten hashtag is one click from being
+      // counted rather than invisible. See §13.
+      const own = all.filter((p) => p.isCampaignPost);
+      const other = all.filter((p) => !p.isCampaignPost);
       const snap = latestSnapshot.get(a.id);
       const scout = a.scoutCandidateId ? latestScout.get(a.scoutCandidateId) : undefined;
 
       // Mean ER across this account's campaign posts, compared against the mean ER across
       // ~100 of their own posts that Scoutline measured. Same formula on both sides — see
       // insights.ts baselineDeltaPct for why that equivalence is what makes this legitimate.
+      //
+      // Campaign posts only: comparing their whole feed against their own baseline would
+      // answer a different question than "did the post we paid for beat their normal work".
       const measuredErs = own.map((p) => p.engagementRatePct).filter((v): v is number => v !== null);
       const meanEr = measuredErs.length
         ? measuredErs.reduce((x, y) => x + y, 0) / measuredErs.length
@@ -496,18 +766,29 @@ export async function getCampaignTracking(campaignId: string): Promise<CampaignT
           own.map((p) => ({ likes: p.likes, comments: p.comments, shares: p.shares, views: p.views })),
         ),
         posts: own,
+        otherPosts: other,
+        isSubscribed: subscribedAccountIds.has(a.id),
+        followerHistory: historyByAccount.get(a.id) ?? [],
       };
     })
-    // Best-performing account first — the ordering the grid and the leaderboard both want.
+    // Accounts with campaign posts first, best-performing at the top. A subscribed page
+    // whose posts are all "other" still appears — it is being tracked, it just hasn't
+    // produced anything the campaign counts yet, and hiding it would look like the
+    // subscription failed.
     .sort((a, b) => (b.totals.engagement ?? -1) - (a.totals.engagement ?? -1));
+
+  const campaignPosts = posts.filter((p) => p.isCampaignPost);
 
   return {
     campaign,
+    // Campaign totals count campaign posts only — the influencer's own unrelated content
+    // must not inflate what the campaign is reported to have delivered.
     totals: aggregate(
-      posts.map((p) => ({ likes: p.likes, comments: p.comments, shares: p.shares, views: p.views })),
+      campaignPosts.map((p) => ({ likes: p.likes, comments: p.comments, shares: p.shares, views: p.views })),
     ),
     accounts,
-    posts,
+    posts: campaignPosts,
+    otherPosts: posts.filter((p) => !p.isCampaignPost),
   };
 }
 
@@ -627,6 +908,57 @@ export async function refreshCampaignTracking(campaignId: string): Promise<{ ref
   }
 
   return { refreshed, failed };
+}
+
+// How long a subscription may go without a discovery pass before the cron re-picks it.
+// Influencers post roughly once a week on this account's own Scoutline data, so hourly
+// would spend Apify credit to find nothing on most passes.
+const PAGE_DISCOVERY_TTL_MS = Number(process.env.PAGE_DISCOVERY_TTL_HOURS || 12) * 60 * 60 * 1000;
+
+/**
+ * Discover new posts for the stalest N subscriptions.
+ *
+ * Batched on a frequent schedule rather than "walk every page hourly", for the reason
+ * refresh-fan-pages' header spells out: one page is a full Apify run, so a single
+ * invocation that walks every subscription cannot fit in any function time limit once
+ * there are more than a handful. Selection is `lastDiscoveryAt` ascending, so successive
+ * runs pick up where the last left off with no cursor to store, and a killed run changes
+ * nothing — the pages it never reached keep their old timestamp and come back next time.
+ *
+ * A failing page still gets its lastDiscoveryAt bumped (see runPageDiscovery), so one
+ * broken subscription cannot monopolise every batch and starve the rest.
+ */
+export async function discoverStalePages(batchSize: number): Promise<{
+  attempted: number;
+  added: number;
+  failed: number;
+}> {
+  const cutoff = new Date(Date.now() - PAGE_DISCOVERY_TTL_MS);
+  const due = await prisma.trackedPageSubscription.findMany({
+    where: {
+      isActive: true,
+      OR: [{ lastDiscoveryAt: null }, { lastDiscoveryAt: { lt: cutoff } }],
+    },
+    // Nulls first: a page just subscribed has never been scanned and is the most urgent.
+    orderBy: { lastDiscoveryAt: { sort: "asc", nulls: "first" } },
+    take: batchSize,
+    select: { id: true },
+  });
+
+  let added = 0;
+  let failed = 0;
+  for (const sub of due) {
+    try {
+      const result = await runPageDiscovery(sub.id);
+      added += result.added;
+    } catch {
+      // Already recorded on the subscription's lastError. Swallowed so one broken page
+      // doesn't abandon the rest of the batch — the same reason #51 exists for fan pages.
+      failed++;
+    }
+  }
+
+  return { attempted: due.length, added, failed };
 }
 
 /** Engagement history for one post — the only read path that touches the snapshot table. */

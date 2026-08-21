@@ -591,6 +591,53 @@ export async function fetchFacebookPageSnapshot(
   };
 }
 
+// Posts pulled per page when discovering an account's recent content. Separate from
+// HANDLE_POSTS_LIMIT so tracking can be tuned without moving the competitor/fan-page
+// scrape, which serves a different purpose on a different cost profile.
+const TRACKED_DISCOVERY_LIMIT = Number(process.env.APIFY_TRACKED_DISCOVERY_LIMIT) || 50;
+
+/**
+ * Recent posts from ONE Instagram account, for page subscriptions.
+ *
+ * Deliberately NOT `scrapeByHandle`, for two reasons that both bite silently:
+ *   - it requests POST_DATA_DETAIL_LEVEL ("basicData"), so every discovered reel would come
+ *     back with no play count and render "—" for plays. That is indistinguishable from the
+ *     null-discipline being broken, on the one platform the campaign mostly runs on. This
+ *     path opts into the paid detail tier exactly like fetchTrackedInstagramPosts, for the
+ *     same reason and under the same §1a exception.
+ *   - it also returns an AccountSnapshot shaped for the `posts` table. A tracked post
+ *     belongs in tracked_posts, and its account snapshot is written separately.
+ */
+export async function discoverInstagramAccountPosts(handle: string): Promise<NormalizedTrackedPost[]> {
+  const cleanHandle = handle.replace(/^@/, "");
+  const items = await trackedRun<Record<string, unknown>>(
+    "tracked-discovery",
+    actorEnv("APIFY_ACTOR_POST"),
+    {
+      username: [cleanHandle],
+      resultsLimit: TRACKED_DISCOVERY_LIMIT,
+      dataDetailLevel: TRACKED_POST_DATA_DETAIL_LEVEL,
+    },
+    { maxItems: TRACKED_DISCOVERY_LIMIT },
+  );
+  return items.map((item) => normalizeTrackedPostItem(item));
+}
+
+/**
+ * Recent posts from ONE Facebook page.
+ *
+ * Facebook needs no separate discovery path: fetchTrackedFacebookPosts already works by
+ * scraping the page, because Facebook has no post-by-URL actor at all. Discovery is the
+ * same call with no post-matching afterwards — which is the one place Facebook's awkward
+ * shape is an advantage.
+ */
+export async function discoverFacebookPagePosts(
+  pageUrl: string,
+  since: Date | null,
+): Promise<NormalizedFacebookPost[]> {
+  return fetchTrackedFacebookPosts(pageUrl, since);
+}
+
 export async function fetchTrackedInstagramPosts(urls: string[]): Promise<NormalizedTrackedPost[]> {
   if (urls.length === 0) return [];
   const items = await trackedRun<Record<string, unknown>>(
