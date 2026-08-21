@@ -406,8 +406,38 @@ afterwards.
   hours older than the last scan. The UI shows per-theater last-seen times for that reason.
 - `availStatus` 0 and 1 semantics are inferred, and — because the 48-hour delta run needed
   automated collection — they can no longer be settled cheaply.
-- The Kerala region list is seeded from a sitemap, which carries no completeness guarantee.
-  Enumerating regions from BookMyShow directly would be more robust.
+- **The 30-region list is incomplete, and this is now the largest known gap.** Measured
+  2026-08-21 after a full pass in which all 30 regions were read successfully: four areas of
+  the campaign's own theatre list returned **no venue at all**.
+
+  | Area | Towns with no venue found | On the campaign list |
+  |---|---|---|
+  | Wayanad | Kalpetta, Sulthan Bathery, Mananthavady, Pullpally | ~6 theatres |
+  | Idukki hills | Kattappana, Adimali, Nedumkandam, Rajakumari | ~5 |
+  | North Kannur | Payyannur, Iritty, Mattannur, Koothuparamb, Peravoor… | ~12 |
+  | Malappuram belt | Malappuram, Tirur, Ponnani, Nilambur, Kottackal… | ~20 |
+
+  These are **not** "not on BookMyShow" — they are towns whose region is never requested.
+  The regions we do have reach further than their names suggest (Chittur, Shoranur,
+  Cherthala, Haripad, Ettumanoor, Karunagapally, Thamarassery and Edappal all surfaced
+  inside a neighbour's catchment), but nothing covers those four areas.
+
+  **Getting the missing region codes needs a human step, on purpose.** A URL needs both the
+  region CODE and its slug (`kalpetta:kalpetta`), and the code cannot be derived from the
+  town name. Five avenues were tried on 2026-08-21 and none is available: the hydration state
+  carries only the current region; four plausible region endpoints all return 403; the city
+  chooser and its search box render nothing extractable; and `robots.txt` publishes no
+  `Sitemap:` line, so there is no crawlable index — which also means the sitemap this list
+  was originally seeded from is gone.
+
+  What is left is guessing slugs and probing for the ones that resolve. **Do not do that.**
+  Twenty-odd speculative requests hunting for endpoints that answer is the behaviour §5a
+  exists to rule out, and it would spend the daily page budget on 404s.
+
+  The cheap, legitimate path is to open BookMyShow's own city picker, pick the missing
+  towns, and read the region off the resulting URL. Two minutes of a person using the site
+  normally, and the codes can then be added to `KERALA_REGIONS` in
+  `src/lib/bookmyshow/urls.ts` and the mirrored `REGIONS` map in `scripts/bms-capture.mjs`.
 - Scans are synchronous. If a Kerala-wide scan outgrows the wait budget, the migration path
   is the async handoff `ScoutRun` already models — `BmsScanRun` carries `apifyRunId` and
   `datasetId` columns for exactly that.
