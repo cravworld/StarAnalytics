@@ -59,19 +59,19 @@ enum ScoutPlatform {
 }
 
 model Post {
-  id            String     @id @default(uuid())
-  source        PostSource
+  id           String     @id @default(uuid())
+  source       PostSource
   // Platform-neutral despite the name, kept as-is (not renamed) to avoid touching every
   // one of its 9 call sites across the ingestion pipeline on a table with real production
   // data — see the multi-platform migration notes. Holds a YouTube video ID too now.
-  platform      Platform   @default(instagram)
-  igShortcode   String?    @map("ig_shortcode")
-  externalUrl   String?    @map("external_url")
-  authorHandle  String?    @map("author_handle")
-  mediaType     String?    @map("media_type")
-  caption       String?
-  postedAt      DateTime?  @map("posted_at")
-  scrapedAt     DateTime   @default(now()) @map("scraped_at")
+  platform     Platform   @default(instagram)
+  igShortcode  String?    @map("ig_shortcode")
+  externalUrl  String?    @map("external_url")
+  authorHandle String?    @map("author_handle")
+  mediaType    String?    @map("media_type")
+  caption      String?
+  postedAt     DateTime?  @map("posted_at")
+  scrapedAt    DateTime   @default(now()) @map("scraped_at")
 
   reach    Int?
   likes    Int?
@@ -79,13 +79,13 @@ model Post {
   saves    Int?
   shares   Int?
 
-  campaignId   String? @map("campaign_id")
-  campaign     Campaign? @relation(fields: [campaignId], references: [id])
-  agencyId     String? @map("agency_id")
-  agency       Agency? @relation(fields: [agencyId], references: [id])
-  fanPageId    String? @map("fan_page_id")
-  fanPage      FanPage? @relation(fields: [fanPageId], references: [id])
-  competitorId String? @map("competitor_id")
+  campaignId   String?            @map("campaign_id")
+  campaign     Campaign?          @relation(fields: [campaignId], references: [id])
+  agencyId     String?            @map("agency_id")
+  agency       Agency?            @relation(fields: [agencyId], references: [id])
+  fanPageId    String?            @map("fan_page_id")
+  fanPage      FanPage?           @relation(fields: [fanPageId], references: [id])
+  competitorId String?            @map("competitor_id")
   competitor   CompetitorAccount? @relation(fields: [competitorId], references: [id])
 
   raw Json?
@@ -98,10 +98,10 @@ model Post {
   // what makes "we already tried this one" representable. Null means never attempted.
   commentsScrapedAt DateTime? @map("comments_scraped_at")
 
-  sentiment          Sentiment?
-  agencyPostScores   AgencyPostScore[]
-  postComments       PostComment[]
-  alerts             Alert[]
+  sentiment        Sentiment?
+  agencyPostScores AgencyPostScore[]
+  postComments     PostComment[]
+  alerts           Alert[]
 
   // Composite, not single-column: a YouTube video ID and an Instagram shortcode occupy the
   // same string space and could theoretically collide. Every existing row defaults to
@@ -137,18 +137,18 @@ model PostComment {
 // campaign dashboards) so hater/repeat-offender detection has a real per-commenter signal
 // to work from, without touching that existing aggregate or its call sites.
 model CommentSentiment {
-  postCommentId String      @id @map("post_comment_id")
-  postComment   PostComment @relation(fields: [postCommentId], references: [id])
+  postCommentId String         @id @map("post_comment_id")
+  postComment   PostComment    @relation(fields: [postCommentId], references: [id])
   // Denormalized at classification time, not read from post_comments.author_handle later:
   // that column gets nulled by the prune-raw-payloads cron after COMMENT_RETENTION_DAYS,
   // but classification always happens well inside that window, so this is a snapshot taken
   // before the handle can be pruned — without it, a hater registry would lose attribution
   // the moment the retention cron runs.
-  authorHandle String?        @map("author_handle")
-  label        SentimentLabel
-  score        Float
-  model        String
-  analyzedAt   DateTime       @default(now()) @map("analyzed_at")
+  authorHandle  String?        @map("author_handle")
+  label         SentimentLabel
+  score         Float
+  model         String
+  analyzedAt    DateTime       @default(now()) @map("analyzed_at")
 
   @@map("comment_sentiment")
 }
@@ -191,6 +191,9 @@ model Campaign {
   agencies      Agency[]
   events        CampaignEvent[]
   buzzSnapshots CampaignBuzzSnapshot[]
+  // Campaign Post Tracking's back-reference. Prisma requires both sides of a relation, but
+  // the FK itself lives on tracked_posts — this adds no column to `campaigns`.
+  trackedPosts  TrackedPost[]
 
   @@map("campaigns")
 }
@@ -235,14 +238,14 @@ model CampaignBuzzSnapshot {
 }
 
 model Agency {
-  id         String  @id @default(uuid())
+  id         String    @id @default(uuid())
   name       String
-  colourHex  String  @map("colour_hex")
-  campaignId String? @map("campaign_id")
+  colourHex  String    @map("colour_hex")
+  campaignId String?   @map("campaign_id")
   campaign   Campaign? @relation(fields: [campaignId], references: [id])
 
-  posts             Post[]
-  agencyPostScores  AgencyPostScore[]
+  posts            Post[]
+  agencyPostScores AgencyPostScore[]
 
   @@map("agencies")
 }
@@ -341,11 +344,11 @@ model Sentiment {
 }
 
 model HashtagSnapshot {
-  id           String   @id @default(uuid())
-  hashtag      String
-  snapshotAt   DateTime @default(now()) @map("snapshot_at")
-  postCount    Int      @map("post_count")
-  avgEngRate   Float    @map("avg_eng_rate")
+  id         String   @id @default(uuid())
+  hashtag    String
+  snapshotAt DateTime @default(now()) @map("snapshot_at")
+  postCount  Int      @map("post_count")
+  avgEngRate Float    @map("avg_eng_rate")
 
   @@map("hashtag_snapshots")
 }
@@ -406,12 +409,12 @@ enum ScoutRunStatus {
 }
 
 model ScoutBatch {
-  id            String   @id @default(uuid())
-  fileName      String   @map("file_name")
-  sourceType    String   @map("source_type") // "pdf" | "excel" | "manual"
-  expectedCount Int      @map("expected_count")
-  parsedCount   Int      @map("parsed_count")
-  createdAt     DateTime @default(now()) @map("created_at")
+  id            String    @id @default(uuid())
+  fileName      String    @map("file_name")
+  sourceType    String    @map("source_type") // "pdf" | "excel" | "manual"
+  expectedCount Int       @map("expected_count")
+  parsedCount   Int       @map("parsed_count")
+  createdAt     DateTime  @default(now()) @map("created_at")
   // Soft delete, not hard delete — a candidate's ScoutSnapshot history is valuable even
   // after the batch that produced it is no longer wanted in the list, and ScoutRun rows
   // can't be cascade-deleted without either losing that history or a schema change to
@@ -432,19 +435,19 @@ model ScoutBatch {
 }
 
 model ScoutCandidate {
-  id       String        @id @default(uuid())
-  platform ScoutPlatform @default(instagram)
+  id            String        @id @default(uuid())
+  platform      ScoutPlatform @default(instagram)
   // Generic "handle" (was igHandle before Facebook support) — an Instagram username, a
   // Facebook page slug/ID, whatever the platform's own actors key off of. Kept mapped to
   // the original ig_handle column deliberately — a real column rename risks the migration
   // tool treating it as drop+add and losing every existing candidate's handle; renaming
   // only the Prisma-side field name needs no data migration at all.
-  handle   String   @map("ig_handle")
+  handle        String        @map("ig_handle")
   // Normalized dedup key, now platform-prefixed ("instagram:somehandle") — a bare handle
   // string alone is no longer guaranteed unique once two platforms are in play (mirrors
   // apify-normalize.ts's postUrlKey discipline: the raw URL varies, this doesn't).
-  profileUrlKey String   @unique @map("profile_url_key")
-  firstSeenAt   DateTime @default(now()) @map("first_seen_at")
+  profileUrlKey String        @unique @map("profile_url_key")
+  firstSeenAt   DateTime      @default(now()) @map("first_seen_at")
 
   batchEntries ScoutBatchEntry[]
   snapshots    ScoutSnapshot[]
@@ -584,10 +587,10 @@ model ScoutSettings {
   // 100, not the actor's own default of 30 — 2026-08-17 direction: "just 15 wont do it
   // justice... atleast latest 100 posts have to be analyzed" (fewer is fine if an account
   // genuinely has fewer, the actor already handles that — this is a ceiling, not a floor).
-  igPostsToAnalyze  Int?    @map("ig_posts_to_analyze")
-  igPostTypeFilter  String? @map("ig_post_type_filter")
+  igPostsToAnalyze  Int?     @map("ig_posts_to_analyze")
+  igPostTypeFilter  String?  @map("ig_post_type_filter")
   igSkipPinnedPosts Boolean? @map("ig_skip_pinned_posts")
-  igDateFilter      String? @map("ig_date_filter")
+  igDateFilter      String?  @map("ig_date_filter")
 
   // Facebook — deliberately page-only (2026-08-18 direction: "not take the posts into
   // account... based on the people talking about this"), not a two-actor pages+posts
@@ -664,7 +667,7 @@ model TheaterCampaign {
   //   called underperforming at all (brief's "minimum sample count" rule) — a single
   //   wide-open show at a one-screen venue is noise, not a signal.
   wideOpenAlertPct Int @default(80) @map("wide_open_alert_pct")
-  minShowsForAlert Int @default(3)  @map("min_shows_for_alert")
+  minShowsForAlert Int @default(3) @map("min_shows_for_alert")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -682,15 +685,15 @@ model TheaterCampaign {
 // Mookkannoor/Angamaly venue is listed under both Kochi and Angamaly) — without a global
 // unique on venueCode, every Kerala-wide theater count would be inflated.
 model Theater {
-  id     String @id @default(uuid())
-  source String @default("bookmyshow")
+  id        String  @id @default(uuid())
+  source    String  @default("bookmyshow")
   // BookMyShow venue code, e.g. "PVMF", "CPCK", "SNYK".
-  venueCode String @map("venue_code")
+  venueCode String  @map("venue_code")
   name      String
   // The region this venue was FIRST seen under. Informational only — a venue can surface
   // under several adjacent regions, and none of them is authoritative.
-  cityCode String  @map("city_code")
-  cityName String  @map("city_name")
+  cityCode  String  @map("city_code")
+  cityName  String  @map("city_name")
   // Exhibitor chain from the page's analytics payload ("PVR", "Cinepolis"), when present.
   chainCode String? @map("chain_code")
 
@@ -722,19 +725,19 @@ model Screening {
   // repeated scans idempotent rather than duplicating a show every tick.
   bmsSessionId String @map("bms_session_id")
 
-  showDate     DateTime @map("show_date") @db.Date
-  showDateTime DateTime @map("show_date_time")
+  showDate     DateTime  @map("show_date") @db.Date
+  showDateTime DateTime  @map("show_date_time")
   // Booking cutoff from the source. Nullable — not every show reports one.
-  cutOffAt DateTime? @map("cut_off_at")
+  cutOffAt     DateTime? @map("cut_off_at")
 
-  language String?
-  format   String?
+  language   String?
+  format     String?
   // Price-BAND tags (e.g. ["pf3","pf4"]). Deliberately not a price: the page exposes band
   // membership, not amounts. Band movement over time is still a real signal.
   priceBands String[] @map("price_bands")
 
-  firstSeenAt DateTime @default(now()) @map("first_seen_at")
-  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
+  firstSeenAt   DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt    DateTime  @default(now()) @map("last_seen_at")
   // Set when a previously-seen show stops appearing in a SUCCESSFUL scan of its city.
   // Never set from a failed or skipped scan — that distinction is the whole point (see
   // BmsScanCityResult): "we didn't look" must never be recorded as "it's gone".
@@ -762,11 +765,11 @@ model AvailabilitySnapshot {
   capturedAt DateTime @default(now()) @map("captured_at")
 
   // Raw source value, 0-3. Nullable because a show can be listed with no status at all.
-  availStatus Int? @map("avail_status")
+  availStatus Int?    @map("avail_status")
   // Normalized level: see lib/bookmyshow/demand.ts. Stored as a string, not an enum, so a
   // new source state lands as an unmapped value we can see rather than a migration
   // failure mid-scan.
-  demandLevel String @map("demand_level")
+  demandLevel String  @map("demand_level")
   // The rendered pill style and any plain-text source label ("fast_filling"), kept for
   // provenance — they are the corroborating evidence for availStatus's meaning.
   styleId     String? @map("style_id")
@@ -802,21 +805,21 @@ model BmsScanRun {
   campaignId String          @map("campaign_id")
   campaign   TheaterCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
-  status BmsScanStatus @default(queued)
+  status   BmsScanStatus @default(queued)
   // "apify" for a real run, "mock" when served from the fixture. Recorded so a mock-backed
   // number can never be mistaken for a live one in the UI.
-  provider String @default("apify")
+  provider String        @default("apify")
 
   apifyRunId String? @map("apify_run_id")
   datasetId  String? @map("dataset_id")
 
-  citiesRequested Int @default(0) @map("cities_requested")
-  citiesSucceeded Int @default(0) @map("cities_succeeded")
-  itemsReceived   Int @default(0) @map("items_received")
-  theatersStored  Int @default(0) @map("theaters_stored")
+  citiesRequested  Int @default(0) @map("cities_requested")
+  citiesSucceeded  Int @default(0) @map("cities_succeeded")
+  itemsReceived    Int @default(0) @map("items_received")
+  theatersStored   Int @default(0) @map("theaters_stored")
   screeningsStored Int @default(0) @map("screenings_stored")
-  snapshotsStored Int @default(0) @map("snapshots_stored")
-  recordsSkipped  Int @default(0) @map("records_skipped")
+  snapshotsStored  Int @default(0) @map("snapshots_stored")
+  recordsSkipped   Int @default(0) @map("records_skipped")
   // Shows whose availStatus was a value this codebase has never seen. Counted rather than
   // skipped — the row is still stored, as `unknown`, with its raw status preserved.
   //
@@ -825,7 +828,7 @@ model BmsScanRun {
   // would drift to "not enough data" and the priority table would quietly empty with no
   // error anywhere. A non-zero value here means stop and re-read demand.ts before trusting
   // any ranking.
-  recordsUnmapped Int @default(0) @map("records_unmapped")
+  recordsUnmapped  Int @default(0) @map("records_unmapped")
 
   error String?
 
@@ -851,15 +854,176 @@ model BmsScanCityResult {
   scanRunId String     @map("scan_run_id")
   scanRun   BmsScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade)
 
-  cityCode String @map("city_code")
-  showDate DateTime @map("show_date") @db.Date
-  status   String
+  cityCode         String   @map("city_code")
+  showDate         DateTime @map("show_date") @db.Date
+  status           String
   // What the page actually reported, when it disagreed with what we asked for.
-  returnedCityCode String? @map("returned_city_code")
-  venueCount       Int     @default(0) @map("venue_count")
-  showCount        Int     @default(0) @map("show_count")
+  returnedCityCode String?  @map("returned_city_code")
+  venueCount       Int      @default(0) @map("venue_count")
+  showCount        Int      @default(0) @map("show_count")
   error            String?
 
   @@unique([scanRunId, cityCode, showDate])
   @@map("bms_scan_city_results")
+}
+
+// ---------------------------------------------------------------------------
+// Campaign Post Tracking — see CAMPAIGN-POST-TRACKING.md
+//
+// Scoutline picks influencers; this measures what they actually delivered. One tracked
+// post = one link pasted by hand. Everything shown (grid grouped by posting account,
+// leaderboard, per-account rollup, campaign totals) is a view over these four tables.
+// ---------------------------------------------------------------------------
+
+// A THIRD platform enum, deliberately — see the comments on Platform and ScoutPlatform
+// above for the two that already exist.
+//
+// `Platform` (instagram|youtube) is welded to the PlatformId union in providers/types.ts —
+// ~79 narrowing sites across the Graph-API-integration features. The ScoutPlatform comment
+// records that adding `facebook` to it was tried and reverted for exactly that reason.
+// `ScoutPlatform` (instagram|facebook) drives Scoutline's actor/normalizer dispatch — ~27
+// sites, every one of which would break on a `youtube` variant it has no scan logic for.
+//
+// This feature is the only one that needs all three at once. A third enum on brand-new
+// tables breaks nothing; widening either existing enum breaks a hundred call sites in
+// features that have no stake in this one.
+enum TrackPlatform {
+  instagram
+  facebook
+  youtube
+}
+
+// The account that posted a tracked post. Created from the post scrape itself (the actor
+// returns the owner), never typed in — the operator only ever pastes a link.
+model TrackedAccount {
+  id          String        @id @default(uuid())
+  platform    TrackPlatform
+  // Instagram username / Facebook page slug / YouTube channel ID. For YouTube this is the
+  // channel ID rather than the display title: titles are mutable and non-unique, while the
+  // videos.list response carries snippet.channelId, which is stable.
+  handle      String
+  displayName String?       @map("display_name")
+  // Platform-prefixed dedup key ("instagram:somehandle") — same discipline as
+  // ScoutCandidate.profileUrlKey. A bare handle is not unique once three platforms exist.
+  accountKey  String        @unique @map("account_key")
+  firstSeenAt DateTime      @default(now()) @map("first_seen_at")
+
+  // Soft link back to Scoutline — INTENTIONALLY a bare id, not a relation. An account can
+  // be tracked without ever having been scouted, and this feature must not take a hard FK
+  // dependency on a Scoutline table it does not own. When set, it is what makes the
+  // "did this paid post beat their own baseline" comparison possible.
+  scoutCandidateId String? @map("scout_candidate_id")
+
+  trackedPosts TrackedPost[]
+  snapshots    TrackedAccountSnapshot[]
+
+  @@map("tracked_accounts")
+}
+
+// Follower history for the posting account — the denominator every derived insight needs,
+// and it moves over time. Append-only, same discipline as AccountSnapshot/ScoutSnapshot.
+//
+// Scraped once per ACCOUNT per day at most, never once per post: 20 tracked posts across 5
+// accounts is 5 profile scrapes, not 20.
+model TrackedAccountSnapshot {
+  id                 String         @id @default(uuid())
+  accountId          String         @map("account_id")
+  account            TrackedAccount @relation(fields: [accountId], references: [id])
+  followers          Int?
+  // False when the platform did not report a follower count (private or limited profile).
+  // Null followers + false means "unknown", never zero — an engagement rate against an
+  // unknown denominator is omitted from the UI rather than rendered as 0%.
+  followersAvailable Boolean        @default(true) @map("followers_available")
+  capturedAt         DateTime       @default(now()) @map("captured_at")
+  // Nullable so prune-raw-payloads can clear it after RAW_PAYLOAD_RETENTION_DAYS, same as
+  // Post.raw / PostComment.raw / ScoutSnapshot.raw.
+  raw                Json?
+
+  @@index([accountId, capturedAt])
+  @@map("tracked_account_snapshots")
+}
+
+// The tracked post itself. Deliberately NOT the existing `Post` model:
+//   - Post's @@unique([platform, igShortcode]) plus its mutually-exclusive nullable FKs
+//     (campaign/agency/fanPage/competitor) means the same Instagram post uploaded once as
+//     an agency deliverable and once as a tracked campaign post is ONE row — whichever
+//     path scrapes last stomps the other's `source` and `scrapedAt`.
+//   - Post holds one set of metrics and overwrites on re-scrape. It has no history, which
+//     is most of what this feature is for.
+//   - Platform has no `facebook`.
+model TrackedPost {
+  id         String         @id @default(uuid())
+  campaignId String         @map("campaign_id")
+  campaign   Campaign       @relation(fields: [campaignId], references: [id])
+  accountId  String         @map("account_id")
+  account    TrackedAccount @relation(fields: [accountId], references: [id])
+  platform   TrackPlatform
+  url        String
+  // Shortcode (IG) / video ID (YT) / post ID (FB). Composite unique with platform, not
+  // bare: the three ID spaces overlap — same reasoning as Post's own composite key.
+  postKey    String         @map("post_key")
+  mediaType  String?        @map("media_type")
+  caption    String?
+  postedAt   DateTime?      @map("posted_at")
+
+  addedAt       DateTime  @default(now()) @map("added_at")
+  isActive      Boolean   @default(true) @map("is_active")
+  lastScrapedAt DateTime? @map("last_scraped_at")
+  lastError     String?   @map("last_error")
+
+  // Denormalized current + previous metrics. NOT redundant with tracked_post_snapshots:
+  // the grid renders N cards and MUST NOT run a query per card. The pool is 5 connections
+  // and /fan-pages already died on exactly this shape (six queries per tracked page, P2024
+  // once ten pages existed). The snapshot table is history; only the per-post trend chart
+  // reads it. See trackedPostsQueryCount.test.ts.
+  //
+  // Every metric nullable: null means "this platform does not report it", never zero.
+  curLikes     Int? @map("cur_likes")
+  curComments  Int? @map("cur_comments")
+  curShares    Int? @map("cur_shares")
+  curViews     Int? @map("cur_views")
+  prevLikes    Int? @map("prev_likes")
+  prevComments Int? @map("prev_comments")
+  prevViews    Int? @map("prev_views")
+
+  snapshots TrackedPostSnapshot[]
+
+  // Global, so a post can be tracked under exactly ONE campaign. Almost certainly right,
+  // but worth stating: the agency pipeline hit this same shape (one post listed under two
+  // agencies in a single sheet) and had to dedup around it. A post promoting two films at
+  // once surfaces here as "already tracked" rather than as a bug. If that case turns out to
+  // be real, this becomes @@unique([campaignId, platform, postKey]).
+  @@unique([platform, postKey])
+  @@index([campaignId, accountId])
+  @@map("tracked_posts")
+}
+
+// Append-only metrics history — a re-scan adds a row, never overwrites. Same discipline as
+// AccountSnapshot / ScoutSnapshot / CampaignBuzzSnapshot. This is what turns "how is it
+// performing" from a single number into a curve, and it is what velocity is computed from.
+model TrackedPostSnapshot {
+  id            String      @id @default(uuid())
+  trackedPostId String      @map("tracked_post_id")
+  trackedPost   TrackedPost @relation(fields: [trackedPostId], references: [id])
+  capturedAt    DateTime    @default(now()) @map("captured_at")
+
+  // All nullable, and the nulls are meaningful — see CAMPAIGN-POST-TRACKING.md section 1:
+  //   likes/comments : every platform reports these. The only cross-platform axis.
+  //   shares         : Facebook only.
+  //   views          : YouTube always; Instagram reels/videos only, and only because this
+  //                    feature opts into the actor's paid detail tier (section 1a). NEVER
+  //                    reach — a play count is not a count of distinct people, and reach is
+  //                    not obtainable for a third-party account at any price.
+  //   reactions      : Facebook's love/haha/wow/care breakdown; null elsewhere.
+  likes     Int?
+  comments  Int?
+  shares    Int?
+  views     Int?
+  reactions Json?
+
+  // Nullable so prune-raw-payloads can clear it after RAW_PAYLOAD_RETENTION_DAYS.
+  raw Json?
+
+  @@index([trackedPostId, capturedAt])
+  @@map("tracked_post_snapshots")
 }

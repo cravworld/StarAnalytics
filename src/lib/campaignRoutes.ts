@@ -24,7 +24,8 @@ export const CAMPAIGN_SUBROUTES: CampaignSubroute[] = [
   { href: "/campaigns/keywords", label: "Keyword Trends" },
   { href: "/campaigns/comments", label: "Comment Sentiment" },
   { href: "/campaigns/compare-own", label: "Compare Campaigns" },
-  { href: "/campaigns/agency", label: "Agency Report", badge: "New" },
+  { href: "/campaigns/agency", label: "Agency Report" },
+  { href: "/campaigns/tracker", label: "Post Tracker", badge: "New" },
   { href: "/campaigns/new", label: "New Campaign", hiddenFromNav: true },
 ];
 

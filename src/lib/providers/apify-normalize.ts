@@ -8,8 +8,11 @@
 // username-mode and post-URL-mode (shortCode, likesCount, commentsCount, timestamp,
 // ownerUsername, type — same shape as the hashtag scraper). No item sampled included
 // a reach/impressions-labeled field; a videoViewCount-style field only appears under
-// the post scraper's paid "detailedData" tier (video play count), which this
-// integration does not request — reach/saves stay null, never backfilled from it.
+// the post scraper's paid "detailedData" tier (video play count). No RawPost path requests
+// that tier — reach/saves stay null and are never backfilled from it. The one exception is
+// normalizeTrackedPostItem below, which serves Campaign Post Tracking: it does request the
+// paid tier and does read the play count, but stores it as `views`, never as reach. See
+// CAMPAIGN-POST-TRACKING.md §1a.
 
 import type { RawPost } from "./types";
 
@@ -108,6 +111,58 @@ export function normalizeProfilePostItem(item: ActorItem, source: RawPost["sourc
 
 export function normalizePostUrlItem(item: ActorItem, source: RawPost["source"] = "agency"): RawPost {
   return toRawPost(item, source);
+}
+
+// ---------------------------------------------------------------------------
+// Campaign Post Tracking — apify/instagram-post-scraper, PAID detail tier
+// ---------------------------------------------------------------------------
+
+/**
+ * Shape returned for a tracked campaign post. Deliberately NOT a `RawPost`: RawPost is the
+ * shape of the `posts` table, and a tracked post is a different table with a different
+ * lifecycle (see CAMPAIGN-POST-TRACKING.md §2a). Reusing RawPost here would drag along
+ * `source`, `reach` and `saves`, none of which mean anything for this feature.
+ */
+export interface NormalizedTrackedPost {
+  postKey: string;
+  authorHandle: string | null;
+  mediaType: string;
+  caption: string | null;
+  postedAt: string | null;
+  likes: number | null;
+  comments: number | null;
+  /**
+   * Instagram play count, from the actor's PAID detailedData tier — reels and videos only.
+   *
+   * `toRawPost` above maps this same field to null on purpose, and that stays correct for
+   * every other call path: nothing else in the app consumes it, and it must never reach a
+   * column named `reach`. This feature is the one consumer, so it reads the field here and
+   * stores it as `views` — a count of video starts, not of distinct people. See
+   * CAMPAIGN-POST-TRACKING.md §1a for why the surcharge is accepted on this path alone.
+   *
+   * Null for photos and carousels: they have no play count, which is not a zero-view post.
+   */
+  views: number | null;
+  raw: ActorItem;
+}
+
+export function normalizeTrackedPostItem(item: ActorItem): NormalizedTrackedPost {
+  const shortcode = str(item, "shortCode", "shortcode") ?? "";
+  return {
+    postKey: shortcode,
+    authorHandle: str(item, "ownerUsername", "username"),
+    mediaType: mediaType(item),
+    caption: str(item, "caption"),
+    postedAt: str(item, "timestamp"),
+    likes: num(item, "likesCount"),
+    comments: num(item, "commentsCount"),
+    views: num(item, "videoPlayCount", "videoViewCount"),
+    // Minimized exactly like toRawPost's. This path scrapes the same actor and stores the
+    // same item shape, so skipping it would quietly reintroduce the identifying fields
+    // (ownerFullName, ownerProfilePicUrl) that the 2026-08-20 data-minimization pass
+    // removed — on a brand-new table the audit script does not yet cover.
+    raw: minimizeRaw(item),
+  };
 }
 
 // apify/instagram-comment-scraper — field names confirmed against a live 2-URL sample run

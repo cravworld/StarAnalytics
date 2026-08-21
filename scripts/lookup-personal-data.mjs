@@ -33,6 +33,10 @@ const HANDLE_TABLES = [
   ["scout_batch_entries", "via candidate_id", "Shortlist row: supplied name, row number, deliverable"],
   ["scout_snapshots", "via candidate_id", "Profile metrics plus the full raw scrape payload"],
   ["scout_scores", "via snapshot_id", "Derived Buzz Factor"],
+  ["tracked_accounts", "handle", "Posted a campaign post that is being tracked. Stores handle and scraped display name"],
+  ["tracked_account_snapshots", "via account_id", "Follower-count history captured each time their posts were re-scanned"],
+  ["tracked_posts", "via account_id", "Their tracked campaign posts: URL, caption, media type, current engagement"],
+  ["tracked_post_snapshots", "via tracked_post_id", "Per-scan engagement history plus the raw scrape payload, pruned at RAW_PAYLOAD_RETENTION_DAYS"],
 ];
 
 // Searched in --name mode. Deliberately a different, much smaller set: a name is not a
@@ -58,8 +62,16 @@ async function lookupByHandle(handle) {
   // scout_candidates is matched on `handle`, NOT `profile_url_key` — the latter is
   // platform-prefixed ("instagram:somehandle") and will never equal a bare handle.
   // The same handle can legitimately exist on both platforms, so this is an array.
-  const [ownPosts, comments, sentimentRows, competitor, fanPage, followerHistory, candidates] =
-    await Promise.all([
+  const [
+    ownPosts,
+    comments,
+    sentimentRows,
+    competitor,
+    fanPage,
+    followerHistory,
+    candidates,
+    trackedAccounts,
+  ] = await Promise.all([
       prisma.post.findMany({
         where: { authorHandle: insensitive },
         include: { sentiment: true },
@@ -94,10 +106,32 @@ async function lookupByHandle(handle) {
           snapshots: { orderBy: { scrapedAt: "desc" }, include: { score: true } },
         },
       }),
+      // Campaign Post Tracking. Matched on `handle`, NOT `account_key` — that column is
+      // platform-prefixed ("instagram:somehandle") and will never equal a bare handle, the
+      // same trap called out for scout_candidates above.
+      //
+      // An influencer whose post was tracked has their handle, display name, post captions
+      // and per-scan engagement history stored here, so this must be part of any access or
+      // deletion request. `raw` rides along with the snapshots for the same reason it does
+      // for Scoutline: for an access request the payload is exactly what the data principal
+      // is entitled to see.
+      prisma.trackedAccount.findMany({
+        where: { handle: insensitive },
+        include: {
+          snapshots: { orderBy: { capturedAt: "desc" } },
+          trackedPosts: {
+            include: {
+              campaign: { select: { id: true, name: true } },
+              snapshots: { orderBy: { capturedAt: "desc" } },
+            },
+          },
+        },
+      }),
     ]);
 
   const scoutEntries = candidates.flatMap((c) => c.batchEntries);
   const scoutSnapshots = candidates.flatMap((c) => c.snapshots);
+  const trackedPosts = trackedAccounts.flatMap((a) => a.trackedPosts);
 
   return {
     mode: "handle",
@@ -114,6 +148,10 @@ async function lookupByHandle(handle) {
       scoutBatchEntryRows: scoutEntries.length,
       scoutSnapshotRows: scoutSnapshots.length,
       scoutScoreRows: scoutSnapshots.filter((s) => s.score).length,
+      trackedAccountRows: trackedAccounts.length,
+      trackedAccountSnapshotRows: trackedAccounts.flatMap((a) => a.snapshots).length,
+      trackedPostRows: trackedPosts.length,
+      trackedPostSnapshotRows: trackedPosts.flatMap((p) => p.snapshots).length,
     },
     ownPosts,
     comments,
@@ -122,6 +160,7 @@ async function lookupByHandle(handle) {
     fanPage,
     followerHistory,
     scoutCandidates: candidates,
+    trackedAccounts,
   };
 }
 

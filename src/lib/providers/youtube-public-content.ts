@@ -39,7 +39,10 @@ interface ChannelListResponse {
   items: {
     id: string;
     snippet?: { title?: string; customUrl?: string };
-    statistics?: { subscriberCount?: string };
+    // hiddenSubscriberCount: a channel can hide its subscriber count, in which case the API
+    // reports subscriberCount as "0". That is a privacy setting, not an audience of zero —
+    // see fetchYouTubeChannelById, which returns null rather than 0 for it.
+    statistics?: { subscriberCount?: string; hiddenSubscriberCount?: boolean };
     contentDetails?: { relatedPlaylists?: { uploads?: string } };
   }[];
 }
@@ -98,6 +101,93 @@ function estimatePostsPerWeek(posts: RawPost[]): number {
   const timestamps = posts.map((p) => new Date(p.postedAt).getTime()).sort((a, b) => a - b);
   const spanWeeks = (timestamps[timestamps.length - 1] - timestamps[0]) / (7 * 24 * 60 * 60 * 1000);
   return spanWeeks > 0 ? Math.round((posts.length / spanWeeks) * 10) / 10 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Campaign Post Tracking
+// ---------------------------------------------------------------------------
+
+export interface TrackedYouTubeVideo {
+  postKey: string;
+  channelId: string | null;
+  channelTitle: string | null;
+  mediaType: string;
+  caption: string | null;
+  postedAt: string | null;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  raw: Record<string, unknown>;
+}
+
+/**
+ * Current stats for a batch of tracked video IDs.
+ *
+ * Written rather than routing through YouTubePublicContentProvider.scrapeByUrls, which
+ * hardcodes `source: "agency"` and returns a RawPost destined for the `posts` table. A
+ * tracked video belongs in tracked_posts and must not be stamped as agency content — see
+ * CAMPAIGN-POST-TRACKING.md §2a.
+ *
+ * Reads `statistics` fields as nullable rather than defaulting to 0: a video with comments
+ * disabled omits commentCount entirely, and a channel that hides likes omits likeCount.
+ * Zero would be a fabricated measurement in both cases.
+ */
+export async function fetchTrackedYouTubeVideos(ids: string[]): Promise<TrackedYouTubeVideo[]> {
+  if (ids.length === 0) return [];
+  const out: TrackedYouTubeVideo[] = [];
+  // videos.list takes at most 50 ids per call, comma-joined.
+  for (let i = 0; i < ids.length; i += 50) {
+    const res = await ytGet<VideoListResponse>("/videos", {
+      part: "snippet,statistics,contentDetails",
+      id: ids.slice(i, i + 50).join(","),
+    });
+    for (const item of res.items) {
+      const normalized = normalizeVideoItem(item, "campaign");
+      const stats = item.statistics;
+      out.push({
+        postKey: item.id,
+        channelId: item.snippet?.channelId ?? null,
+        channelTitle: item.snippet?.channelTitle ?? null,
+        mediaType: normalized.mediaType,
+        caption: normalized.caption || null,
+        postedAt: item.snippet?.publishedAt ?? null,
+        views: stats?.viewCount !== undefined ? Number(stats.viewCount) : null,
+        likes: stats?.likeCount !== undefined ? Number(stats.likeCount) : null,
+        comments: stats?.commentCount !== undefined ? Number(stats.commentCount) : null,
+        raw: item as unknown as Record<string, unknown>,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Subscriber count for a channel, looked up by channel ID.
+ *
+ * resolveChannel above can only look a channel up by `forHandle`, but the video response
+ * gives us a channel ID, not a handle — so this is a separate call rather than a reuse.
+ *
+ * `hiddenSubscriberCount` is honoured: a channel that hides its subscriber count reports
+ * subscriberCount as "0", which is a privacy setting, not an audience of zero. Returning 0
+ * there would make every engagement rate computed against it meaningless.
+ */
+export async function fetchYouTubeChannelById(
+  channelId: string,
+): Promise<{ title: string | null; subscribers: number | null; hidden: boolean; raw: Record<string, unknown> } | null> {
+  const res = await ytGet<ChannelListResponse>("/channels", {
+    part: "snippet,statistics",
+    id: channelId,
+  });
+  const channel = res.items[0];
+  if (!channel) return null;
+  const hidden = channel.statistics?.hiddenSubscriberCount === true;
+  const rawCount = channel.statistics?.subscriberCount;
+  return {
+    title: channel.snippet?.title ?? null,
+    subscribers: hidden || rawCount === undefined ? null : Number(rawCount),
+    hidden,
+    raw: channel as unknown as Record<string, unknown>,
+  };
 }
 
 export class YouTubePublicContentProvider implements PublicContentProvider {
