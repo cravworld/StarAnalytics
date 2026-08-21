@@ -52,6 +52,7 @@ const prisma = {
     findFirst: recorder("trackedAccountSnapshot", "findFirst", null),
   },
   scoutSnapshot: { findMany: recorder("scoutSnapshot", "findMany", []) },
+  trackedPageSubscription: { findMany: recorder("trackedPageSubscription", "findMany", []) },
   trackedPostSnapshot: { findMany: recorder("trackedPostSnapshot", "findMany", []) },
 };
 
@@ -74,6 +75,11 @@ function fakeTrackedPosts(n: number) {
     isActive: true,
     lastScrapedAt: new Date("2026-08-12T00:00:00Z"),
     lastError: null,
+    // Every other post is a non-campaign one from a tracked page, so the campaign/other
+    // split is exercised by the count test rather than only by the happy path.
+    isCampaignPost: i % 2 === 0,
+    discoveredVia: i % 2 === 0 ? "pasted" : "page-scan",
+    includedByUserAt: null,
     curLikes: 100 + i,
     curComments: 10 + i,
     curShares: null,
@@ -131,6 +137,13 @@ async function countWith(n: number, run: () => Promise<unknown>): Promise<number
     calls.push({ model: "scoutSnapshot", op: "findMany" });
     return fakeScoutSnapshots(n);
   });
+  // Page subscriptions: one set-wide query for the campaign, not a lookup per account. The
+  // fixture returns a row per account precisely so a per-account implementation would still
+  // pass the data assertions and fail only on the query count — which is the point.
+  prisma.trackedPageSubscription.findMany.mockImplementation(async () => {
+    calls.push({ model: "trackedPageSubscription", op: "findMany" });
+    return Array.from({ length: Math.ceil(n / 2) }, (_, i) => ({ accountId: `account-${i}` }));
+  });
   await run();
   return calls.length;
 }
@@ -153,7 +166,14 @@ describe("tracked posts query count", () => {
     // passes while testing nothing. These pin that the full read path really ran.
     expect(one).toBeGreaterThan(0);
     expect(new Set(calls.map((c) => c.model))).toEqual(
-      new Set(["campaign", "trackedPost", "trackedAccount", "trackedAccountSnapshot", "scoutSnapshot"]),
+      new Set([
+        "campaign",
+        "trackedPost",
+        "trackedAccount",
+        "trackedAccountSnapshot",
+        "scoutSnapshot",
+        "trackedPageSubscription",
+      ]),
     );
   });
 

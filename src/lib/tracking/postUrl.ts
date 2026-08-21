@@ -194,6 +194,127 @@ export function parsePostUrl(input: string): ParsePostUrlResult {
   };
 }
 
+export interface ParsedAccountUrl {
+  platform: TrackPlatformId;
+  /** Instagram username / Facebook page slug or id / YouTube channel id or @handle. */
+  handle: string;
+  canonicalUrl: string;
+}
+
+export type ParseAccountUrlResult =
+  | { ok: true; value: ParsedAccountUrl }
+  | { ok: false; reason: string };
+
+// Instagram path segments that are app routes, never a username.
+const IG_RESERVED = new Set([
+  "p",
+  "reel",
+  "reels",
+  "tv",
+  "stories",
+  "explore",
+  "accounts",
+  "direct",
+  "s",
+]);
+
+// YouTube gives a channel three URL shapes and they are NOT equivalent to us.
+//   /@handle       -> resolvable via channels.list?forHandle
+//   /channel/UC... -> the channel id itself, resolvable via channels.list?id
+//   /c/customName  -> a legacy vanity name, resolvable by NEITHER lookup. It needs a
+//                     search call, which is 100 quota units against a 10,000/day budget
+//                     (youtube-public-content.ts's own note) — so it is rejected with an
+//                     instruction rather than silently costing a hundred times a normal
+//                     lookup or failing opaquely.
+const YT_HANDLE = /youtube\.com\/@([A-Za-z0-9_.-]+)/i;
+const YT_CHANNEL_ID = /youtube\.com\/channel\/(UC[A-Za-z0-9_-]{20,})/i;
+const YT_LEGACY_VANITY = /youtube\.com\/(?:c|user)\/([A-Za-z0-9_.-]+)/i;
+
+/**
+ * A page/profile link, as opposed to a single post.
+ *
+ * Companion to parsePostUrl: ingest tries the post parse first and falls back to this, so
+ * the operator pastes whatever they have into one box and never has to declare which kind
+ * of link it is.
+ */
+export function parseAccountUrl(input: string): ParseAccountUrlResult {
+  const trimmed = input.trim();
+  if (!trimmed) return { ok: false, reason: "Empty link." };
+
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const host = hostOf(withScheme);
+  if (!host) return { ok: false, reason: `"${trimmed}" is not a valid URL.` };
+  const canonicalUrl = stripTracking(withScheme);
+
+  if (host === "instagram.com" || host.endsWith(".instagram.com")) {
+    const seg = new URL(canonicalUrl).pathname.split("/").filter(Boolean)[0];
+    if (!seg) return { ok: false, reason: "That's the Instagram home page, not an account." };
+    if (IG_RESERVED.has(seg.toLowerCase())) {
+      return { ok: false, reason: "That looks like a post link, not an account page." };
+    }
+    return { ok: true, value: { platform: "instagram", handle: seg, canonicalUrl } };
+  }
+
+  if (host === "youtube.com" || host.endsWith(".youtube.com")) {
+    const byId = canonicalUrl.match(YT_CHANNEL_ID);
+    if (byId) return { ok: true, value: { platform: "youtube", handle: byId[1], canonicalUrl } };
+    const byHandle = canonicalUrl.match(YT_HANDLE);
+    if (byHandle) return { ok: true, value: { platform: "youtube", handle: `@${byHandle[1]}`, canonicalUrl } };
+    if (YT_LEGACY_VANITY.test(canonicalUrl)) {
+      return {
+        ok: false,
+        reason:
+          "That's a legacy YouTube /c/ or /user/ link, which the API can't resolve directly. Open the channel and copy its /@handle URL instead.",
+      };
+    }
+    return { ok: false, reason: "That YouTube link doesn't point at a channel." };
+  }
+
+  if (host === "facebook.com" || host.endsWith(".facebook.com")) {
+    // profile.php?id=<numeric> is the id-based form of a page URL.
+    const numericId = new URL(canonicalUrl).searchParams.get("id");
+    if (/^\d+$/.test(numericId ?? "")) {
+      return { ok: true, value: { platform: "facebook", handle: numericId as string, canonicalUrl } };
+    }
+    const seg = new URL(canonicalUrl).pathname.split("/").filter(Boolean)[0];
+    if (!seg) return { ok: false, reason: "That's the Facebook home page, not a page." };
+    if (FB_RESERVED.has(seg.toLowerCase())) {
+      return { ok: false, reason: "That looks like a post link, not a page." };
+    }
+    return { ok: true, value: { platform: "facebook", handle: seg, canonicalUrl } };
+  }
+
+  return {
+    ok: false,
+    reason: `${host} isn't a supported platform. Tracking covers Instagram, Facebook and YouTube.`,
+  };
+}
+
+/**
+ * Rebuild a post's public URL from its stored key.
+ *
+ * Needed because a page-discovered post has no pasted URL to keep — it arrived as an item
+ * in a page scrape, not as a link someone typed. The URL is what the card links to and what
+ * a later Facebook re-scan derives its page from, so it has to be reconstructible rather
+ * than left null.
+ */
+export function postUrlFor(platform: TrackPlatformId, postKey: string, accountHandle: string): string {
+  if (platform === "instagram") return `https://www.instagram.com/p/${postKey}/`;
+  if (platform === "youtube") return `https://www.youtube.com/watch?v=${postKey}`;
+  // Must keep the page in the path: facebookPageFrom() reads it back out to know which page
+  // to scrape on refresh, and a bare /posts/{id} URL would strand the post permanently.
+  return `https://www.facebook.com/${accountHandle}/posts/${postKey}`;
+}
+
+/** The public page URL for an account, used as scraper input. */
+export function accountUrlFor(platform: TrackPlatformId, handle: string): string {
+  if (platform === "instagram") return `https://www.instagram.com/${handle}/`;
+  if (platform === "facebook") return `https://www.facebook.com/${handle}/`;
+  return handle.startsWith("@")
+    ? `https://www.youtube.com/${handle}`
+    : `https://www.youtube.com/channel/${handle}`;
+}
+
 /**
  * Platform-prefixed dedup key for an account. A bare handle is not unique once three
  * platforms are in play.

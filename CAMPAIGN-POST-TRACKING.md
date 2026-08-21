@@ -654,7 +654,7 @@ Once it is live, in this order:
   the address-bar permalink instead (§4a).
 - **No re-scan cron yet** (§6). Metrics move only when someone presses Refresh, so velocity
   stays blank until a post is scanned twice.
-- **No bulk upload yet** (Phase 3). The ingest function already takes an array and the form
+- **No spreadsheet upload yet** (Phase 3). Page subscriptions (§13) now cover the common case — paste the page, not 40 links. The ingest function already takes an array and the form
   accepts multiple pasted links, so this is a sheet parser, not a new pipeline — but read
   §12 first: the write path must be moved off the request before a spreadsheet points at it.
 - **No per-post trend chart.** `getTrackedPostTrend` exists and is tested by nothing that
@@ -686,3 +686,117 @@ That is fine for Phase 1, whose stated use is pasting a handful of links at a ti
 promise that 200 works. **Before bulk upload ships (Phase 3), this must be moved behind a
 `ScrapeRun` row + `after()` + status poll**, the way `runAgencyBatchJob` already handles a
 few hundred URLs. Do not point a spreadsheet at the current path.
+
+---
+
+## 13. Whole-page tracking
+
+Paste an influencer's **page or profile** link instead of a post link and the campaign
+subscribes to that page: their existing posts are pulled in, and anything they post from
+then on is picked up automatically by a cron. Same box, same textarea — ingest tries the
+post parse first and falls back to the account parse, so nobody has to declare which kind of
+link they pasted.
+
+Direction (2026-08-21): *"I might also have to input whole page links, to track not just the
+post, to track the whole page as such."*
+
+### 13a. The problem a page import creates, and how it's resolved
+
+An influencer's page mixes two things that look identical to a scraper: the posts they made
+for the campaign, and their own everyday content. Counting the lot would put their holiday
+photos into the client's engagement numbers. Filtering silently would drop real campaign
+work whenever someone forgot the hashtag — and nobody would ever know what was missed,
+because a filtered-out post is indistinguishable from a post that never existed.
+
+So neither. **Everything the page returns is stored; a flag decides what counts.**
+
+| | Counted in campaign totals | Visible |
+|---|---|---|
+| A link you pasted | ✅ always | ✅ |
+| Discovered post mentioning a campaign hashtag | ✅ automatically | ✅ |
+| Any other post from that page | ❌ | ✅ under "not counted", one click to include |
+
+`tracked_posts.is_campaign_post` carries the decision; `discovered_via` records whether the
+post was pasted or found by a page scan, so the UI can explain itself.
+
+The third row is the important one. The hashtag is the **only** automatic signal available —
+all three campaigns have `start_date` and `end_date` NULL, so there is no date window to
+scope by — and it will miss posts. Keeping the misses visible turns a silent data-quality
+problem into a one-click decision.
+
+**A human's decision is never overwritten.** Clicking "count this one" stamps
+`included_by_user_at`, and `storeTrackedPost` deliberately omits `is_campaign_post` from its
+update branch, so no later re-scan or discovery pass can quietly reverse it — an influencer
+editing a hashtag out of an old caption must not silently drop a post from the totals.
+
+Matching is word-boundaried and case-insensitive: `#np50` must not match `#np500`, and
+nobody types hashtags consistently. `campaignHashtagMatch.test.ts` pins both directions,
+plus regex metacharacters — campaign hashtags are operator-entered free text and reach a
+`RegExp` constructor.
+
+### 13b. Subscribing is instant; discovery is not
+
+`subscribeToPage` records intent and returns. The scrape runs off-request via `after()`.
+
+This is not an optimisation. A page yields up to `APIFY_TRACKED_DISCOVERY_LIMIT` (50) posts
+and each goes through `storeTrackedPost` at ~6 sequential queries plus a follower scrape —
+comfortably past the request budget. Awaiting it would time out on the first real page and
+leave partial rows with no record of where it stopped. This is §12's warning arriving in
+practice, which is why page import was built on the async path from the start rather than
+being written synchronously and rewritten later.
+
+The UI says so plainly ("their posts are being fetched in the background"), because
+"1 page tracked" next to an empty grid otherwise reads as a failure.
+
+### 13c. Ongoing discovery
+
+`/api/cron/discover-tracked-pages`, every 10 minutes, `PAGE_DISCOVERY_BATCH` (default 2)
+subscriptions per run, skipping any scanned within `PAGE_DISCOVERY_TTL_HOURS` (default 12).
+
+Batched for the reason `refresh-fan-pages` documents at length: one page is a full Apify
+run, so a single invocation walking every subscription cannot fit in any function time limit
+once there are more than a handful. Selection is `last_discovery_at` ascending with nulls
+first, so successive runs continue where the last stopped with no cursor to store, a
+just-subscribed page is the most urgent, and a killed run changes nothing — pages it never
+reached keep their old timestamp and come back next time.
+
+`last_discovery_at` is bumped **on failure too**. It records when discovery was attempted,
+not when it succeeded — the same distinction `Post.comments_scraped_at` exists to make.
+Without it, one permanently broken page would be the stalest row on every pass and starve
+every other subscription.
+
+### 13d. Discovery does not reuse `scrapeByHandle`
+
+`scrapeByHandle` looks like the obvious Instagram discovery call and would have introduced a
+silent bug: it requests `basicData`, so every discovered reel would come back with no play
+count and render "—" for plays — indistinguishable from the null discipline being broken, on
+the platform most of the campaign runs on. `discoverInstagramAccountPosts` opts into the
+paid detail tier under the same §1a exception as pasted posts.
+
+Facebook needs no separate discovery path at all: `fetchTrackedFacebookPosts` already works
+by scraping the page, because Facebook has no post-by-URL actor (§4a). It is the one place
+Facebook's awkward shape is an advantage.
+
+YouTube resolves `/@handle` and `/channel/UC…`. Legacy `/c/` and `/user/` vanity URLs are
+**rejected with an instruction**, not silently failed: they resolve through neither
+`forHandle` nor `id`, only through `search.list` at 100 quota units against a 10,000/day
+budget.
+
+### 13e. Page-level metrics
+
+Follower change across the tracked period, from the `tracked_account_snapshots` rows already
+written on every scan — no extra query, built from the same result set the latest-follower
+lookup uses.
+
+Shown only with two or more readings. One snapshot is a reading, not a trend, and "+0" would
+assert the count was measured twice and didn't move — a different claim from "we've only
+looked once". Snapshots where the platform hid the follower count are dropped rather than
+plotted as zero, which would draw a cliff that never happened.
+
+### 13f. Privacy consequence, stated
+
+A page subscription **widens what is collected** about a commercial partner: their
+non-campaign posts are stored too. That is recorded in `DATA-PRIVACY.md` rather than left
+implicit, and `tracked_page_subscriptions` is in the data-rights lookup's searched-tables
+list with a specific note — **a deletion request must deactivate the subscription**, or the
+next discovery pass simply re-adds everything that was deleted.

@@ -38,18 +38,26 @@ export function AddTrackedPostForm({ campaignId }: { campaignId: string }) {
     });
   }
 
-  const problems = result?.outcomes.filter((o) => o.status !== "added") ?? [];
+  const subscribed = result?.outcomes.filter((o) => o.status === "page-subscribed") ?? [];
+  const pagesSubscribed = subscribed.length;
+  // "page-subscribed" is a success, not a problem — it must not land in the red list below.
+  const problems = result?.outcomes.filter((o) => o.status !== "added" && o.status !== "page-subscribed") ?? [];
 
   return (
     <div className="card" style={{ marginBottom: 16 }}>
-      <div className="card-title">Track a post</div>
-      <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 8 }}>
-        Paste an Instagram, Facebook or YouTube post link — one per line. The account that
-        posted it is detected automatically.
+      <div className="card-title">Track a post or a page</div>
+      <div style={{ color: "var(--muted)", fontSize: 12, marginBottom: 8, lineHeight: 1.55 }}>
+        Paste Instagram, Facebook or YouTube links — one per line. Mix platforms freely.
+        <br />
+        A <strong>post link</strong> tracks that post. A <strong>page or profile link</strong>{" "}
+        tracks the whole account: their existing posts are pulled in now, and anything they
+        post from here on is picked up automatically.
       </div>
       <textarea
         rows={3}
-        placeholder={"https://www.instagram.com/p/CxYz123/\nhttps://youtu.be/dQw4w9WgXcQ"}
+        placeholder={
+          "https://www.instagram.com/p/CxYz123/\nhttps://www.instagram.com/theinfluencer/\nhttps://youtu.be/dQw4w9WgXcQ"
+        }
         value={text}
         onChange={(e) => setText(e.target.value)}
         disabled={pending}
@@ -61,7 +69,8 @@ export function AddTrackedPostForm({ campaignId }: { campaignId: string }) {
         </button>
         {result ? (
           <span style={{ fontSize: 12, color: "var(--muted)" }}>
-            {result.added} added
+            {result.added} post{result.added === 1 ? "" : "s"} added
+            {pagesSubscribed > 0 ? `, ${pagesSubscribed} page${pagesSubscribed === 1 ? "" : "s"} tracked` : ""}
             {result.duplicates > 0 ? `, ${result.duplicates} already tracked` : ""}
             {result.rejected > 0 ? `, ${result.rejected} rejected` : ""}
           </span>
@@ -70,6 +79,22 @@ export function AddTrackedPostForm({ campaignId }: { campaignId: string }) {
 
       {error ? (
         <div style={{ marginTop: 10, fontSize: 12, color: "var(--pencil-red)" }}>{error}</div>
+      ) : null}
+
+      {/* Subscribing is instant; the page's posts are scraped off-request and land shortly
+          after. Said explicitly, because otherwise "1 page tracked" with no posts on screen
+          reads as a failure. */}
+      {subscribed.length > 0 ? (
+        <div style={{ marginTop: 10, fontSize: 12, color: "var(--pencil-green)", lineHeight: 1.5 }}>
+          {subscribed.map((s, i) => (
+            <div key={i}>{s.reason}</div>
+          ))}
+          <div style={{ color: "var(--muted)", marginTop: 4 }}>
+            Their posts are being fetched in the background — reload in a minute to see them.
+            Posts mentioning a campaign hashtag are counted automatically; anything else is
+            listed under the page as &ldquo;not counted&rdquo; for you to include.
+          </div>
+        </div>
       ) : null}
 
       {/* Per-link reasons, not a single "some links failed" — the reasons are actionable

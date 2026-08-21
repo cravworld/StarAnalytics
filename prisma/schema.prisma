@@ -187,13 +187,14 @@ model Campaign {
   endDate   DateTime?      @map("end_date")
   type      String?
 
-  posts         Post[]
-  agencies      Agency[]
-  events        CampaignEvent[]
-  buzzSnapshots CampaignBuzzSnapshot[]
-  // Campaign Post Tracking's back-reference. Prisma requires both sides of a relation, but
-  // the FK itself lives on tracked_posts — this adds no column to `campaigns`.
-  trackedPosts  TrackedPost[]
+  posts             Post[]
+  agencies          Agency[]
+  events            CampaignEvent[]
+  buzzSnapshots     CampaignBuzzSnapshot[]
+  // Campaign Post Tracking's back-references. Prisma requires both sides of a relation, but
+  // the FKs live on the other tables — these add no columns to `campaigns`.
+  trackedPosts      TrackedPost[]
+  pageSubscriptions TrackedPageSubscription[]
 
   @@map("campaigns")
 }
@@ -914,8 +915,9 @@ model TrackedAccount {
   // "did this paid post beat their own baseline" comparison possible.
   scoutCandidateId String? @map("scout_candidate_id")
 
-  trackedPosts TrackedPost[]
-  snapshots    TrackedAccountSnapshot[]
+  trackedPosts  TrackedPost[]
+  snapshots     TrackedAccountSnapshot[]
+  subscriptions TrackedPageSubscription[]
 
   @@map("tracked_accounts")
 }
@@ -970,6 +972,27 @@ model TrackedPost {
   isActive      Boolean   @default(true) @map("is_active")
   lastScrapedAt DateTime? @map("last_scraped_at")
   lastError     String?   @map("last_error")
+
+  // Does this post count toward the campaign's totals?
+  //
+  // A tracked PAGE brings in everything the influencer posts — campaign work and their own
+  // holiday photos alike. Counting all of it would inflate campaign engagement with content
+  // nobody commissioned; filtering it away silently would hide posts where the influencer
+  // simply forgot the hashtag. So everything is stored and this flag decides what counts:
+  // the page view shows the account's full activity, campaign totals count only these.
+  //
+  // Defaults true because a pasted link is definitionally campaign work — the operator said
+  // so by pasting it. Only page-discovered posts can arrive false.
+  isCampaignPost Boolean @default(true) @map("is_campaign_post")
+
+  // "pasted" | "page-scan". Which route brought this post in, so the UI can explain why a
+  // post is or isn't counted, and so a human's decision is distinguishable from a guess.
+  discoveredVia String @default("pasted") @map("discovered_via")
+
+  // Set when someone clicks "count this one too" on a discovered post. Its presence is what
+  // marks isCampaignPost as a human judgement rather than a hashtag match, so a later
+  // re-scan must never overwrite it.
+  includedByUserAt DateTime? @map("included_by_user_at")
 
   // Denormalized current + previous metrics. NOT redundant with tracked_post_snapshots:
   // the grid renders N cards and MUST NOT run a query per card. The pool is 5 connections
@@ -1026,4 +1049,35 @@ model TrackedPostSnapshot {
 
   @@index([trackedPostId, capturedAt])
   @@map("tracked_post_snapshots")
+}
+
+// A page tracked on an ongoing basis for a campaign. Paste a page link once and new posts
+// are picked up on a schedule, rather than pasting each post link as it appears.
+//
+// A join table rather than a flag on TrackedAccount, because the same influencer can be
+// commissioned for two films at once: NP50 and Pluto are both live right now. A single
+// campaignId column on the account would force one to win.
+model TrackedPageSubscription {
+  id         String         @id @default(uuid())
+  campaignId String         @map("campaign_id")
+  campaign   Campaign       @relation(fields: [campaignId], references: [id])
+  accountId  String         @map("account_id")
+  account    TrackedAccount @relation(fields: [accountId], references: [id])
+
+  isActive Boolean @default(true) @map("is_active")
+
+  // When discovery last RAN, not when it last found something — the same distinction
+  // Post.commentsScrapedAt exists to make. A page that posts nothing for a month would
+  // otherwise re-qualify as "never scanned" on every cron pass and be rescanned forever.
+  lastDiscoveryAt DateTime? @map("last_discovery_at")
+  lastError       String?   @map("last_error")
+
+  // How far back the first discovery reached. Recorded so a later "why isn't this older
+  // post here" has an answer rather than a guess.
+  discoverFrom DateTime? @map("discover_from")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@unique([campaignId, accountId])
+  @@index([isActive, lastDiscoveryAt])
+  @@map("tracked_page_subscriptions")
 }

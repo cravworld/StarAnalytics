@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
 import { formatCompactNumber } from "@/lib/format";
 import { aggregate } from "@/lib/tracking/insights";
+import { OtherPostsPanel } from "@/components/tracking/OtherPostsPanel";
 import type { CampaignTrackingView, TrackedAccountView, TrackedPostView } from "@/lib/data/trackedPosts";
 import type { TrackPlatformId } from "@/lib/tracking/postUrl";
 
@@ -109,6 +110,32 @@ function PostCard({ post }: { post: TrackedPostView }) {
   );
 }
 
+/**
+ * Follower change across the tracked period — the only page-level number here that isn't a
+ * rollup of the page's posts.
+ *
+ * Renders nothing below two data points, rather than showing a flat "0". One snapshot is a
+ * reading, not a trend, and "+0" would assert that the follower count was measured twice and
+ * didn't move — which is a different claim from "we've only looked once".
+ */
+function FollowerTrend({ history }: { history: { at: Date; followers: number }[] }) {
+  if (history.length < 2) return null;
+  const first = history[0];
+  const last = history[history.length - 1];
+  const delta = last.followers - first.followers;
+  if (delta === 0) return null;
+  const up = delta > 0;
+  const since = first.at.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  return (
+    <span
+      style={{ color: up ? "var(--pencil-green)" : "var(--pencil-red)", fontWeight: 600 }}
+      title={`Followers went from ${first.followers.toLocaleString("en-IN")} to ${last.followers.toLocaleString("en-IN")} since ${since}.`}
+    >
+      {up ? "↑" : "↓"} {formatCompactNumber(Math.abs(delta))} followers
+    </span>
+  );
+}
+
 function AccountHeader({ account }: { account: TrackedAccountView }) {
   return (
     <div
@@ -130,6 +157,15 @@ function AccountHeader({ account }: { account: TrackedAccountView }) {
         <span style={{ fontWeight: 600, fontSize: 14 }}>
           {accountLabel(account.platform, account.handle, account.displayName)}
         </span>
+        {account.isSubscribed ? (
+          <span
+            className="score-chip chip-good"
+            style={{ marginLeft: 8, fontSize: 10 }}
+            title="This whole page is tracked — new posts are picked up automatically."
+          >
+            Page tracked
+          </span>
+        ) : null}
         <span style={{ color: "var(--muted)", fontSize: 12, marginLeft: 8 }}>
           {PLATFORM_LABEL[account.platform]}
           {" · "}
@@ -139,6 +175,7 @@ function AccountHeader({ account }: { account: TrackedAccountView }) {
         </span>
       </div>
       <div style={{ fontSize: 12, display: "flex", gap: 14, alignItems: "baseline", flexWrap: "wrap" }}>
+        <FollowerTrend history={account.followerHistory} />
         <span>
           <strong><Metric value={account.totals.engagement} /></strong>{" "}
           <span style={{ color: "var(--muted)" }}>engagement</span>
@@ -338,11 +375,24 @@ export function TrackedPostsView({ data }: { data: CampaignTrackingView }) {
         filteredAccounts.map((account) => (
           <Card key={account.id} style={{ marginBottom: 16 }}>
             <AccountHeader account={account} />
-            <div className="post-grid" style={{ marginBottom: 0 }}>
-              {account.posts.map((p) => (
-                <PostCard key={p.id} post={p} />
-              ))}
-            </div>
+            {account.posts.length === 0 ? (
+              // A subscribed page with nothing counted yet. Saying so beats an empty box,
+              // which reads as the subscription having failed.
+              <div style={{ color: "var(--muted)", fontSize: 12, padding: "8px 0" }}>
+                No campaign posts counted from this page yet.
+              </div>
+            ) : (
+              <div className="post-grid" style={{ marginBottom: 0 }}>
+                {account.posts.map((p) => (
+                  <PostCard key={p.id} post={p} />
+                ))}
+              </div>
+            )}
+            <OtherPostsPanel
+              campaignId={data.campaign.id}
+              posts={account.otherPosts}
+              hashtags={data.campaign.hashtags}
+            />
           </Card>
         ))
       ) : view === "leaderboard" ? (

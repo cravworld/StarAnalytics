@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { parsePostUrl, accountKeyFor, facebookPageFrom, FB_SHARE_LINK_REASON } from "./postUrl";
+import {
+  parsePostUrl,
+  parseAccountUrl,
+  accountUrlFor,
+  accountKeyFor,
+  facebookPageFrom,
+  FB_SHARE_LINK_REASON,
+} from "./postUrl";
 
 function parsed(url: string) {
   const r = parsePostUrl(url);
@@ -136,6 +143,81 @@ describe("parsePostUrl — rejections", () => {
 
   it("tolerates a missing scheme", () => {
     expect(parsePostUrl("instagram.com/p/CxYz123_-/").ok).toBe(true);
+  });
+});
+
+// Page links go in the same box as post links — ingest tries the post parse first and falls
+// back to this, so the operator never has to declare which kind of link they pasted.
+describe("parseAccountUrl", () => {
+  function acct(url: string) {
+    const r = parseAccountUrl(url);
+    if (!r.ok) throw new Error(`expected ${url} to parse, got: ${r.reason}`);
+    return r.value;
+  }
+
+  it("reads an Instagram profile", () => {
+    expect(acct("https://www.instagram.com/someone/")).toMatchObject({
+      platform: "instagram",
+      handle: "someone",
+    });
+  });
+
+  // Without the reserved-segment guard, a post link would parse as an account called "p".
+  it("does not mistake an Instagram post link for an account", () => {
+    expect(parseAccountUrl("https://www.instagram.com/p/CxYz123/").ok).toBe(false);
+    expect(parseAccountUrl("https://www.instagram.com/reel/CxYz123/").ok).toBe(false);
+  });
+
+  it("reads a Facebook page by slug and by numeric profile id", () => {
+    expect(acct("https://www.facebook.com/thepage/")).toMatchObject({
+      platform: "facebook",
+      handle: "thepage",
+    });
+    expect(acct("https://www.facebook.com/profile.php?id=123456")).toMatchObject({
+      platform: "facebook",
+      handle: "123456",
+    });
+  });
+
+  it("does not mistake a Facebook post link for a page", () => {
+    expect(parseAccountUrl("https://www.facebook.com/reel/123").ok).toBe(false);
+    expect(parseAccountUrl("https://www.facebook.com/watch/?v=123").ok).toBe(false);
+  });
+
+  // YouTube gives a channel three URL shapes and only two are resolvable by a cheap lookup.
+  it("reads a YouTube channel by @handle and by channel id", () => {
+    expect(acct("https://www.youtube.com/@SomeChannel")).toMatchObject({
+      platform: "youtube",
+      handle: "@SomeChannel",
+    });
+    expect(acct("https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv")).toMatchObject({
+      platform: "youtube",
+      handle: "UCabcdefghijklmnopqrstuv",
+    });
+  });
+
+  // A /c/ vanity name resolves through neither forHandle nor id — only a search call, which
+  // costs 100 quota units against a 10,000/day budget. Rejected with an instruction rather
+  // than silently costing 100x a normal lookup.
+  it("rejects legacy /c/ and /user/ YouTube links with an instruction", () => {
+    const r = parseAccountUrl("https://www.youtube.com/c/SomeOldName");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/@handle/);
+  });
+
+  it("names an unsupported host", () => {
+    const r = parseAccountUrl("https://tiktok.com/@someone");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain("tiktok.com");
+  });
+});
+
+describe("accountUrlFor", () => {
+  it("builds the scraper input URL for each platform", () => {
+    expect(accountUrlFor("instagram", "someone")).toBe("https://www.instagram.com/someone/");
+    expect(accountUrlFor("facebook", "thepage")).toBe("https://www.facebook.com/thepage/");
+    expect(accountUrlFor("youtube", "@Chan")).toBe("https://www.youtube.com/@Chan");
+    expect(accountUrlFor("youtube", "UCabc")).toBe("https://www.youtube.com/channel/UCabc");
   });
 });
 

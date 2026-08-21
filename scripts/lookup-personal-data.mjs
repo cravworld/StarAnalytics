@@ -37,6 +37,7 @@ const HANDLE_TABLES = [
   ["tracked_account_snapshots", "via account_id", "Follower-count history captured each time their posts were re-scanned"],
   ["tracked_posts", "via account_id", "Their tracked campaign posts: URL, caption, media type, current engagement"],
   ["tracked_post_snapshots", "via tracked_post_id", "Per-scan engagement history plus the raw scrape payload, pruned at RAW_PAYLOAD_RETENTION_DAYS"],
+  ["tracked_page_subscriptions", "via account_id", "Their whole page is subscribed for a campaign, so their NON-campaign posts are collected too — see DATA-PRIVACY.md. A deletion request must stop the subscription, or discovery will simply re-add the posts"],
 ];
 
 // Searched in --name mode. Deliberately a different, much smaller set: a name is not a
@@ -119,6 +120,10 @@ async function lookupByHandle(handle) {
         where: { handle: insensitive },
         include: {
           snapshots: { orderBy: { capturedAt: "desc" } },
+          // Subscriptions matter for a DELETION request specifically: deleting this
+          // person's posts without deactivating the subscription means the next discovery
+          // pass simply re-adds them.
+          subscriptions: { include: { campaign: { select: { id: true, name: true } } } },
           trackedPosts: {
             include: {
               campaign: { select: { id: true, name: true } },
@@ -150,6 +155,7 @@ async function lookupByHandle(handle) {
       scoutScoreRows: scoutSnapshots.filter((s) => s.score).length,
       trackedAccountRows: trackedAccounts.length,
       trackedAccountSnapshotRows: trackedAccounts.flatMap((a) => a.snapshots).length,
+      trackedPageSubscriptionRows: trackedAccounts.flatMap((a) => a.subscriptions).length,
       trackedPostRows: trackedPosts.length,
       trackedPostSnapshotRows: trackedPosts.flatMap((p) => p.snapshots).length,
     },
