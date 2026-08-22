@@ -8,6 +8,13 @@ import { getBookMyShowProvider, isBookMyShowLive } from "@/lib/bookmyshow/provid
 import { scoreTheater, type ShowSignal, type TheaterPriority } from "@/lib/bookmyshow/scoring";
 import { resolveRegions } from "@/lib/bookmyshow/urls";
 import type { BmsScrapeItem, NormalizedCityResult } from "@/lib/bookmyshow/types";
+import {
+  BMS_BASIS_NOTE,
+  digestSubject,
+  formatCampaignAlertDigest,
+  formatCampaignAlertDigestHtml,
+  type TheaterAlertSummary,
+} from "./theaterAlertDigest";
 
 // Data layer for Theater Campaign Intelligence.
 //
@@ -1003,10 +1010,19 @@ export async function getTheaterShows(campaignId: string, theaterId: string) {
  * DATA_MODE_NOTIFIER flips to "live" — no new notification machinery.
  *
  * Deduped per (campaign, theater, scan-interval window) via the existing Alert table:
- * a campaign scanned every 90 minutes would otherwise email the same "Palakkad is quiet"
+ * a campaign scanned every 90 minutes would otherwise report the same "Palakkad is quiet"
  * line 16 times a day, which trains the recipient to ignore it. Alert delivery failures
  * are caught and logged rather than thrown — a mail outage must not fail a scan whose data
  * landed correctly.
+ *
+ * Two separate volume controls, because there were two separate ways to flood an inbox:
+ *   - the dedup window above bounds how OFTEN one theater may be reported;
+ *   - the digest bounds how MANY messages one scan produces. Sends are batched into a
+ *     single summary email at the end (see theaterAlertDigest.ts) rather than one per
+ *     theater, which is what turned a 32-theater scan into 32 emails.
+ * Note this is one email per campaign per scan — the cron loops campaigns and calls this
+ * once each, so a deployment with several active campaigns still gets one mail per
+ * campaign.
  */
 /**
  * How long the same theater stays quiet after alerting.
@@ -1047,8 +1063,13 @@ export async function raiseCampaignAlerts(
   const notifier = getNotifierProvider();
   const channel = getNotifierChannel();
 
-  let raised = 0;
   let suppressed = 0;
+  // Rows first, one send at the end. The Alert row per theater is what dedup reads back
+  // on the next scan, so it stays per-theater and is written inside the loop exactly as
+  // before; only delivery is pulled out. Collapsing the rows too would silently widen
+  // dedup to per-campaign — a theater going quiet at 14:00 would be suppressed because a
+  // different theater alerted at 13:00.
+  const pending: { alertId: string; summary: TheaterAlertSummary }[] = [];
 
   for (const theater of targets) {
     const type = `bms_demand:${campaignId}:${theater.theaterId}`;
@@ -1061,35 +1082,66 @@ export async function raiseCampaignAlerts(
       continue;
     }
 
+    const summary: TheaterAlertSummary = {
+      theaterId: theater.theaterId,
+      name: theater.name,
+      cityName: theater.cityName,
+      wideOpenShows: theater.priority.wideOpenShows,
+      eligibleShows: theater.priority.eligibleShows,
+      confidence: theater.priority.confidence,
+      reasons: theater.priority.reasons,
+    };
+
+    // The stored row keeps its own standalone text — it is the per-theater audit record
+    // and is read on its own, out of the digest's context, so it still carries the basis
+    // note. Only the email is a digest.
     const message = [
       `${detail.campaign.movieName} — ${theater.name}, ${theater.cityName}`,
       `${theater.priority.wideOpenShows} of ${theater.priority.eligibleShows} shows still wide open.`,
       `Confidence: ${theater.priority.confidence}.`,
       `Reasons: ${theater.priority.reasons.join(" ")}`,
-      // Never omitted. The recipient is being asked to spend money on the strength of an
-      // availability label, and must not read it as a sales figure.
-      `Based on BookMyShow availability labels, not ticket sales. BookMyShow publishes no seat counts.`,
+      BMS_BASIS_NOTE,
     ].join("\n");
 
     const alert = await prisma.alert.create({
       data: { type, message, channel, campaignId: null },
     });
-
-    try {
-      await notifier.send({
-        id: alert.id,
-        type,
-        message,
-        createdAt: alert.createdAt.toISOString(),
-      });
-      await prisma.alert.update({ where: { id: alert.id }, data: { deliveredAt: new Date() } });
-    } catch (err) {
-      console.error(`${SCAN_LOG} alert delivery failed campaign=${campaignId} theater=${theater.theaterId}:`, err);
-    }
-    raised++;
+    pending.push({ alertId: alert.id, summary });
   }
 
-  console.log(`${SCAN_LOG} alerts campaign=${campaignId} raised=${raised} suppressed=${suppressed} channel=${channel}`);
+  const raised = pending.length;
+
+  if (raised > 0) {
+    const digest = {
+      movieName: detail.campaign.movieName,
+      theaters: pending.map((p) => p.summary),
+      generatedAt: now,
+    };
+    const ids = pending.map((p) => p.alertId);
+
+    try {
+      // One email for the whole scan. The Alert row this send is stamped against is the
+      // first of the batch purely so the notifier has an id to carry; deliveredAt is then
+      // stamped across every row the digest covered, since one delivery covers them all.
+      await notifier.send({
+        id: ids[0],
+        type: `bms_demand_digest:${campaignId}`,
+        subject: digestSubject(digest),
+        message: formatCampaignAlertDigest(digest),
+        createdAt: now.toISOString(),
+        html: formatCampaignAlertDigestHtml(digest),
+      });
+      await prisma.alert.updateMany({ where: { id: { in: ids } }, data: { deliveredAt: new Date() } });
+    } catch (err) {
+      // A mail outage must not fail a scan whose data landed correctly — the rows are
+      // already written, they just stay unstamped.
+      console.error(`${SCAN_LOG} alert delivery failed campaign=${campaignId} theaters=${raised}:`, err);
+    }
+  }
+
+  console.log(
+    `${SCAN_LOG} alerts campaign=${campaignId} raised=${raised} suppressed=${suppressed} emails=${raised > 0 ? 1 : 0} channel=${channel}`,
+  );
   return { raised, suppressed };
 }
 
