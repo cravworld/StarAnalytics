@@ -1,6 +1,8 @@
 // DPDP data-minimization audit: what's actually inside posts.raw / post_comments.raw /
-// scout_snapshots.raw vs. what the app reads back out of them (currently: nothing — see
-// DATA-PRIVACY.md). Reports field names and how often each appears, never field values,
+// scout_snapshots.raw vs. what the app reads back out of them. posts.raw has six SQL
+// readers across two fields (`hashtags`, `mentions`) — this header used to say "currently:
+// nothing", which was wrong; see DATA-PRIVACY.md open item 5. The other two columns do
+// still have no reader. Reports field names and how often each appears, never field values,
 // so this is safe to run and paste the output of even outside this database's normal
 // access boundary — it's a structure report, not a data dump.
 //
