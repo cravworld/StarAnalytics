@@ -96,6 +96,46 @@ export function isQuotaCircuitOpen({
 }
 
 /**
+ * Why the account can't spend, when it can't.
+ *
+ * `platform-feature-disabled` is not one condition. It was only ever the monthly spend
+ * cap in the 2026-07-31 outage this module was written for, and the code quietly took
+ * that for the whole set — so on 2026-08-22, with $307 of a $1000 cap used, the banner
+ * told the reader to raise a limit that was nowhere near binding while Apify was in
+ * fact refusing over unpaid invoices. The two need different actions from a human, so
+ * they need to be different values here.
+ */
+export type QuotaBlockReason = "usage-cap" | "billing" | "unknown";
+
+/** The `message` half of Apify's 403 payload, pulled out of a stored scrape_runs error. */
+export function extractApifyErrorMessage(errorText: string | null | undefined): string | null {
+  if (typeof errorText !== "string") return null;
+  // Matched with a regex rather than JSON.parse: the stored text is our own prefix
+  // ("Apify runActor(...) failed: 403 ") followed by the payload, so it is not parseable
+  // as a whole, and the composed mid-run abort message is not JSON at all.
+  const match = errorText.match(/"message"\s*:\s*"([^"]*)"/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Classify a stored quota rejection into something a banner can act on.
+ *
+ * Unknown is a real answer, not a fallback bug: Apify can disable runs for reasons this
+ * list has never seen, and inventing a cause for one is exactly the failure being fixed.
+ * Callers should show the message verbatim in that case.
+ */
+export function describeQuotaBlock(errorText: string | null | undefined): QuotaBlockReason {
+  const text = typeof errorText === "string" ? errorText : "";
+  const message = extractApifyErrorMessage(text) ?? "";
+  if (/invoice/i.test(message)) return "billing";
+  if (/usage.*(limit|cap)|limit.*exceeded/i.test(message)) return "usage-cap";
+  // The mid-run abort trackedRun composes carries no payload to read — it is assembled
+  // after a budget check, so the cause is known even without a message.
+  if (/account budget exhausted/i.test(text)) return "usage-cap";
+  return "unknown";
+}
+
+/**
  * Circuit state, derived entirely from the scrape_runs audit trail rather than a
  * separate table. No migration, and no state that can drift out of sync with what
  * actually happened — a skip writes no row (see assertQuotaCircuitClosed), so the
@@ -104,12 +144,15 @@ export function isQuotaCircuitOpen({
 export async function readQuotaCircuit(): Promise<{
   lastQuotaErrorAt: Date | null;
   lastSuccessAt: Date | null;
+  /** Apify's own words for the most recent rejection, for the banner to report. */
+  lastQuotaErrorMessage: string | null;
+  lastQuotaErrorReason: QuotaBlockReason | null;
 }> {
   const [quotaError, success] = await Promise.all([
     prisma.scrapeRun.findFirst({
       where: { status: "error", error: { contains: QUOTA_ERROR_MARKER } },
       orderBy: { finishedAt: "desc" },
-      select: { finishedAt: true },
+      select: { finishedAt: true, error: true },
     }),
     // apifyRunId is the discriminator, not the kind, and that matters. scrape_runs
     // holds two different things: actor-level rows written by trackedRun, and
@@ -129,6 +172,8 @@ export async function readQuotaCircuit(): Promise<{
   return {
     lastQuotaErrorAt: quotaError?.finishedAt ?? null,
     lastSuccessAt: success?.finishedAt ?? null,
+    lastQuotaErrorMessage: extractApifyErrorMessage(quotaError?.error),
+    lastQuotaErrorReason: quotaError ? describeQuotaBlock(quotaError.error) : null,
   };
 }
 

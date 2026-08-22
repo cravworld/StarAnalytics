@@ -28,8 +28,31 @@ export async function PipelineHealthBanner() {
   // the one that describes what is actually on screen, so it carries that clause.
   const postAge = health.newestPostAt ? formatAge(health.newestPostAt) : null;
 
-  const headline = health.quotaExhausted
-    ? "Data collection has stopped — the Apify monthly usage limit has been reached."
+  // Each block reason gets the cause it actually has and the fix that actually clears
+  // it. Naming the wrong one is worse than naming none: on 2026-08-22 this told a reader
+  // to raise a usage limit sitting at 30% while Apify was refusing over unpaid invoices,
+  // which is an instruction that cannot work and hides the one that would.
+  const BLOCKED = {
+    "usage-cap": {
+      cause: " — the Apify monthly usage limit has been reached.",
+      action: " Raise the monthly usage limit in the Apify console to resume;",
+    },
+    billing: {
+      cause: " — Apify has blocked this account over unpaid invoices.",
+      action: " Settle the outstanding invoice under Billing in the Apify console to resume;",
+    },
+    unknown: {
+      cause: health.blockMessage
+        ? ` — Apify is refusing to start runs: "${health.blockMessage}".`
+        : " — Apify is refusing to start runs.",
+      action: " Check the account status in the Apify console to resume;",
+    },
+  } as const;
+
+  const blocked = health.quotaExhausted ? BLOCKED[health.blockReason ?? "unknown"] : null;
+
+  const headline = blocked
+    ? `Data collection has stopped${blocked.cause}`
     : health.status === "down"
       ? "Data collection has stopped."
       : "Data collection may be behind.";
@@ -38,9 +61,10 @@ export async function PipelineHealthBanner() {
     ? `Last successful scrape ${scrapeAge}.${postAge ? ` Post, hashtag and sentiment figures on screen are from ${postAge}, not live.` : ""}`
     : "No successful scrape has been recorded yet.";
 
-  const action = health.quotaExhausted
-    ? " Raise the monthly usage limit in the Apify console to resume; collection restarts on its own within the hour."
-    : "";
+  // The recovery half is identical whatever the cause — the breaker re-probes on a
+  // cooldown and closes on the first success — so it is stated once here rather than
+  // repeated into all three.
+  const action = blocked ? `${blocked.action} collection restarts on its own within the hour.` : "";
 
   return (
     <div

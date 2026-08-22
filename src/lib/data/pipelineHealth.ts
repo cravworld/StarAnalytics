@@ -11,6 +11,7 @@ import {
   isQuotaCircuitOpen,
   readQuotaCircuit,
   QUOTA_ERROR_MARKER,
+  type QuotaBlockReason,
 } from "@/lib/apify/quotaBreaker";
 
 export type PipelineStatus = "ok" | "stale" | "down";
@@ -21,8 +22,12 @@ export interface PipelineHealth {
   lastSuccessAt: Date | null;
   /** Newest post actually written — what the campaign screens are showing. */
   newestPostAt: Date | null;
-  /** True when Apify is rejecting on the monthly spend cap specifically. */
+  /** True when Apify is refusing to start runs — for any of the reasons below. */
   quotaExhausted: boolean;
+  /** Which refusal, when `quotaExhausted`. Null when the pipeline is not blocked. */
+  blockReason: QuotaBlockReason | null;
+  /** Apify's own wording, so an unrecognised block can still be reported accurately. */
+  blockMessage: string | null;
   failuresLast24h: number;
 }
 
@@ -77,7 +82,17 @@ export async function getPipelineHealth(): Promise<PipelineHealth> {
     process.env.DATA_MODE_APIFY === "live" ? isAccountBudgetExhausted() : Promise.resolve(false),
   ]);
 
-  const quotaExhausted = budgetExhausted || isQuotaCircuitOpen({ ...circuit, now: Date.now() });
+  const circuitOpen = isQuotaCircuitOpen({ ...circuit, now: Date.now() });
+  const quotaExhausted = budgetExhausted || circuitOpen;
+
+  // Order matters. The budget preflight only ever fires on headroom, so when it is the
+  // thing blocking us the cause is the cap by definition — no message to consult. Only
+  // when the block comes from a real rejection do we ask Apify what it said.
+  const blockReason: QuotaBlockReason | null = budgetExhausted
+    ? "usage-cap"
+    : circuitOpen
+      ? (circuit.lastQuotaErrorReason ?? "unknown")
+      : null;
 
   return {
     status: classifyPipelineHealth({
@@ -88,9 +103,12 @@ export async function getPipelineHealth(): Promise<PipelineHealth> {
     lastSuccessAt: circuit.lastSuccessAt,
     newestPostAt: newestPost?.scrapedAt ?? null,
     quotaExhausted,
+    blockReason,
+    blockMessage: quotaExhausted && !budgetExhausted ? circuit.lastQuotaErrorMessage : null,
     failuresLast24h,
   };
 }
 
 // Re-exported so the banner can describe the cause without importing the Apify layer.
 export { QUOTA_ERROR_MARKER };
+export type { QuotaBlockReason };
