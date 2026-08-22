@@ -332,3 +332,39 @@ export function accountKeyFor(platform: TrackPlatformId, handle: string): string
   const normalized = handle.trim().toLowerCase().replace(/^@/, "").replace(/\.+$/, "");
   return `${platform}:${normalized}`;
 }
+
+/**
+ * A pasted blob -> the individual links in it.
+ *
+ * Lives here rather than in the Server Action because the form has to chunk the paste before
+ * it submits (see TRACK_SUBMIT_CHUNK_SIZE), and a chunk boundary drawn with a different
+ * splitter than the server's would cut a URL in half. One splitter, both sides.
+ *
+ * Splitting on whitespace AND commas means a column pasted straight out of a sheet works
+ * as-is, which is how these lists actually arrive.
+ */
+export function splitTrackedPostUrls(raw: string): string[] {
+  return raw
+    .split(/[\s,]+/)
+    .map((u) => u.trim())
+    .filter(Boolean);
+}
+
+/**
+ * How many links go in one submission. One.
+ *
+ * Not a cost-saving measure — it is the only thing that keeps a paste inside the request
+ * budget. Every link whose author is new to the tracker costs an inline Apify profile scrape
+ * in storeTrackedPost -> refreshAccountSnapshotIfStale, and a single Instagram profile can
+ * take most of the page's 800s on its own. Two such links in one request is already over.
+ *
+ * The post-metrics scrape is genuinely batched (SCRAPE_BATCH_SIZE = 200, one actor run per
+ * platform), which is what the old "one submission is at most one actor run" reasoning was
+ * looking at when it let the whole textarea go in a single call. The per-account run is the
+ * one that multiplies, and it is invisible from the URL list.
+ *
+ * Same value and same reason as BULK_ADD_CHUNK_SIZE.instagram on the fan-pages path. Kept
+ * flat across platforms rather than per-platform like that one, because a single paste here
+ * mixes platforms freely and there is no chunk to attach a per-platform size to.
+ */
+export const TRACK_SUBMIT_CHUNK_SIZE = 1;
