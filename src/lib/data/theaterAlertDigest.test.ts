@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   BMS_BASIS_NOTE,
-  citySummary,
+  cityBreakdown,
+  DIGEST_DETAIL_LIMIT,
   digestSubject,
+  totalWideOpenShows,
   formatCampaignAlertDigest,
   formatCampaignAlertDigestHtml,
   sortTheatersByUrgency,
@@ -26,7 +28,6 @@ function theater(over: Partial<TheaterAlertSummary> = {}): TheaterAlertSummary {
     wideOpenShows: 6,
     eligibleShows: 12,
     confidence: "high",
-    reasons: ["Half the shows are wide open."],
     ...over,
   };
 }
@@ -78,14 +79,77 @@ describe("sortTheatersByUrgency", () => {
   });
 });
 
-describe("citySummary", () => {
-  it("lists each city once, worst first", () => {
-    const cities = citySummary([
+describe("cityBreakdown", () => {
+  it("groups theatres by city, busiest city first", () => {
+    const cities = cityBreakdown([
       theater({ theaterId: "a", cityName: "Kochi", wideOpenShows: 3, eligibleShows: 10 }),
       theater({ theaterId: "b", cityName: "Trivandrum", wideOpenShows: 9, eligibleShows: 10 }),
       theater({ theaterId: "c", cityName: "Kochi", wideOpenShows: 8, eligibleShows: 10 }),
     ]);
-    expect(cities).toEqual(["Trivandrum", "Kochi"]);
+    expect(cities).toEqual([
+      { cityName: "Kochi", count: 2, wideOpenShows: 11 },
+      { cityName: "Trivandrum", count: 1, wideOpenShows: 9 },
+    ]);
+  });
+});
+
+describe("totalWideOpenShows", () => {
+  it("adds up the wide-open shows across every flagged theatre", () => {
+    expect(
+      totalWideOpenShows([
+        theater({ theaterId: "a", wideOpenShows: 3 }),
+        theater({ theaterId: "b", wideOpenShows: 7 }),
+      ]),
+    ).toBe(10);
+  });
+});
+
+/**
+ * The live campaign flags 82 theatres in one scan. One email is the fix for the flood, but
+ * 82 full detail rows inside that email is the same unreadability in a new place — so the
+ * detail list is capped and the remainder listed compactly. Nothing may be dropped
+ * silently.
+ */
+describe("large digests stay readable", () => {
+  const many = Array.from({ length: 82 }, (_, i) =>
+    theater({
+      theaterId: `t${i}`,
+      name: `Theatre ${i}`,
+      cityName: `City ${i % 23}`,
+      wideOpenShows: 82 - i,
+      eligibleShows: 82,
+    }),
+  );
+
+  it("caps the detailed rows", () => {
+    const text = formatCampaignAlertDigest(digest(many));
+    expect(text).toContain(`WORST ${DIGEST_DETAIL_LIMIT} THEATRES`);
+  });
+
+  it("still names every theatre somewhere — the cap is never a silent truncation", () => {
+    const text = formatCampaignAlertDigest(digest(many));
+    const html = formatCampaignAlertDigestHtml(digest(many));
+    for (const t of many) {
+      expect(text).toContain(t.name);
+      expect(html).toContain(t.name);
+    }
+  });
+
+  it("says how many were moved into the compact list", () => {
+    const text = formatCampaignAlertDigest(digest(many));
+    expect(text).toContain(`ALSO FLAGGED (${many.length - DIGEST_DETAIL_LIMIT})`);
+  });
+
+  it("leads with the total and the city count, not with 82 rows", () => {
+    const text = formatCampaignAlertDigest(digest(many));
+    expect(text).toContain("82 theatres need a push");
+    expect(text).toContain("23 cities");
+  });
+
+  it("does not add an 'also flagged' section when everything fits", () => {
+    const text = formatCampaignAlertDigest(digest(many.slice(0, 5)));
+    expect(text).not.toContain("ALSO FLAGGED");
+    expect(text).toContain("THEATRES");
   });
 });
 
