@@ -3,18 +3,27 @@
 import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import {
+  createAccountCategory,
+  deleteAccountCategory,
   ingestTrackedPostUrls,
   refreshCampaignTracking,
+  renameAccountCategory,
   runPageDiscovery,
+  setAccountCategory,
   setPostCampaignInclusion,
   type IngestResult,
 } from "@/lib/data/trackedPosts";
+import type { AccountCategory } from "@/lib/tracking/categories";
 import { requireSession } from "@/lib/require-session";
 
 // A Server Action is a public POST endpoint, so the batch size is capped here rather than
 // trusted from the caller — same reasoning as MAX_BULK_ADD_HANDLES on the fan-page path.
 // Matched to the scrape batch size so one submission is at most one actor run.
 const MAX_URLS_PER_SUBMIT = 200;
+
+// Same reasoning as MAX_URLS_PER_SUBMIT: a Server Action is a public POST endpoint, so a
+// category name is truncated here rather than trusted to be a sane length.
+const MAX_CATEGORY_NAME_LENGTH = 60;
 
 export async function addTrackedPostsAction(
   campaignId: string,
@@ -102,4 +111,58 @@ export async function refreshTrackedPostsAction(campaignId: string): Promise<voi
     }
   });
   revalidatePath(`/campaigns/tracker/${campaignId}`);
+}
+
+/**
+ * File an account under a category (or clear it with null).
+ *
+ * Revalidates the whole tracker section, not just the campaign the click came from: the
+ * category lives on the ACCOUNT, so filing @someone as a Movie Critic in the NP50 tracker
+ * changes how they render in every other campaign's tracker too.
+ */
+export async function setAccountCategoryAction(
+  campaignId: string,
+  accountId: string,
+  categoryId: string | null,
+): Promise<void> {
+  await requireSession();
+  await setAccountCategory(accountId, categoryId);
+  revalidatePath(`/campaigns/tracker/${campaignId}`);
+  revalidatePath("/campaigns/tracker");
+}
+
+/**
+ * Add a category and return it, so the caller can file the account under it in one step.
+ *
+ * Returns the existing row for a name that's already taken rather than erroring — see
+ * createAccountCategory.
+ */
+export async function createAccountCategoryAction(
+  campaignId: string,
+  name: string,
+): Promise<AccountCategory | null> {
+  await requireSession();
+  const created = await createAccountCategory(name.slice(0, MAX_CATEGORY_NAME_LENGTH));
+  revalidatePath(`/campaigns/tracker/${campaignId}`);
+  return created;
+}
+
+/** Rename in place — the id is stable, so no account changes section. */
+export async function renameAccountCategoryAction(
+  campaignId: string,
+  categoryId: string,
+  name: string,
+): Promise<void> {
+  await requireSession();
+  await renameAccountCategory(categoryId, name.slice(0, MAX_CATEGORY_NAME_LENGTH));
+  revalidatePath(`/campaigns/tracker/${campaignId}`);
+  revalidatePath("/campaigns/tracker");
+}
+
+/** Delete a category. Its accounts drop to Uncategorised; nothing is deleted with it. */
+export async function deleteAccountCategoryAction(campaignId: string, categoryId: string): Promise<void> {
+  await requireSession();
+  await deleteAccountCategory(categoryId);
+  revalidatePath(`/campaigns/tracker/${campaignId}`);
+  revalidatePath("/campaigns/tracker");
 }

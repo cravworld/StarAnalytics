@@ -4,10 +4,20 @@ import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
 import { formatCompactNumber } from "@/lib/format";
-import { aggregate } from "@/lib/tracking/insights";
+import { aggregate, type AggregateTotals } from "@/lib/tracking/insights";
 import { OtherPostsPanel } from "@/components/tracking/OtherPostsPanel";
+import { CategoryPicker } from "@/components/tracking/CategoryPicker";
+import { CategoryManager } from "@/components/tracking/CategoryManager";
+import {
+  groupByCategory,
+  matchesCategoryFilter,
+  UNCATEGORISED_KEY,
+  UNCATEGORISED_LABEL,
+} from "@/lib/tracking/categories";
+import type { CategorySection } from "@/lib/tracking/categories";
 import type { CampaignTrackingView, TrackedAccountView, TrackedPostView } from "@/lib/data/trackedPosts";
 import type { TrackPlatformId } from "@/lib/tracking/postUrl";
+import type { AccountCategory } from "@/lib/tracking/categories";
 
 const PLATFORM_LABEL: Record<TrackPlatformId, string> = {
   instagram: "Instagram",
@@ -136,7 +146,15 @@ function FollowerTrend({ history }: { history: { at: Date; followers: number }[]
   );
 }
 
-function AccountHeader({ account }: { account: TrackedAccountView }) {
+function AccountHeader({
+  account,
+  campaignId,
+  categories,
+}: {
+  account: TrackedAccountView;
+  campaignId: string;
+  categories: AccountCategory[];
+}) {
   return (
     <div
       style={{
@@ -174,7 +192,13 @@ function AccountHeader({ account }: { account: TrackedAccountView }) {
           {account.totals.posts} post{account.totals.posts === 1 ? "" : "s"}
         </span>
       </div>
-      <div style={{ fontSize: 12, display: "flex", gap: 14, alignItems: "baseline", flexWrap: "wrap" }}>
+      <div style={{ fontSize: 12, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+        <CategoryPicker
+          campaignId={campaignId}
+          accountId={account.id}
+          categoryId={account.categoryId}
+          categories={categories}
+        />
         <FollowerTrend history={account.followerHistory} />
         <span>
           <strong><Metric value={account.totals.engagement} /></strong>{" "}
@@ -221,19 +245,179 @@ function CoverageNote({ label, covered, total }: { label: string; covered: numbe
   );
 }
 
+
+/**
+ * The band above each group of accounts in the grid.
+ *
+ * Carries the group's own totals so the question the grouping exists to answer — "how did
+ * the critics do against the vloggers" — is readable without adding up the cards below.
+ * Its numbers come from the filtered posts, so they always describe exactly what is drawn
+ * underneath them.
+ */
+function SectionHeader({
+  section,
+  totals,
+}: {
+  section: CategorySection<TrackedAccountView>;
+  totals: AggregateTotals | undefined;
+}) {
+  const posts = section.accounts.reduce((n, a) => n + a.posts.length, 0);
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        gap: 12,
+        flexWrap: "wrap",
+        borderBottom: "2px solid var(--rule)",
+        paddingBottom: 6,
+        marginBottom: 10,
+      }}
+    >
+      <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>
+        {section.name}
+        {/* Said plainly rather than styled differently and left to be inferred: these
+            accounts have not been filed, which is a thing to go and do. */}
+        {section.isReal ? null : (
+          <span style={{ fontWeight: 400, fontSize: 11, color: "var(--muted)", marginLeft: 8 }}>
+            not filed under a category yet
+          </span>
+        )}
+      </h2>
+      <div style={{ fontSize: 12, display: "flex", gap: 14, flexWrap: "wrap" }}>
+        <span style={{ color: "var(--muted)" }}>
+          {section.accounts.length} account{section.accounts.length === 1 ? "" : "s"} · {posts} post
+          {posts === 1 ? "" : "s"}
+        </span>
+        <span>
+          <strong>
+            <Metric value={totals?.engagement ?? null} />
+          </strong>{" "}
+          <span style={{ color: "var(--muted)" }}>engagement</span>
+        </span>
+        <span>
+          <strong>
+            <Metric value={totals?.views ?? null} />
+          </strong>{" "}
+          <span style={{ color: "var(--muted)" }}>plays</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One row per category — the collective comparison across groups.
+ *
+ * Share-of-engagement is computed against the sum of the sections shown, which equals the
+ * filtered campaign total precisely BECAUSE an account can only be filed under one category
+ * (see CAMPAIGN-POST-TRACKING.md §14). If accounts could carry several, these percentages
+ * would total more than 100% and the column would be quietly meaningless.
+ *
+ * Rendered as "—" rather than 0% when engagement is unmeasured, on the same principle as
+ * every other metric on this screen.
+ */
+function CategoryTotalsTable({
+  sections,
+  totals,
+  campaignTotal,
+}: {
+  sections: CategorySection<TrackedAccountView>[];
+  totals: Map<string, AggregateTotals>;
+  campaignTotal: number | null;
+}) {
+  return (
+    <Card title="By category">
+      <div className="tbl-scroll">
+        <table className="post-tbl">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Accounts</th>
+              <th>Posts</th>
+              <th>Likes</th>
+              <th>Comments</th>
+              <th>Plays</th>
+              <th>Engagement</th>
+              <th>Avg / post</th>
+              <th>Share of engagement</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sections.map((section) => {
+              const total = totals.get(section.key);
+              const posts = section.accounts.reduce((n, a) => n + a.posts.length, 0);
+              const engagementTotal = total?.engagement ?? null;
+              const share =
+                engagementTotal !== null && campaignTotal !== null && campaignTotal > 0
+                  ? (engagementTotal / campaignTotal) * 100
+                  : null;
+              return (
+                <tr key={section.key}>
+                  <td>
+                    <strong>{section.name}</strong>
+                  </td>
+                  <td>{section.accounts.length}</td>
+                  <td>{posts}</td>
+                  <td>
+                    <Metric value={total?.likes ?? null} />
+                  </td>
+                  <td>
+                    <Metric value={total?.comments ?? null} />
+                  </td>
+                  <td>
+                    <Metric value={total?.views ?? null} />
+                  </td>
+                  <td>
+                    <strong>
+                      <Metric value={engagementTotal} />
+                    </strong>
+                  </td>
+                  <td>
+                    <Metric value={engagementTotal === null || posts === 0 ? null : Math.round(engagementTotal / posts)} />
+                  </td>
+                  <td>{share === null ? "—" : `${share.toFixed(0)}%`}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>
+        An account is filed under one category, so these rows add up to the campaign total
+        rather than overlapping. Accounts you haven&apos;t filed yet appear under
+        &ldquo;{UNCATEGORISED_LABEL}&rdquo; — file them from the grid or the account totals
+        table.
+      </div>
+    </Card>
+  );
+}
+
 export function TrackedPostsView({ data }: { data: CampaignTrackingView }) {
-  const [view, setView] = useState<"grid" | "leaderboard" | "accounts">("grid");
+  const [view, setView] = useState<"grid" | "leaderboard" | "accounts" | "categories">("grid");
   const [platform, setPlatform] = useState<"all" | TrackPlatformId>("all");
+  const [category, setCategory] = useState<string>("all");
   const [search, setSearch] = useState("");
+
+  // accountId -> categoryId, so the category filter can be applied to a POST. Without this
+  // the filter could only narrow the account list, and filteredPosts — which the KPI row and
+  // the All-posts table are both built from — would silently ignore it, leaving the header
+  // and the body of the page describing different sets of posts.
+  const categoryByAccountId = useMemo(
+    () => new Map(data.accounts.map((a) => [a.id, a.categoryId])),
+    [data.accounts],
+  );
 
   const matches = (p: TrackedPostView) => {
     if (platform !== "all" && p.platform !== platform) return false;
+    if (!matchesCategoryFilter(category, categoryByAccountId.get(p.accountId) ?? null)) return false;
     if (!search.trim()) return true;
     const q = search.trim().toLowerCase();
     return p.accountHandle.toLowerCase().includes(q) || (p.caption ?? "").toLowerCase().includes(q);
   };
 
-  const filteredPosts = useMemo(() => data.posts.filter(matches), [data.posts, platform, search]);
+  const filteredPosts = useMemo(() => data.posts.filter(matches), [data.posts, platform, category, search]);
 
   // Totals are recomputed from the filtered posts, not carried over from the server's
   // unfiltered rollup. Filtering to one platform and still showing the all-platform total
@@ -253,7 +437,7 @@ export function TrackedPostsView({ data }: { data: CampaignTrackingView }) {
           };
         })
         .filter((a) => a.posts.length > 0),
-    [data.accounts, platform, search],
+    [data.accounts, platform, category, search],
   );
 
   // accountId -> displayName, so the flat post table can name a YouTube channel without
@@ -267,6 +451,55 @@ export function TrackedPostsView({ data }: { data: CampaignTrackingView }) {
     const set = new Set(data.posts.map((p) => p.platform));
     return (["instagram", "facebook", "youtube"] as TrackPlatformId[]).filter((p) => set.has(p));
   }, [data.posts]);
+
+
+  // Sections for the grid, built from the FILTERED accounts so a platform or search filter
+  // empties a section out of existence rather than leaving an empty box behind.
+  const sections = useMemo(
+    () => groupByCategory(filteredAccounts, data.categories),
+    [filteredAccounts, data.categories],
+  );
+
+  // Per-section rollups, summed from the same filtered posts the cards below them render.
+  // Never a server-side rollup: a section header that stayed campaign-wide while its cards
+  // showed one platform would be the same header/body contradiction the per-account totals
+  // above are written to avoid.
+  const sectionTotals = useMemo(
+    () =>
+      new Map(
+        sections.map((section) => [
+          section.key,
+          aggregate(
+            section.accounts
+              .flatMap((a) => a.posts)
+              .map((p) => ({ likes: p.likes, comments: p.comments, shares: p.shares, views: p.views })),
+          ),
+        ]),
+      ),
+    [sections],
+  );
+
+  // Offered in the filter only when there is something to choose between — same rule as
+  // platformsPresent. Derived from ALL the campaign's accounts rather than the filtered
+  // ones, so choosing a category never removes the option you just chose from the list.
+  const categoriesPresent = useMemo(() => {
+    const used = new Set(data.accounts.map((a) => a.categoryId ?? UNCATEGORISED_KEY));
+    const inOrder = data.categories.filter((c) => used.has(c.id)).map((c) => ({ key: c.id, name: c.name }));
+    if (used.has(UNCATEGORISED_KEY)) inOrder.push({ key: UNCATEGORISED_KEY, name: UNCATEGORISED_LABEL });
+    return inOrder;
+  }, [data.accounts, data.categories]);
+
+  // Accounts, not posts, and campaign-wide rather than filtered — this labels the category
+  // list in the manager, which states a fact about the campaign, not about whatever filter
+  // happens to be switched on.
+  const accountsPerCategory = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of data.accounts) {
+      if (!a.categoryId) continue;
+      counts.set(a.categoryId, (counts.get(a.categoryId) ?? 0) + 1);
+    }
+    return counts;
+  }, [data.accounts]);
 
   // Same reasoning as the per-account totals above: every number on the page describes the
   // same set of posts. A KPI row that stayed campaign-wide while the grid below it showed
@@ -325,9 +558,18 @@ export function TrackedPostsView({ data }: { data: CampaignTrackingView }) {
         measured against follower count, which is a proxy for audience size, not reach.
       </div>
 
+      <CategoryManager
+        campaignId={data.campaign.id}
+        categories={data.categories}
+        counts={accountsPerCategory}
+      />
+
       <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <button className={`btn ${view === "grid" ? "btn-primary" : ""}`} onClick={() => setView("grid")}>
           Grid by account
+        </button>
+        <button className={`btn ${view === "categories" ? "btn-primary" : ""}`} onClick={() => setView("categories")}>
+          By category
         </button>
         <button className={`btn ${view === "leaderboard" ? "btn-primary" : ""}`} onClick={() => setView("leaderboard")}>
           All posts
@@ -351,6 +593,16 @@ export function TrackedPostsView({ data }: { data: CampaignTrackingView }) {
             ))}
           </select>
         ) : null}
+        {categoriesPresent.length > 1 ? (
+          <select value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="all">All categories</option>
+            {categoriesPresent.map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <span style={{ fontSize: 12, color: "var(--muted)" }}>
           {filteredPosts.length} / {data.posts.length} posts
         </span>
@@ -369,32 +621,44 @@ export function TrackedPostsView({ data }: { data: CampaignTrackingView }) {
           </div>
         </Card>
       ) : view === "grid" ? (
-        // Sectioned by posting account rather than one flat wall of cards — seeing every
-        // account at once is the point; a flat grid with a dropdown makes you filter to
-        // compare.
-        filteredAccounts.map((account) => (
-          <Card key={account.id} style={{ marginBottom: 16 }}>
-            <AccountHeader account={account} />
-            {account.posts.length === 0 ? (
-              // A subscribed page with nothing counted yet. Saying so beats an empty box,
-              // which reads as the subscription having failed.
-              <div style={{ color: "var(--muted)", fontSize: 12, padding: "8px 0" }}>
-                No campaign posts counted from this page yet.
-              </div>
-            ) : (
-              <div className="post-grid" style={{ marginBottom: 0 }}>
-                {account.posts.map((p) => (
-                  <PostCard key={p.id} post={p} />
-                ))}
-              </div>
-            )}
-            <OtherPostsPanel
-              campaignId={data.campaign.id}
-              posts={account.otherPosts}
-              hashtags={data.campaign.hashtags}
-            />
-          </Card>
+        // Two levels of grouping: category, then posting account within it. Seeing every
+        // account at once is the point — a flat grid with a dropdown makes you filter to
+        // compare — and the category band is what lets the operator compare a group of
+        // critics against a group of vloggers without doing that arithmetic themselves.
+        sections.map((section) => (
+          <div key={section.key} style={{ marginBottom: 20 }}>
+            <SectionHeader section={section} totals={sectionTotals.get(section.key)} />
+            {section.accounts.map((account) => (
+              <Card key={account.id} style={{ marginBottom: 16 }}>
+                <AccountHeader
+                  account={account}
+                  campaignId={data.campaign.id}
+                  categories={data.categories}
+                />
+                {account.posts.length === 0 ? (
+                  // A subscribed page with nothing counted yet. Saying so beats an empty box,
+                  // which reads as the subscription having failed.
+                  <div style={{ color: "var(--muted)", fontSize: 12, padding: "8px 0" }}>
+                    No campaign posts counted from this page yet.
+                  </div>
+                ) : (
+                  <div className="post-grid" style={{ marginBottom: 0 }}>
+                    {account.posts.map((p) => (
+                      <PostCard key={p.id} post={p} />
+                    ))}
+                  </div>
+                )}
+                <OtherPostsPanel
+                  campaignId={data.campaign.id}
+                  posts={account.otherPosts}
+                  hashtags={data.campaign.hashtags}
+                />
+              </Card>
+            ))}
+          </div>
         ))
+      ) : view === "categories" ? (
+        <CategoryTotalsTable sections={sections} totals={sectionTotals} campaignTotal={t.engagement} />
       ) : view === "leaderboard" ? (
         <Card title="All tracked posts">
           <div className="tbl-scroll">
@@ -449,6 +713,10 @@ export function TrackedPostsView({ data }: { data: CampaignTrackingView }) {
               <thead>
                 <tr>
                   <th>Account</th>
+                  {/* Editable in place. This table is where the operator lands after a page
+                      subscription has created ten accounts at once, so filing all ten from
+                      one screen has to be possible without opening ten cards. */}
+                  <th>Category</th>
                   <th>Platform</th>
                   <th>Followers</th>
                   <th>Posts</th>
@@ -464,6 +732,15 @@ export function TrackedPostsView({ data }: { data: CampaignTrackingView }) {
                 {filteredAccounts.map((a) => (
                   <tr key={a.id}>
                     <td>{accountLabel(a.platform, a.handle, a.displayName)}</td>
+                    <td>
+                      <CategoryPicker
+                        campaignId={data.campaign.id}
+                        accountId={a.id}
+                        categoryId={a.categoryId}
+                        categories={data.categories}
+                        compact
+                      />
+                    </td>
                     <td>{PLATFORM_LABEL[a.platform]}</td>
                     <td>{a.followersAvailable ? <Metric value={a.followers} /> : "hidden"}</td>
                     <td>{a.posts.length}</td>

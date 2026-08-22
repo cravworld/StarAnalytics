@@ -120,6 +120,10 @@ async function lookupByHandle(handle) {
         where: { handle: insensitive },
         include: {
           snapshots: { orderBy: { capturedAt: "desc" } },
+          // Resolved to its name rather than left as a UUID. The category is a judgement
+          // the operator recorded ABOUT this person ("Movie Critic"), so an access request
+          // should return the word, not an id that means nothing to them.
+          category: { select: { name: true } },
           // Subscriptions matter for a DELETION request specifically: deleting this
           // person's posts without deactivating the subscription means the next discovery
           // pass simply re-adds them.

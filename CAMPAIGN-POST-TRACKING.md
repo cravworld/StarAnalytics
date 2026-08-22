@@ -800,3 +800,107 @@ non-campaign posts are stored too. That is recorded in `DATA-PRIVACY.md` rather 
 implicit, and `tracked_page_subscriptions` is in the data-rights lookup's searched-tables
 list with a specific note — **a deletion request must deactivate the subscription**, or the
 next discovery pass simply re-adds everything that was deleted.
+
+## 14. Account categories — influencers, vloggers, critics as sections
+
+**The ask:** "is it possible to have a way to separately group the influencers, vloggers, fx
+pages, movie reviewers, movie critics etc as different sections?"
+
+A movie critic's post and a fan page's post are not comparable, and averaging them together
+produces a campaign-wide engagement rate that describes nobody. Categories make the tracker
+answer "how did the critics do" rather than only "how did everyone do".
+
+### 14a. Where the category lives — on the account, not the post, not the pairing
+
+On `TrackedAccount`. An account **is** a movie critic; that is a fact about them, not about
+one campaign, so saying it once holds everywhere they are tracked. Storing it per
+campaign-account pair would mean re-filing the same fifty people for every new campaign,
+which is the kind of chore that stops getting done after the second campaign — at which
+point the sections are wrong and worse than absent.
+
+The consequence is stated in the UI rather than left to be discovered: the picker's tooltip
+and the manager panel both say the label applies to every campaign the account appears in.
+
+### 14b. A table, not an enum, not a string column
+
+`tracked_account_categories` — id, name, `sort_order`.
+
+- **Not an enum.** "etc." was in the ask. A new kind of account must not need a migration.
+- **Not a bare string on the account.** Two spellings of one group would render as two
+  sections, and there would be no way to rename a group without an `UPDATE` sweep.
+- **Ordered.** Sections render in `sort_order`, so which group is looked at first is the
+  operator's decision, not the alphabet's. Names tie-break equal orders — every category
+  added after the seeded five takes the default of 100, and without the tie-break they would
+  shuffle between page loads.
+
+The five names from the ask are seeded by the migration, so the dropdown is usable on first
+load rather than starting empty. They are seeded **verbatim** — including "FX Pages", which
+is ambiguous enough that it was never going to survive contact — which is exactly why rename
+shipped in the first version rather than being deferred. Renaming is one `UPDATE` against a
+stable id; no account changes section.
+
+### 14c. One category per account, deliberately
+
+`categoryId`, not `categoryIds`. Sections carry their own totals, and an account filed under
+two sections would have its engagement counted in both — the section totals would no longer
+sum to the campaign total, and the "share of engagement" column would add up to more than
+100%. A page that is genuinely both a vlogger and a reviewer gets filed where the operator
+would look for it.
+
+That is a real limitation, recorded here rather than smoothed over. Multi-tag grouping is
+possible later, but it costs the additive property, and the additive property is what makes
+the by-category table trustworthy.
+
+### 14d. Uncategorised is a real state, never a guess
+
+A page discovered by a subscription arrives unfiled, and nothing tries to infer what it is
+from its caption or its Scoutline record. Unfiled accounts render in an **Uncategorised**
+section that always sorts last, whatever `sort_order` the real categories carry — it is a
+to-do list, not a peer of the others.
+
+Two fallbacks land there too, both chosen so an account can never vanish off the screen:
+
+- A `category_id` pointing at a category deleted between two reads.
+- Any account whose category isn't in the list the page loaded.
+
+Losing an account from the grid would read as "its posts stopped being tracked", which is a
+worse failure than showing it as unfiled.
+
+Deleting a category is safe by construction: the FK is `ON DELETE SET NULL`, so its accounts
+fall back to Uncategorised. Nothing is deleted with it — no account, no post, no history —
+which is why the delete button doesn't ask for confirmation.
+
+### 14e. The filter has to go through the post predicate
+
+The trap this feature walked toward: the category lives on the account, so the natural
+implementation narrows the account list. Do only that, and `filteredPosts` — which the KPI
+row and the whole "All posts" table are built from — silently ignores the category filter,
+and the header and body of the page describe different sets of posts.
+
+So the view builds an `accountId -> categoryId` map and tests it inside `matches(post)`,
+alongside the platform and search filters. All four surfaces — KPIs, grid, all-posts table,
+account totals — filter identically, and every section total is `aggregate()`d from the
+filtered posts rather than read from a server-side rollup.
+
+### 14f. Query cost: one more query, constant
+
+The category list is one `findMany` for the whole screen, regardless of account count —
+`getCampaignTracking` is now seven queries, still flat in the number of posts and accounts.
+Pinned by `trackedPostsQueryCount.test.ts`, whose fixture files half its accounts and leaves
+the rest unfiled so both paths are exercised by the count test.
+
+The grouping itself is pure and lives in `src/lib/tracking/categories.ts`, tested directly —
+including the property that matters most for the totals: every account is placed exactly
+once, never dropped and never duplicated.
+
+### 14g. Where it appears
+
+- **Grid by account** — a category band above each group, carrying that group's own account
+  count, post count, engagement and plays.
+- **By category** (new view) — one row per category: accounts, posts, likes, comments, plays,
+  engagement, average per post, and share of campaign engagement.
+- **Account totals** — a Category column with an inline picker, which is the screen the
+  operator lands on after a page subscription creates ten accounts at once.
+- **Filter bar** — a category dropdown, shown only when more than one category is in use,
+  same rule as the platform dropdown.
+- **Manage categories** — rename, delete, add.
