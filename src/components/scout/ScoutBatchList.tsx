@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Pill } from "@/components/ui/Pill";
+import { formatIstDate } from "@/lib/format";
 import type { ScoutBatchSummary } from "@/lib/data/scout";
 
 export function ScoutBatchList({ batches }: { batches: ScoutBatchSummary[] }) {
@@ -77,7 +78,7 @@ export function ScoutBatchList({ batches }: { batches: ScoutBatchSummary[] }) {
               />
               <div className="htag-name scout-batch-name" title={b.fileName}>{b.fileName}</div>
               <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                {b.parsedCount} accounts · {new Date(b.createdAt).toLocaleDateString()}
+                {b.parsedCount} accounts · {formatIstDate(b.createdAt, { year: true })}
               </div>
               <div className="htag-eng">{b.scoredCount}/{b.parsedCount} scored</div>
               <Pill kind={done ? "good" : "warn"}>{done ? "Done" : "Scanning…"}</Pill>
