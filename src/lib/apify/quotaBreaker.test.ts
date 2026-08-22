@@ -5,6 +5,8 @@ import {
   isAccountBudgetExhausted,
   isQuotaCircuitOpen,
   resetAccountBudgetCache,
+  describeQuotaBlock,
+  extractApifyErrorMessage,
   ApifyQuotaExhaustedError,
   BUDGET_RESERVE_USD,
   QUOTA_ERROR_MARKER,
@@ -23,8 +25,57 @@ const REAL_QUOTA_ERROR = `Apify runActor(apify/instagram-hashtag-scraper) failed
   }
 }`;
 
+// Also verbatim from prod (scrape_runs.error, 2026-08-22). Same `type` as the cap
+// rejection above and a completely different cause: monthly usage was $307 of $1000 at
+// the time, so nothing about the limit was involved.
+const REAL_INVOICE_ERROR = `Apify runActor(apify/instagram-profile-scraper) failed: 403 {
+  "error": {
+    "type": "platform-feature-disabled",
+    "message": "Too many outstanding invoices"
+  }
+}`;
+
 const HOUR = 3_600_000;
 const COOLDOWN = 55 * 60 * 1000;
+
+describe("extractApifyErrorMessage", () => {
+  it("pulls the message out of a stored rejection", () => {
+    expect(extractApifyErrorMessage(REAL_QUOTA_ERROR)).toBe("Monthly usage hard limit exceeded");
+    expect(extractApifyErrorMessage(REAL_INVOICE_ERROR)).toBe("Too many outstanding invoices");
+  });
+
+  it("returns null when there is no message to read", () => {
+    expect(extractApifyErrorMessage("Apify run abc did not finish within 300000ms — aborted")).toBeNull();
+    expect(extractApifyErrorMessage(null)).toBeNull();
+    expect(extractApifyErrorMessage(undefined)).toBeNull();
+  });
+});
+
+describe("describeQuotaBlock", () => {
+  // The distinction the banner exists to draw: both are `platform-feature-disabled`,
+  // and they need opposite actions from whoever reads the banner.
+  it("separates the spend cap from a billing block", () => {
+    expect(describeQuotaBlock(REAL_QUOTA_ERROR)).toBe("usage-cap");
+    expect(describeQuotaBlock(REAL_INVOICE_ERROR)).toBe("billing");
+  });
+
+  // No payload to read, but the cause is known: trackedRun only composes this after
+  // checking the account budget itself.
+  it("reads the composed mid-run abort as the cap", () => {
+    expect(
+      describeQuotaBlock(`Apify run ended with status ABORTED — account budget exhausted (${QUOTA_ERROR_MARKER})`),
+    ).toBe("usage-cap");
+  });
+
+  // Guessing here is the original bug. An unrecognised block must stay unrecognised so
+  // the banner quotes Apify instead of inventing a cause.
+  it("does not guess at an unfamiliar block", () => {
+    expect(
+      describeQuotaBlock(`failed: 403 { "error": { "type": "${QUOTA_ERROR_MARKER}", "message": "Account suspended" } }`),
+    ).toBe("unknown");
+    expect(describeQuotaBlock(null)).toBe("unknown");
+  });
+});
 
 describe("isApifyQuotaError", () => {
   it("matches the real Apify quota rejection", () => {
