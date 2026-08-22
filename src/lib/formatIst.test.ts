@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatHoursUntil, formatIstDateTime } from "./format";
+import { formatCount, formatHoursUntil, formatIstDate, formatIstDateTime } from "./format";
 
 // These exist because of React hydration error #418 on the campaign detail page.
 //
@@ -30,6 +30,50 @@ describe("formatIstDateTime", () => {
     const fromDate = formatIstDateTime(INSTANT);
     expect(fromString).toBe(fromDate);
     expect(fromNumber).toBe(fromDate);
+  });
+});
+
+// The same bug, found again in production on the post tracker (#418 on
+// /campaigns/tracker/[campaignId]). PR #52 shipped its own inline
+// `toLocaleDateString("en-IN", …)` calls, which name the locale but not the zone — so the
+// numbers grouped correctly and the DAY was still whatever zone the runtime was in.
+describe("formatIstDate", () => {
+  it("renders the IST day, not the UTC one, for a post published after midnight IST", () => {
+    // 02:00 IST on the 22nd is 20:30 UTC on the 21st. The server said "21 Aug", the browser
+    // said "22 Aug", and React tore the tree down. Every post published between midnight
+    // and 05:30 IST hits this — an ordinary night's posting, not an edge case.
+    const afterMidnightIst = new Date("2026-08-21T20:30:00.000Z");
+    expect(formatIstDate(afterMidnightIst)).toContain("22");
+  });
+
+  it("adds the year only when asked", () => {
+    const d = new Date("2026-08-21T06:00:00.000Z");
+    expect(formatIstDate(d)).not.toContain("2026");
+    expect(formatIstDate(d, { year: true })).toContain("2026");
+  });
+
+  it("is stable across repeated calls, which is what hydration compares", () => {
+    const d = new Date("2026-08-21T20:30:00.000Z");
+    expect(formatIstDate(d)).toBe(formatIstDate(d));
+  });
+
+  it("accepts the shapes the data layer actually hands it", () => {
+    const d = new Date("2026-08-21T06:00:00.000Z");
+    expect(formatIstDate(d.toISOString())).toBe(formatIstDate(d));
+    expect(formatIstDate(d.getTime())).toBe(formatIstDate(d));
+  });
+});
+
+describe("formatCount", () => {
+  // Bare toLocaleString() groups by the runtime's locale: a Vercel function says
+  // "1,234,567" and an en-IN browser says "12,34,567". Same text mismatch, same #418.
+  it("groups the Indian way regardless of the runtime's own locale", () => {
+    expect(formatCount(1234567)).toBe("12,34,567");
+  });
+
+  it("leaves small numbers alone", () => {
+    expect(formatCount(0)).toBe("0");
+    expect(formatCount(999)).toBe("999");
   });
 });
 

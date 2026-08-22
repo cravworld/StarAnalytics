@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
 import { ScoutDataTable } from "@/components/scout/ScoutDataTable";
+import { formatCount, formatIstDate } from "@/lib/format";
 import type { ScoutLeaderboardRow, ScoutRawRow } from "@/lib/data/scout";
 import type { ScoutPlatform } from "@prisma/client";
 
@@ -109,7 +110,7 @@ export function ScoutLeaderboardFilterable({ rows, rawRows }: { rows: ScoutLeade
                               <div className="lb-bar-fill" style={{ width: `${r.buzzFactor}%`, background: scoreColor(r.buzzFactor) }} />
                             </div>
                             <div className="lb-meta">
-                              {r.followers !== null ? <span>Followers <strong>{r.followers.toLocaleString()}</strong></span> : null}
+                              {r.followers !== null ? <span>Followers <strong>{formatCount(r.followers)}</strong></span> : null}
                               {r.engagementRatePct !== null ? (
                                 <span>Engagement <strong>{r.engagementRatePct.toFixed(1)}%</strong></span>
                               ) : null}
@@ -123,7 +124,7 @@ export function ScoutLeaderboardFilterable({ rows, rawRows }: { rows: ScoutLeade
                                   {r.buzzFactorDelta > 0 ? `▲${r.buzzFactorDelta}` : r.buzzFactorDelta < 0 ? `▼${Math.abs(r.buzzFactorDelta)}` : "no change"}
                                   {" "}
                                   since last scan
-                                  {r.previousScrapedAt ? ` (${new Date(r.previousScrapedAt).toLocaleDateString()})` : ""}
+                                  {r.previousScrapedAt ? ` (${formatIstDate(r.previousScrapedAt, { year: true })})` : ""}
                                 </span>
                               ) : null}
                               {r.note ? <span style={{ color: "var(--amber)" }}>{r.note}</span> : null}

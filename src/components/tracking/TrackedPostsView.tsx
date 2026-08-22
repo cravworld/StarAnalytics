@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Pill";
-import { formatCompactNumber } from "@/lib/format";
+import { formatCompactNumber, formatIstDate } from "@/lib/format";
 import { aggregate, type AggregateTotals } from "@/lib/tracking/insights";
 import { OtherPostsPanel } from "@/components/tracking/OtherPostsPanel";
 import { CategoryPicker } from "@/components/tracking/CategoryPicker";
@@ -97,7 +97,7 @@ function PostCard({ post }: { post: TrackedPostView }) {
       </div>
 
       <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
-        {post.postedAt ? post.postedAt.toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "date unknown"}
+        {post.postedAt ? formatIstDate(post.postedAt) : "date unknown"}
         {post.mediaType ? ` · ${post.mediaType}` : ""}
       </div>
 
@@ -135,7 +135,7 @@ function FollowerTrend({ history }: { history: { at: Date; followers: number }[]
   const delta = last.followers - first.followers;
   if (delta === 0) return null;
   const up = delta > 0;
-  const since = first.at.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  const since = formatIstDate(first.at);
   return (
     <span
       style={{ color: up ? "var(--pencil-green)" : "var(--pencil-red)", fontWeight: 600 }}
@@ -224,7 +224,7 @@ function BaselineBadge({ account }: { account: TrackedAccountView }) {
   if (account.baselineDeltaPct === null) return null;
   const beat = account.baselineDeltaPct >= 0;
   const measured = account.baselineMeasuredAt
-    ? account.baselineMeasuredAt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+    ? formatIstDate(account.baselineMeasuredAt, { year: true })
     : null;
   return (
     <span
@@ -690,7 +690,7 @@ export function TrackedPostsView({ data }: { data: CampaignTrackingView }) {
                         </a>
                       </td>
                       <td>{PLATFORM_LABEL[p.platform]}</td>
-                      <td>{p.postedAt ? p.postedAt.toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "—"}</td>
+                      <td>{p.postedAt ? formatIstDate(p.postedAt) : "—"}</td>
                       <td>{p.mediaType ?? "—"}</td>
                       <td><Metric value={p.likes} /></td>
                       <td><Metric value={p.comments} /></td>

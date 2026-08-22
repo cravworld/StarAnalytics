@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setPostCampaignInclusionAction } from "@/lib/actions/trackedPosts";
-import { formatCompactNumber } from "@/lib/format";
+import { formatCompactNumber, formatIstDate } from "@/lib/format";
 import type { TrackedPostView } from "@/lib/data/trackedPosts";
 
 /**
@@ -80,7 +80,7 @@ export function OtherPostsPanel({
                   <tr key={p.id}>
                     <td style={{ whiteSpace: "nowrap" }}>
                       {p.postedAt
-                        ? p.postedAt.toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+                        ? formatIstDate(p.postedAt)
                         : "—"}
                     </td>
                     <td style={{ maxWidth: 320 }}>

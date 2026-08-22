@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { Sparkline } from "@/components/ui/Sparkline";
 import { useTopbarExport } from "@/components/shell/TopbarExportContext";
 import { toCsv } from "@/lib/csv";
+import { formatIstDate } from "@/lib/format";
 import type { CommentSentimentInsights } from "@/lib/data/commentSentimentInsights";
 
 // This screen was written before the notebook redesign landed, so it carried the old
@@ -18,7 +19,7 @@ const MUTED = "var(--muted)";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return formatIstDate(iso);
 }
 
 export function CommentSentimentView({ data }: { data: CommentSentimentInsights }) {

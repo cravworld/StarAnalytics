@@ -31,6 +31,35 @@ export function formatIstDateTime(d: Date | string | number): string {
 }
 
 /**
+ * Date without the clock — "21 Aug", or "21 Aug 2026" with `year`.
+ *
+ * Same rule and same bug as formatIstDateTime above, and the day-only case is the one that
+ * bites hardest: a post published between 00:00 and 05:30 IST is still the PREVIOUS day in
+ * UTC, so the server renders one date and the browser another for every such post. That is
+ * a hydration mismatch on an ordinary evening's posts, not an edge case.
+ */
+export function formatIstDate(d: Date | string | number, opts: { year?: boolean } = {}): string {
+  return new Date(d).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    ...(opts.year ? { year: "numeric" as const } : {}),
+    timeZone: "Asia/Kolkata",
+  });
+}
+
+/**
+ * A count with Indian digit grouping — 12,34,567 rather than 1,234,567.
+ *
+ * Bare `n.toLocaleString()` is the same class of bug as the dates: it reads the locale from
+ * the runtime, so a Vercel function (en-US) and an en-IN browser group the same number
+ * differently and React tears the tree down. Naming the locale fixes the mismatch and is
+ * also simply the right grouping for these screens.
+ */
+export function formatCount(n: number): string {
+  return n.toLocaleString("en-IN");
+}
+
+/**
  * Coarse "time until" for an upcoming show.
  *
  * `now` is injectable for the same reason `formatAge` takes it: read from `Date.now()` at

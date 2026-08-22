@@ -5,11 +5,12 @@ import { Line } from "react-chartjs-2";
 import type { SentimentTrendPoint } from "@/lib/data/campaigns";
 import type { CampaignEventRow } from "@/lib/data/campaignEvents";
 import { PENCIL_GREEN, GREEN_FILL, INK, LEAF, GRIDLINE, tickFont } from "./theme";
+import { formatIstDate } from "@/lib/format";
 
 // events is optional and defaults to [] — every existing caller of this component predates
 // the timeline feature and shouldn't have to change to keep compiling.
 export function SentimentTrendLine({ data, events = [] }: { data: SentimentTrendPoint[]; events?: CampaignEventRow[] }) {
-  const labels = data.map((d) => new Date(d.date).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+  const labels = data.map((d) => formatIstDate(d.date));
 
   // Best-effort only: this can only mark a day that already has a classified-post data
   // point (sentimentTrend is sparse by design, see getCampaignDetail) — an event on a day
