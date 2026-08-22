@@ -52,6 +52,7 @@ export function TheaterPriorityTable({
   const [format, setFormat] = useState("");
   const [language, setLanguage] = useState("");
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<"priority" | "shows" | "wideOpen">("priority");
 
   const cities = useMemo(
     () => [...new Set(rows.map((r) => r.cityName))].sort(),
@@ -60,19 +61,39 @@ export function TheaterPriorityTable({
   const formats = useMemo(() => [...new Set(rows.flatMap((r) => r.formats))].sort(), [rows]);
   const languages = useMemo(() => [...new Set(rows.flatMap((r) => r.languages))].sort(), [rows]);
 
-  const filtered = useMemo(
-    () =>
-      rows.filter((r) => {
-        if (city && r.cityName !== city) return false;
-        if (band && r.priority.band !== band) return false;
-        if (confidence && r.priority.confidence !== confidence) return false;
-        if (format && !r.formats.includes(format)) return false;
-        if (language && !r.languages.includes(language)) return false;
-        if (query && !r.name.toLowerCase().includes(query.toLowerCase())) return false;
-        return true;
-      }),
-    [rows, city, band, confidence, format, language, query],
-  );
+  const filtered = useMemo(() => {
+    const kept = rows.filter((r) => {
+      if (city && r.cityName !== city) return false;
+      if (band && r.priority.band !== band) return false;
+      if (confidence && r.priority.confidence !== confidence) return false;
+      if (format && !r.formats.includes(format)) return false;
+      if (language && !r.languages.includes(language)) return false;
+      if (query && !r.name.toLowerCase().includes(query.toLowerCase())) return false;
+      return true;
+    });
+
+    // Priority is a SHARE of the slate, which says nothing about how big the slate is —
+    // 3 of 3 wide open scores the same as 25 of 25. "Most shows" exists because those are
+    // not equally worth a campaign push: the same reading over 25 shows is the same signal
+    // with far more behind it. The default still leads on priority, but breaks its ties on
+    // slate size rather than alphabetically.
+    const by = {
+      priority: (a: TheaterRow, b: TheaterRow) =>
+        b.priority.score - a.priority.score ||
+        b.priority.eligibleShows - a.priority.eligibleShows ||
+        a.name.localeCompare(b.name),
+      shows: (a: TheaterRow, b: TheaterRow) =>
+        b.priority.eligibleShows - a.priority.eligibleShows ||
+        b.priority.score - a.priority.score ||
+        a.name.localeCompare(b.name),
+      wideOpen: (a: TheaterRow, b: TheaterRow) =>
+        b.priority.wideOpenShows - a.priority.wideOpenShows ||
+        b.priority.score - a.priority.score ||
+        a.name.localeCompare(b.name),
+    } as const;
+
+    return [...kept].sort(by[sort]);
+  }, [rows, city, band, confidence, format, language, query, sort]);
 
   if (rows.length === 0) {
     return (
@@ -94,6 +115,7 @@ export function TheaterPriorityTable({
           onChange={(e) => setQuery(e.target.value)}
           style={{ padding: "4px 8px", minWidth: 160 }}
         />
+        <SortSelect value={sort} onChange={setSort} />
         <Select label="City" value={city} onChange={setCity} options={cities} />
         <Select
           label="Priority"
@@ -194,6 +216,34 @@ export function TheaterPriorityTable({
         </table>
       </div>
     </>
+  );
+}
+
+/**
+ * Separate from `Select` because this one is not a filter — it never hides a row, and it has
+ * no "All". Reusing the filter component would have meant an "All" option that means nothing
+ * for an ordering.
+ */
+function SortSelect({
+  value,
+  onChange,
+}: {
+  value: "priority" | "shows" | "wideOpen";
+  onChange: (v: "priority" | "shows" | "wideOpen") => void;
+}) {
+  return (
+    <label style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+      <span style={{ color: "var(--muted)" }}>Sort</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as "priority" | "shows" | "wideOpen")}
+        style={{ padding: "4px 6px" }}
+      >
+        <option value="priority">Priority</option>
+        <option value="shows">Most shows</option>
+        <option value="wideOpen">Most wide open</option>
+      </select>
+    </label>
   );
 }
 
