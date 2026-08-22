@@ -950,6 +950,28 @@ model TrackedAccount {
   // "Uncategorised" is a real, visible state rather than a wrong guess. onDelete: SetNull
   // is explicit — deleting a category must drop its accounts into Uncategorised, never
   // delete the accounts.
+  // Self-declared profile text, captured so a category can be SUGGESTED from what the
+  // account says about itself rather than guessed from its handle. Instagram's biography;
+  // for YouTube the channel description, which is the same thing under another name.
+  //
+  // Opposite update rule to categoryId directly below: these are SCRAPED, so every refresh
+  // overwrites them — an account that rewrites its bio should show the new bio. categoryId
+  // is a human's decision and a re-scan must never touch it. Do not "make these
+  // consistent"; the difference is the point.
+  //
+  // Null and empty string are different states and both are kept distinct: null means we
+  // have never looked, "" means we looked and the account has no bio.
+  bio              String?   @db.Text
+  // The platform's own category label, where the platform has one — Instagram business
+  // accounts pick from a fixed list ("Digital creator", "Movie", "Blogger"). Coarse, and
+  // measured to be useless on YouTube (all 31 tracked channels return the identical
+  // "Film, Entertainment" topic pair), so it is stored as supporting evidence, never as a
+  // classification on its own.
+  platformCategory String?   @map("platform_category")
+  // When the two fields above were last read. Distinguishes "scraped, no bio" from "never
+  // scraped since this column existed", which a null bio alone cannot.
+  profileTextAt    DateTime? @map("profile_text_at")
+
   categoryId String?                 @map("category_id")
   category   TrackedAccountCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 

@@ -904,3 +904,80 @@ once, never dropped and never duplicated.
 - **Filter bar** — a category dropdown, shown only when more than one category is in use,
   same rule as the platform dropdown.
 - **Manage categories** — rename, delete, add.
+
+### 14h. Can a category be identified automatically? — measured, 2026-08-22
+
+Asked directly: "is there no way to autoidentify?" Four candidate signals, measured against
+the 69 real tracked accounts (38 Instagram, 31 YouTube) rather than reasoned about.
+
+**YouTube `topicDetails` — dead. Do not revisit.**
+
+One `channels.list` call, free, all 31 channels. Every single one returned the identical
+pair:
+
+```
+31  Film
+31  Entertainment
+ 5  Music          (+ 4 Music_of_Asia, 1 Television_program, 1 Performing_arts, 1 Humour)
+ 0  channels with no topic at all
+```
+
+100% coverage and zero discriminating power. It looks like a category field and separates
+nothing, because every account in this campaign is a film account. That is why
+`fetchYouTubeChannelById` deliberately does **not** request that part.
+
+**YouTube channel descriptions — thin.** 31 stored, 20 empty or contentless ("Let's goo...",
+a bare Instagram link). Of the 11 with real text, exactly one declares a type in the sense
+the sections need: REELOAD MEDIA, "short review of Movies, TV shows, Web Series".
+
+**Handle and display-name vocabulary — 41 of 69, but only with the right words.** An earlier
+pass matched `review|critic|vlog|fan` and hit 8 of 69, which was measuring the wrong
+vocabulary. Matching what these accounts actually call themselves:
+
+```
+18  Edits / cut pages     (cutss, cutz, cutx, .mp4, editing, loom, reeload)
+11  Cinema / film generic (CINEMAA.PREMI, Cinema Man777, Cinemetric.io)
+ 7  Meme / troll pages    (trollex, MEMER APPU, relatable.ahno)
+ 4  Vlogs / personal
+ 1  Reviewers / critics   (review master)
+28  no signal             (Anees, ArYa, Shihab, Sreegi — personal names)
+```
+
+**Two findings that matter more than the hit rate:**
+
+1. **The seeded five don't match the data.** The dominant real cluster is *edit/cut pages*
+   at 18, and reviewers/critics number exactly one. If "FX Pages" meant edit pages, that
+   category is the biggest group in the campaign and the rest of the list needs rethinking
+   against what is actually being tracked.
+2. **A bare personal name is itself a signal.** The 28 accounts with no keyword are
+   overwhelmingly individually-named creators, which is what distinguishes a person from a
+   page — the single most useful split available, and it comes free.
+
+**Instagram bios — the one signal still unmeasured**, and the most likely to work: a bio is
+where an account states what it is, and 38 of the 69 are Instagram. Blocked by billing at
+time of writing (below). Capture is built and waiting; `npm run audit:account-profiles`
+prints the answer once a refresh has run.
+
+**What is deliberately NOT built: the suggester.** Nothing auto-assigns, and nothing will
+until the Instagram numbers exist. A wrong label is worse than a blank one here — it lands
+in section totals that look authoritative and that nobody has a reason to doubt. When it is
+built it will propose with its evidence shown ("bio says 'short review of Movies'") for a
+human to accept or override, never assign silently.
+
+### 14i. Apify account blocked — 2026-08-22
+
+Discovered while trying to measure the above. Actor runs return:
+
+```
+403 platform-feature-disabled — "Too many outstanding invoices"
+```
+
+`users/me` reports plan SCALE, `isPaying: true`, all platform features enabled; the block is
+purely unpaid invoices. Everything Apify-backed is frozen: tracked-post refresh, page
+discovery, Scoutline, hashtag polling, fan pages, BookMyShow.
+
+**Nothing is lost by the outage**, and that is a design property, not luck. `runPageDiscovery`
+records the failure on the subscription's `lastError`, and the discovery cron selects by
+`lastCheckedAt` ascending — so it is self-healing with no cursor to repair. Everything
+backfills on its own once invoices clear. The YouTube path is unaffected throughout: it uses
+the official Data API with an API key, not Apify.

@@ -11,7 +11,7 @@ import {
   fetchTrackedInstagramPosts,
   fetchTrackedFacebookPosts,
   fetchFacebookPageSnapshot,
-  fetchProfileSnapshot,
+  fetchTrackedInstagramProfile,
   discoverInstagramAccountPosts,
   discoverFacebookPagePosts,
 } from "@/lib/providers/apify-public-content";
@@ -51,6 +51,17 @@ export interface TrackedAccountScrape {
    * either a division by zero or a wildly inflated rate.
    */
   followersAvailable: boolean;
+  /**
+   * What the account says about itself — Instagram's biography, YouTube's channel
+   * description. Captured so a category can be SUGGESTED from the account's own words
+   * rather than guessed from its handle.
+   *
+   * "" and null mean different things and both reach the database: "" is a measured blank,
+   * null is "this platform or path reported nothing".
+   */
+  bio: string | null;
+  /** The platform's own category label, where it has one. Instagram business accounts only. */
+  platformCategory: string | null;
   raw: Record<string, unknown> | null;
 }
 
@@ -293,24 +304,33 @@ class LiveTrackedPostProvider implements TrackedPostProvider {
         displayName: page.displayName,
         followers: page.followers,
         followersAvailable: page.followers !== null,
+        // Not wired: there are zero tracked Facebook accounts, and the Facebook path is
+        // blocked along with everything else on the Apify account, so field names could not
+        // be verified. Left null rather than half-built on a guess.
+        bio: null,
+        platformCategory: null,
         raw: page.raw,
       };
     }
 
     if (platform === "instagram") {
-      // Reuses the existing profile call, which already keeps `includeAboutSection: false`
-      // — APIFY-USAGE-AUDIT.md finding L: that add-on bills $0.006/profile, more than the
-      // profile call itself, and nothing reads what it returns. The §1a detail-tier
-      // exception is scoped to post scrapes only and must not drift into this path.
-      const snap = await fetchProfileSnapshot(handle);
+      // Same single actor run as fetchProfileSnapshot, and `includeAboutSection` stays
+      // false inside it — APIFY-USAGE-AUDIT.md finding L: that add-on bills $0.006/profile,
+      // more than the profile call itself, and nothing reads what it returns. The §1a
+      // detail-tier exception is scoped to post scrapes only and must not drift here.
+      // The only difference from fetchProfileSnapshot is that this one keeps the bio and
+      // category the response already carried and that one discarded.
+      const snap = await fetchTrackedInstagramProfile(handle);
       return {
-        handle: snap.handle,
+        handle,
         displayName: snap.displayName,
-        followers: snap.followers,
-        // fetchProfileSnapshot substitutes 0 when the actor returned no profile item at
-        // all (private/deleted/renamed). Treated as unknown rather than as an audience of
-        // zero, so no engagement rate is computed against it.
-        followersAvailable: snap.followers > 0,
+        // Null followers means the actor returned no profile item at all (private, deleted,
+        // renamed). Kept as 0-with-followersAvailable-false rather than as a real zero, so
+        // no engagement rate is computed against it.
+        followers: snap.followers ?? 0,
+        followersAvailable: (snap.followers ?? 0) > 0,
+        bio: snap.bio,
+        platformCategory: snap.platformCategory,
         raw: null,
       };
     }
@@ -318,13 +338,26 @@ class LiveTrackedPostProvider implements TrackedPostProvider {
     if (platform === "youtube") {
       const channel = await fetchYouTubeChannelById(handle);
       if (!channel) {
-        return { handle, displayName: null, followers: null, followersAvailable: false, raw: null };
+        return {
+          handle,
+          displayName: null,
+          followers: null,
+          followersAvailable: false,
+          bio: null,
+          platformCategory: null,
+          raw: null,
+        };
       }
       return {
         handle,
         displayName: channel.title,
         followers: channel.subscribers,
         followersAvailable: channel.subscribers !== null,
+        bio: channel.description,
+        // YouTube has no self-declared category. topicDetails looks like one and isn't:
+        // all 31 tracked channels return the identical "Film, Entertainment" pair
+        // (measured 2026-08-22), so it separates nothing.
+        platformCategory: null,
         raw: channel.raw,
       };
     }
@@ -439,6 +472,10 @@ class MockTrackedPostProvider implements TrackedPostProvider {
       displayName: `Mock Creator ${h % 5}`,
       followers: hidden ? null : 5_000 + (h % 495_000),
       followersAvailable: !hidden,
+      // One in three mock accounts has a blank bio, so the "measured but empty" path is
+      // exercised locally rather than only against real accounts.
+      bio: h % 3 === 0 ? "" : `Mock bio ${h % 5} — movie reviews and cinema updates`,
+      platformCategory: h % 2 === 0 ? "Digital creator" : null,
       raw: { mock: true },
     };
   }

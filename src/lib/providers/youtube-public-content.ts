@@ -38,7 +38,7 @@ async function ytGet<T>(path: string, params: Record<string, string>): Promise<T
 interface ChannelListResponse {
   items: {
     id: string;
-    snippet?: { title?: string; customUrl?: string };
+    snippet?: { title?: string; customUrl?: string; description?: string };
     // hiddenSubscriberCount: a channel can hide its subscriber count, in which case the API
     // reports subscriberCount as "0". That is a privacy setting, not an audience of zero —
     // see fetchYouTubeChannelById, which returns null rather than 0 for it.
@@ -173,7 +173,23 @@ export async function fetchTrackedYouTubeVideos(ids: string[]): Promise<TrackedY
  */
 export async function fetchYouTubeChannelById(
   channelId: string,
-): Promise<{ title: string | null; subscribers: number | null; hidden: boolean; raw: Record<string, unknown> } | null> {
+): Promise<{
+  title: string | null;
+  subscribers: number | null;
+  hidden: boolean;
+  /**
+   * The channel description — YouTube's equivalent of a bio, and free: it is already in the
+   * snippet part this call requests. Returned as "" rather than null when the channel has
+   * no description, so "we looked and it was blank" stays distinct from "we never looked".
+   *
+   * Deliberately NOT accompanied by topicDetails. That part is also free, and it was
+   * measured against all 31 tracked channels on 2026-08-22: every single one returned the
+   * identical "Film, Entertainment" pair. Zero discriminating power for grouping, so
+   * requesting it would cost a wider response for no signal.
+   */
+  description: string | null;
+  raw: Record<string, unknown>;
+} | null> {
   const res = await ytGet<ChannelListResponse>("/channels", {
     part: "snippet,statistics",
     id: channelId,
@@ -186,6 +202,7 @@ export async function fetchYouTubeChannelById(
     title: channel.snippet?.title ?? null,
     subscribers: hidden || rawCount === undefined ? null : Number(rawCount),
     hidden,
+    description: channel.snippet?.description ?? null,
     raw: channel as unknown as Record<string, unknown>,
   };
 }

@@ -18,8 +18,10 @@ import {
   normalizeProfileItem,
   normalizeProfilePostItem,
   normalizeTrackedPostItem,
+  normalizeTrackedProfileItem,
   postUrlKey,
   type NormalizedTrackedPost,
+  type TrackedProfileFields,
 } from "./apify-normalize";
 import {
   normalizeFacebookPostItem,
@@ -389,6 +391,36 @@ export async function fetchProfileSnapshot(handle: string): Promise<AccountSnaps
     engagementRateEstimate: 0,
     storyResponseRate: null,
   };
+}
+
+/**
+ * Profile call for Campaign Post Tracking — the same one actor run as
+ * fetchProfileSnapshot, but keeping the self-declared text it throws away.
+ *
+ * Written alongside rather than replacing it, for the same reason
+ * fetchTrackedYouTubeVideos sits alongside scrapeByUrls: fetchProfileSnapshot returns an
+ * AccountSnapshot destined for fan pages and competitors, and neither of those has anywhere
+ * to put a bio.
+ *
+ * COST IS UNCHANGED. One actor run, one profile, and includeAboutSection stays false —
+ * APIFY-USAGE-AUDIT.md finding L: that add-on bills $0.006/profile on top of the $0.0023
+ * call and returns date-joined and country, neither of which anything reads. The bio and
+ * category are in the ordinary response; we were simply discarding them.
+ */
+export async function fetchTrackedInstagramProfile(handle: string): Promise<TrackedProfileFields> {
+  const cleanHandle = handle.replace(/^@/, "");
+  const items = await trackedRun<Record<string, unknown>>(
+    "profile",
+    actorEnv("APIFY_ACTOR_PROFILE"),
+    { usernames: [cleanHandle], includeAboutSection: false },
+    { maxItems: 1 },
+  );
+  // No item at all — private, deleted, or renamed. Every field null: nothing was measured,
+  // and a zero follower count or an empty bio would both be fabrications.
+  if (!items[0]) {
+    return { followers: null, displayName: null, bio: null, platformCategory: null };
+  }
+  return normalizeTrackedProfileItem(items[0]);
 }
 
 // Results per hashtag poll. `resultsLimit` is per hashtag on this actor too, but we only
