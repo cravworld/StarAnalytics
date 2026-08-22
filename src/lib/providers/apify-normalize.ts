@@ -216,6 +216,58 @@ export interface ProfileSnapshotFields {
   postsCount: number | null;
 }
 
+/**
+ * Profile fields for Campaign Post Tracking, including the self-declared text.
+ *
+ * Separate from normalizeProfileItem above rather than widening it: that one feeds
+ * AccountSnapshot, which fan pages and competitors also use, and neither of those wants a
+ * bio. Same actor, same single call, same billing — this just stops discarding fields the
+ * response already contains.
+ *
+ * NOT VERIFIED AGAINST A LIVE RUN. The field names come from the actor's documentation, not
+ * from a response we have seen — the Apify account is blocked for outstanding invoices, so
+ * the first real run is the first proof. Same status as the Facebook post normalizer, and
+ * handled the same way: every field reads through a fallback list, and a name that turns out
+ * to be wrong yields null rather than throwing. If bios come back empty for every account
+ * once billing clears, the field names are wrong and this is where to fix it.
+ */
+export interface TrackedProfileFields {
+  followers: number | null;
+  displayName: string | null;
+  /** "" when the account genuinely has no bio; null when no field was present at all. */
+  bio: string | null;
+  platformCategory: string | null;
+}
+
+/**
+ * Reads a string key WITHOUT collapsing "" to null, unlike str() above.
+ *
+ * The distinction is load-bearing here and nowhere else in this file: an account with an
+ * empty bio has been measured, and an account whose response carried no biography field at
+ * all has not. Collapsing them would make "we looked and there was nothing" indistinguishable
+ * from "the field name is wrong" — which is the exact failure this normalizer is most likely
+ * to have, since its field names are unverified.
+ */
+function strOrEmpty(item: ActorItem, ...keys: string[]): string | null {
+  for (const k of keys) {
+    const v = item[k];
+    if (typeof v === "string") return v;
+  }
+  return null;
+}
+
+export function normalizeTrackedProfileItem(item: ActorItem): TrackedProfileFields {
+  return {
+    followers: num(item, "followersCount", "followers"),
+    displayName: str(item, "fullName", "full_name"),
+    bio: strOrEmpty(item, "biography", "bio"),
+    // businessCategoryName is what a business/creator account sets; categoryName is the
+    // broader label the actor sometimes returns instead. Either is the platform's own word
+    // for what this account is, which is all this field claims to be.
+    platformCategory: str(item, "businessCategoryName", "categoryName", "category_name"),
+  };
+}
+
 export function normalizeProfileItem(item: ActorItem): ProfileSnapshotFields {
   return {
     followers: num(item, "followersCount", "followers") ?? 0,

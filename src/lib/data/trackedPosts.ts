@@ -516,11 +516,29 @@ async function refreshAccountSnapshotIfStale(
         raw: (snap.raw ?? undefined) as object | undefined,
       },
     });
-    if (snap.displayName) {
-      await prisma.trackedAccount.update({
-        where: { id: accountId },
-        data: { displayName: snap.displayName },
-      });
+    // Display name and profile text are both SCRAPED, so a refresh overwrites them — an
+    // account that rewrites its bio should show the new bio. That is the opposite rule to
+    // categoryId, which is a human's filing decision and which nothing on a scrape path may
+    // touch. The two live next to each other in the schema; the difference is deliberate.
+    //
+    // bio is written whenever it is non-null, INCLUDING when it is "". An empty string is a
+    // measured result ("this account has no bio") and overwriting a stale bio with it is
+    // correct; only null — meaning the platform reported nothing — is skipped, so a failed
+    // read never erases text we already had.
+    const profileUpdate: {
+      displayName?: string;
+      bio?: string;
+      platformCategory?: string | null;
+      profileTextAt?: Date;
+    } = {};
+    if (snap.displayName) profileUpdate.displayName = snap.displayName;
+    if (snap.bio !== null) {
+      profileUpdate.bio = snap.bio;
+      profileUpdate.platformCategory = snap.platformCategory;
+      profileUpdate.profileTextAt = new Date();
+    }
+    if (Object.keys(profileUpdate).length > 0) {
+      await prisma.trackedAccount.update({ where: { id: accountId }, data: profileUpdate });
     }
   } catch (err) {
     // A missing follower count costs engagement rate for this account, not the post itself.

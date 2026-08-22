@@ -15,7 +15,8 @@
     "db:validate": "node --env-file=.env.local node_modules/prisma/build/index.js validate",
     "db:studio": "node --env-file=.env.local node_modules/prisma/build/index.js studio",
     "data-rights:lookup": "node --env-file=.env.local scripts/lookup-personal-data.mjs",
-    "audit:raw-payload": "node --env-file=.env.local scripts/audit-raw-payload.mjs"
+    "audit:raw-payload": "node --env-file=.env.local scripts/audit-raw-payload.mjs",
+    "audit:account-profiles": "node --env-file=.env.local scripts/show-account-profiles.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
