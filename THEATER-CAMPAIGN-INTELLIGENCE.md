@@ -238,8 +238,11 @@ longer a throttle to wait out, and continuing to ask would just be asking.
 
 Without `--sweep`, a run spends one burst. Since the city list arrives in a fixed order it
 would otherwise read the same first cities every time, so `resolveCities` rotates the window
-by **one** city per run — not by the window size, since with 30 regions and a window of 6
-`bucket * 6 % 30` takes only 5 distinct values and just 5 cities would ever reach the front.
+by **one** city per run — not by the window size. Stepping by the window only ever reaches
+`N / gcd(N, window)` starting points: with the 30 regions configured when this was written,
+`bucket * 6 % 30` took just 5 distinct values, so only 5 cities ever reached the front. At
+today's 32 it is 16 of 32 — better, but still half the list frozen out, and it swings on the
+region count rather than on anything deliberate. Stepping by one reaches all N whatever N is.
 
 **Count pages, not cities.** `--max-cities` caps cities, but a run requests `cities × dates`
 and `--days` defaults to **2**, so `--max-cities 6` is twelve pages.
@@ -417,21 +420,29 @@ afterwards.
   hours older than the last scan. The UI shows per-theater last-seen times for that reason.
 - `availStatus` 0 and 1 semantics are inferred, and — because the 48-hour delta run needed
   automated collection — they can no longer be settled cheaply.
-- **The 30-region list is incomplete, and this is now the largest known gap.** Measured
-  2026-08-21 after a full pass in which all 30 regions were read successfully: four areas of
-  the campaign's own theatre list returned **no venue at all**.
+- **The region list is incomplete, and this is now the largest known gap.** Measured
+  2026-08-21 after a full pass in which all 30 regions then configured were read
+  successfully: four areas of the campaign's own theatre list returned **no venue at all**.
+  Two region codes have since been read and added (2026-08-22), so the list now stands at
+  32 and the table below is part-closed.
 
-  | Area | Towns with no venue found | On the campaign list |
-  |---|---|---|
-  | Wayanad | Kalpetta, Sulthan Bathery, Mananthavady, Pullpally | ~6 theatres |
-  | Idukki hills | Kattappana, Adimali, Nedumkandam, Rajakumari | ~5 |
-  | North Kannur | Payyannur, Iritty, Mattannur, Koothuparamb, Peravoor… | ~12 |
-  | Malappuram belt | Malappuram, Tirur, Ponnani, Nilambur, Kottackal… | ~20 |
+  | Area | Towns with no venue found | On the campaign list | Region since added |
+  |---|---|---|---|
+  | Wayanad | Kalpetta, Sulthan Bathery, Mananthavady, Pullpally | ~6 theatres | — still missing |
+  | Idukki hills | Kattappana, Adimali, Nedumkandam, Rajakumari | ~5 | — still missing |
+  | North Kannur | Payyannur, Iritty, Mattannur, Koothuparamb, Peravoor… | ~12 | `KASA` (Kasaragod), north of the belt |
+  | Malappuram belt | Malappuram, Tirur, Ponnani, Nilambur, Kottackal… | ~20 | `MALP` (Malappuram) |
 
   These are **not** "not on BookMyShow" — they are towns whose region is never requested.
   The regions we do have reach further than their names suggest (Chittur, Shoranur,
   Cherthala, Haripad, Ettumanoor, Karunagapally, Thamarassery and Edappal all surfaced
-  inside a neighbour's catchment), but nothing covers those four areas.
+  inside a neighbour's catchment), which is why adding one region can close several towns.
+
+  **What the two additions actually settle is not yet measured.** `MALP` and `KASA` mean
+  those regions are now *requested*; whether their catchments reach Tirur, Ponnani,
+  Nilambur, Kottackal, Payyannur or Iritty is exactly the kind of thing this list has been
+  wrong about before, and the honest answer is that the next full pass will say. Wayanad and
+  the Idukki hills are untouched by both — no configured region sits in either.
 
   **Getting the missing region codes needs a human step, on purpose.** A URL needs both the
   region CODE and its slug (`kalpetta:kalpetta`), and the code cannot be derived from the

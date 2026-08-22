@@ -10,7 +10,7 @@ Not user-facing — this is the operating record from a DPDP (India's Digital Pe
 |---|---|---|---|
 | Account email/name/role | `users` | Internal team / agency logins | Access control for the app itself |
 | Post caption, author handle, engagement counts | `posts` | Public post authors (third parties, not our users) | Campaign/competitor analytics |
-| Full raw scrape payload — **incl. commenter real names and profile photo URLs**, see below | `posts.raw`, `post_comments.raw` | Same | Kept as an ingestion artifact. Read back in exactly one place, `backfillCampaignLink()` (`raw -> 'hashtags'`, in SQL) — see the correction below; nothing else touches it. Run `npm run audit:raw-payload` to see what's actually in it. Pruned after `RAW_PAYLOAD_RETENTION_DAYS` (default 90) by the `prune-raw-payloads` cron |
+| Full raw scrape payload — **incl. commenter real names and profile photo URLs**, see below | `posts.raw`, `post_comments.raw` | Same | Kept as an ingestion artifact, and **read back by six SQL queries across two fields** (`hashtags` and `mentions`) — see open item 5, which this row previously under-stated as a single reader. Run `npm run audit:raw-payload` to see what's actually in it. Pruned after `RAW_PAYLOAD_RETENTION_DAYS` (default 90) by the `prune-raw-payloads` cron |
 | Comment text + author handle | `post_comments` | Public commenters (third parties) | Sentiment analysis input. Read exactly once (by the classifier) and never again — nulled after `COMMENT_RETENTION_DAYS` (default 90) by the same cron; the row itself is kept so comment counts stay accurate |
 | Handle, display name, follower count | `competitor_accounts`, `fan_pages` | Public account owners | Competitor/fan tracking |
 | Follower-count history, keyed by handle | `account_snapshots` | Same | Follower trend charts and decline alerting. Worth calling out separately from the row above: it is keyed on `(platform, ig_handle)` with no foreign key, and `removeCompetitor()` deliberately leaves these rows behind when the `competitor_accounts` row is deleted — so a handle can persist here after the only row naming it elsewhere is gone. Not pruned; a follower count is the account's own public metric, same reasoning as posts' engagement data |
@@ -142,7 +142,46 @@ These came out of the audit as real gaps but are scope/product decisions, not so
 
    **The ~20 unused Scoutline *derived metrics* were deliberately left in**, and that half stays open. They are analytics rather than identifiers, so the privacy gain is small, while dropping them is *irreversible for future data*: `raw` exists to be the artifact you go back to, and the prune already bounds retention at 90 days — stripping buys a shorter window, not an escape from indefinite retention. Revisit if a reviewer asks or if the retained volume starts to matter.
 
-5. **Campaign backfill depends on a column the prune deletes** (found 2026-08-20, not fixed). `backfillCampaignLink()` matches on `raw -> 'hashtags'`, so once `posts.raw` is nulled past `RAW_PAYLOAD_RETENTION_DAYS` a post can no longer be linked to a campaign that starts tracking its hashtag later. A correctness bug rather than a privacy one, and it predates all of the above — the raw-payload prune was written on the belief that nothing read `raw` back. The fix is probably to persist hashtags in their own column (they are already extracted for `Campaign.hashtags`) rather than to weaken the prune, since retaining a whole scrape payload to support one field is exactly the over-collection this document exists to push against.
+5. ~~**Six queries depend on fields the prune deletes**~~ — found 2026-08-20 as a single reader, scope corrected and **resolved 2026-08-22**. While `posts.raw` was nulled outright past `RAW_PAYLOAD_RETENTION_DAYS`, every one of these silently stopped matching:
+
+   | Site | Field | What degrades |
+   |---|---|---|
+   | `backfillCampaignLink()` (`apify-public-content.ts`) | `hashtags` | a post can no longer be linked to a campaign that starts tracking its hashtag later |
+   | `getCampaignHashtagBreakdown()` (`campaigns.ts`) | `hashtags` | campaign detail's per-hashtag table |
+   | `getCampaignMentionBreakdown()` | `mentions` | campaign detail's per-mention table |
+   | `getCampaignHashtagSuggestions()` | `hashtags` | suggested untracked tags |
+   | `getTrackedHashtags()` | `hashtags` | the tracked-hashtags list |
+   | `trackHashtag()` | `hashtags` | linking existing posts when a tag is first tracked |
+
+   **This was originally recorded as one reader of one field, which was wrong on both counts.** The correction matters because "nothing reads `raw` back" is the belief the prune was written on, and it is repeated in `apify-normalize.ts` (`hashtags` described as "the one field here that is genuinely read back") and in `audit-raw-payload.mjs`'s own header. Both are corrected alongside this.
+
+   Presence measured 2026-08-22 over a 200-row sample: `hashtags` 100%, `mentions` 75%. So this is not a marginal path.
+
+   **The failure mode is silence.** A nulled `raw` does not error — it fails to match, so each of these under-reports. The campaign detail screen shows a hashtag breakdown that quietly shrinks as posts age past 90 days, with nothing to indicate rows are missing.
+
+   **Fixed 2026-08-22** by minimizing `posts.raw` instead of nulling it: the prune now
+   replaces the payload with just its `hashtags` and `mentions` keys, so all six queries keep
+   working. One file (`prune-raw-payloads/route.ts`), no migration, no query rewrites.
+
+   Retaining two arrays of non-identifying strings is not the over-collection this document
+   objects to — it objects to retaining the *whole* payload, whose identifying fields
+   (`ownerFullName`, `ownerProfilePicUrl`) `minimizeRaw()` already drops at ingest. What the
+   prune discards is the rest of the actor item, which genuinely has no reader. The
+   alternative considered and rejected was promoting both fields to real columns: a cleaner
+   long-term shape, but a schema migration plus a backfill that has to land in the same
+   migration or the cutover makes matching temporarily worse, to buy the same outcome.
+
+   The implementation has one non-obvious requirement, and it is load-bearing: the preserved
+   object is passed through `jsonb_strip_nulls`. Those queries guard with `raw ? 'mentions'`,
+   which tests key **existence**, so writing `"mentions": null` for a post with no mentions
+   would pass the guard and then fail in `jsonb_array_elements_text` with "cannot extract
+   elements from a scalar". Verified read-only against 500 production rows before shipping:
+   no row produces a JSON-null value, no key present beforehand is lost, and re-running over
+   an already-minimized row is a no-op.
+
+   **Posts already pruned are unrecoverable.** Their `raw` is already NULL and no backfill
+   restores it, so this fix is forward-looking only — it stops the loss continuing, it does
+   not undo what the prune has already removed.
 
 ~~6. Decide a real retention policy for structured data~~ — **resolved 2026-07-30**: see "Retention" above. `post_comments.text`/`author_handle` (the actual third-party personal data in the structured-data set) now prunes on `COMMENT_RETENTION_DAYS`; posts' own caption/engagement data and derived `sentiment` rows are deliberately kept indefinitely, for reasons documented in that section.
 

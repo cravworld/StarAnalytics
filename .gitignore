@@ -53,3 +53,12 @@ next-env.d.ts
 
 # Local capture run log — written by scripts/bms-capture.mjs on the operator machine.
 bms-capture.log
+
+# Operator working files — the client's own source documents (influencer lists, page
+# exports, the brief) and the spreadsheets derived from them. Deliberately untracked
+# rather than committed: they carry real names and handles, which DATA-PRIVACY.md's
+# minimisation posture keeps out of a permanent git history, and nothing in the app
+# reads them — they are the input a person formats by hand before uploading. The one
+# tracked derivative is reference/bethlehem-kudumba-unit-theatres.txt, which holds
+# theatre names only.
+/files/

@@ -57,8 +57,11 @@ function mediaType(item: ActorItem): RawPost["mediaType"] {
 // is the handle, it is already its own column, and removing it would break nothing but
 // gain nothing.
 //
-// `hashtags` must survive: backfillCampaignLink() in apify-public-content.ts queries
-// `raw -> 'hashtags'` in SQL. It is the one field here that is genuinely read back.
+// `hashtags` AND `mentions` must both survive: six SQL queries read them back out of
+// `raw` — backfillCampaignLink() in apify-public-content.ts, plus getTrackedHashtags(),
+// trackHashtag() and the three getCampaign*Breakdown/Suggestions helpers in data/campaigns.ts.
+// This comment used to call `hashtags` "the one field here that is genuinely read back";
+// that was wrong on both the count and the field list. See DATA-PRIVACY.md open item 5.
 const RAW_DROPPED_TOP_LEVEL = ["ownerFullName", "ownerProfilePicUrl"];
 const RAW_DROPPED_OWNER = ["full_name", "profile_pic_url", "profile_pic_id"];
 
