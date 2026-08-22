@@ -68,6 +68,19 @@ export const KERALA_REGIONS: BmsRegion[] = [
   { code: "PUNA", slug: "punalur", name: "Punalur", lat: "9.0100", long: "76.9300" },
   { code: "KARR", slug: "kallara", name: "Kallara", lat: "8.7000", long: "76.9000" },
   { code: "GOOL", slug: "goolikkadavu", name: "Goolikkadavu", lat: "9.1000", long: "76.6000" },
+
+  // Added 2026-08-22, after a full pass proved these areas were unreachable rather than
+  // absent: every one of the 30 regions above was read successfully, and the campaign's own
+  // theatre list still had whole towns with no venue found. Their regions were simply never
+  // requested.
+  //
+  // The slugs came from the campaign owner using BookMyShow's city picker. The CODES were
+  // then read from each region's own landing page, which reports its own regionCode the way
+  // /explore/home/kochi reports KOCH — not guessed, because a wrong code silently returns a
+  // neighbouring region's showtimes rather than failing, and the region assertion in
+  // normalizeCityPage would then discard the page as a mismatch.
+  { code: "KASA", slug: "kasaragod", name: "Kasaragod", lat: "12.5102", long: "74.9852" },
+  { code: "MALP", slug: "malappuram", name: "Malappuram", lat: "11.0732", long: "76.0740" },
 ];
 
 const REGIONS_BY_CODE = new Map(KERALA_REGIONS.map((r) => [r.code, r]));

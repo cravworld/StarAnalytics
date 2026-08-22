@@ -116,6 +116,11 @@ const REGIONS = {
   PUNA: ["punalur", "Punalur", "9.0100", "76.9300"],
   KARR: ["kallara", "Kallara", "8.7000", "76.9000"],
   GOOL: ["goolikkadavu", "Goolikkadavu", "9.1000", "76.6000"],
+  // Added 2026-08-22 — see the note in src/lib/bookmyshow/urls.ts. Codes read from each
+  // region's own landing page, not guessed: a wrong code silently returns a neighbouring
+  // region rather than failing.
+  KASA: ["kasaragod", "Kasaragod", "12.5102", "74.9852"],
+  MALP: ["malappuram", "Malappuram", "11.0732", "76.0740"],
 };
 
 // --- main -------------------------------------------------------------------
