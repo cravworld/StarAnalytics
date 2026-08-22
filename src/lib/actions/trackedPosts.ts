@@ -35,6 +35,7 @@ const MAX_CATEGORY_NAME_LENGTH = 60;
 export async function addTrackedPostsAction(
   campaignId: string,
   rawUrls: string,
+  revalidate = true,
 ): Promise<IngestResult> {
   await requireSession();
 
@@ -72,8 +73,19 @@ export async function addTrackedPostsAction(
     });
   }
 
-  revalidatePath(`/campaigns/tracker/${campaignId}`);
-  revalidatePath("/campaigns/tracker");
+  // Only the client's LAST chunk revalidates — same reasoning as addFanPagesBulkAction, and
+  // now for the same reason: this is called once per link in a run of N. revalidatePath does
+  // not just invalidate a cache; it makes the action response carry a freshly rendered RSC
+  // payload for the whole route, which the client commits as a seeded navigation. Left
+  // unconditional, a thirty-link paste would run getCampaignTracking thirty times against the
+  // 5-connection pool *while* thirty scrapes are in flight, and commit thirty mid-run
+  // re-renders into the tree holding this form's progress and outcome state. The route is
+  // dynamic, so there is no cached payload to go stale in the meantime, and the form calls
+  // router.refresh() on every exit path — including the stopped and failed ones.
+  if (revalidate) {
+    revalidatePath(`/campaigns/tracker/${campaignId}`);
+    revalidatePath("/campaigns/tracker");
+  }
   return result;
 }
 

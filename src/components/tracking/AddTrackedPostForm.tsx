@@ -97,9 +97,13 @@ export function AddTrackedPostForm({ campaignId }: { campaignId: string }) {
 
     // The in-paste duplicates are known before anything is spent, so they seed the running
     // tally rather than being appended at the end — they belong in the first render of it.
+    // Every array spelled out rather than spread from EMPTY_RESULT: a shallow copy would
+    // alias that module constant's arrays, and the push()es below would grow it for the
+    // lifetime of the page.
     const running: IngestResult = {
       ...EMPTY_RESULT,
       duplicates: parsed.duplicates.length,
+      pageSubscriptionIds: [],
       outcomes: [...parsed.duplicates],
     };
     setResult({ ...running, outcomes: [...running.outcomes] });
@@ -118,13 +122,18 @@ export function AddTrackedPostForm({ campaignId }: { campaignId: string }) {
         }
         const chunk = urls.slice(i, i + TRACK_SUBMIT_CHUNK_SIZE);
         setProgress({ done: i, total });
+        // Revalidate on the final chunk only — see the note on addTrackedPostsAction. Mid-run
+        // revalidation makes every chunk's response carry a re-render of this whole route,
+        // which is both wasted database work and a commit into the tree holding this
+        // component's state. router.refresh() below covers every other way this loop ends.
+        const isFinalChunk = i + TRACK_SUBMIT_CHUNK_SIZE >= total;
 
         // Per chunk, NOT around the loop. ingestTrackedPostUrls already turns per-link
         // problems into outcomes, but the call itself still throws for things it never
         // sees — a request over maxDuration, a dropped connection, an expired session.
         // Caught around the loop, any one of those abandoned every link after it.
         try {
-          const r = await addTrackedPostsAction(campaignId, chunk.join("\n"));
+          const r = await addTrackedPostsAction(campaignId, chunk.join("\n"), isFinalChunk);
           running.added += r.added;
           running.duplicates += r.duplicates;
           running.rejected += r.rejected;
