@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { addTrackedPostsAction } from "@/lib/actions/trackedPosts";
-import type { IngestResult } from "@/lib/data/trackedPosts";
+import { parsePostUrl, splitTrackedPostUrls, TRACK_SUBMIT_CHUNK_SIZE } from "@/lib/tracking/postUrl";
+import type { IngestOutcome, IngestResult } from "@/lib/data/trackedPosts";
 
 /**
  * Paste post links to track them.
@@ -12,30 +13,162 @@ import type { IngestResult } from "@/lib/data/trackedPosts";
  * the ingest function has always taken an array (so bulk upload stays a parser rather than
  * a second pipeline), and a textarea costs nothing over a single input while letting
  * someone paste a column straight out of a sheet.
+ *
+ * **It submits one link per request, not the whole box.** Sending the lot in a single
+ * Server Action was what it did originally, on the strength of MAX_URLS_PER_SUBMIT being
+ * "matched to the scrape batch size so one submission is at most one actor run". That is
+ * true of the post-metrics actor and false in aggregate: storeTrackedPost calls
+ * refreshAccountSnapshotIfStale for every post, which runs a live Apify profile scrape for
+ * each account the tracker hasn't seen recently, serially, inside the request. A paste of
+ * links from a dozen different influencers is a dozen sequential actor runs in one POST,
+ * which is a 504 — and, because the whole IngestResult was thrown away with the error, an
+ * operator with no way to tell which of their links had actually landed before the cutoff.
+ *
+ * So: same shape as BulkAddFanPagesForm, and for the same reason.
+ *  - Chunked, so no single request can outrun the page's maxDuration.
+ *  - Outcomes accumulate per chunk, so a timeout or a closed tab keeps everything already
+ *    stored and still names it. Nothing here is all-or-nothing.
+ *  - Stoppable, because realising you pasted the wrong column happens five links in.
+ *  - Three failures in a row aborts: one bad link is routine, three straight means the
+ *    session expired or Apify is refusing, and the rest of the list would fail identically.
  */
+
+/** @see CONSECUTIVE_FAILURE_LIMIT in BulkAddFanPagesForm — same reasoning, same number. */
+const CONSECUTIVE_FAILURE_LIMIT = 3;
+
+const EMPTY_RESULT: IngestResult = {
+  added: 0,
+  duplicates: 0,
+  rejected: 0,
+  pageSubscriptionIds: [],
+  outcomes: [],
+};
+
+/**
+ * In-paste duplicates, resolved here rather than by the server.
+ *
+ * The server still dedups by postKey, but it can only see one chunk at a time now, so the
+ * second copy of a link would reach it as a fresh submission and come back as "already
+ * tracked in this campaign" — technically true, quietly misleading, and a wasted round trip
+ * against a real scraper. parsePostUrl is deliberately dependency-free (see its header) so
+ * the same keying is available here for free.
+ *
+ * Links that don't parse as posts are passed through untouched: they may be page/profile
+ * links, and only the server knows how to tell those from junk.
+ */
+function splitPasteForSubmit(raw: string): { submit: string[]; duplicates: IngestOutcome[] } {
+  const submit: string[] = [];
+  const duplicates: IngestOutcome[] = [];
+  const seen = new Set<string>();
+  for (const url of splitTrackedPostUrls(raw)) {
+    const parsed = parsePostUrl(url);
+    if (!parsed.ok) {
+      submit.push(url);
+      continue;
+    }
+    const key = `${parsed.value.platform}:${parsed.value.postKey}`;
+    if (seen.has(key)) {
+      duplicates.push({ url, status: "duplicate", reason: "Same post appears twice in this batch." });
+      continue;
+    }
+    seen.add(key);
+    submit.push(url);
+  }
+  return { submit, duplicates };
+}
+
 export function AddTrackedPostForm({ campaignId }: { campaignId: string }) {
   const router = useRouter();
   const [text, setText] = useState("");
   const [result, setResult] = useState<IngestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  // A ref, not state: the loop below reads this between chunks and would close over a stale
+  // copy of a state variable for its whole run.
+  const stopRequested = useRef(false);
 
-  function onSubmit() {
-    if (!text.trim()) return;
+  const pending = progress !== null;
+  const parsed = useMemo(() => splitPasteForSubmit(text), [text]);
+
+  async function onSubmit() {
+    if (parsed.submit.length === 0) return;
+    stopRequested.current = false;
     setError(null);
-    setResult(null);
-    startTransition(async () => {
-      try {
-        const r = await addTrackedPostsAction(campaignId, text);
-        setResult(r);
-        // Only clear the box when everything landed — otherwise the operator loses the
-        // links they still need to fix.
-        if (r.rejected === 0 && r.duplicates === 0) setText("");
-        router.refresh();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+
+    // The in-paste duplicates are known before anything is spent, so they seed the running
+    // tally rather than being appended at the end — they belong in the first render of it.
+    // Every array spelled out rather than spread from EMPTY_RESULT: a shallow copy would
+    // alias that module constant's arrays, and the push()es below would grow it for the
+    // lifetime of the page.
+    const running: IngestResult = {
+      ...EMPTY_RESULT,
+      duplicates: parsed.duplicates.length,
+      pageSubscriptionIds: [],
+      outcomes: [...parsed.duplicates],
+    };
+    setResult({ ...running, outcomes: [...running.outcomes] });
+
+    const urls = parsed.submit;
+    const total = urls.length;
+    let consecutiveFailures = 0;
+    let stopped = false;
+    setProgress({ done: 0, total });
+
+    try {
+      for (let i = 0; i < total; i += TRACK_SUBMIT_CHUNK_SIZE) {
+        if (stopRequested.current) {
+          stopped = true;
+          break;
+        }
+        const chunk = urls.slice(i, i + TRACK_SUBMIT_CHUNK_SIZE);
+        setProgress({ done: i, total });
+        // Revalidate on the final chunk only — see the note on addTrackedPostsAction. Mid-run
+        // revalidation makes every chunk's response carry a re-render of this whole route,
+        // which is both wasted database work and a commit into the tree holding this
+        // component's state. router.refresh() below covers every other way this loop ends.
+        const isFinalChunk = i + TRACK_SUBMIT_CHUNK_SIZE >= total;
+
+        // Per chunk, NOT around the loop. ingestTrackedPostUrls already turns per-link
+        // problems into outcomes, but the call itself still throws for things it never
+        // sees — a request over maxDuration, a dropped connection, an expired session.
+        // Caught around the loop, any one of those abandoned every link after it.
+        try {
+          const r = await addTrackedPostsAction(campaignId, chunk.join("\n"), isFinalChunk);
+          running.added += r.added;
+          running.duplicates += r.duplicates;
+          running.rejected += r.rejected;
+          running.pageSubscriptionIds.push(...r.pageSubscriptionIds);
+          running.outcomes.push(...r.outcomes);
+          consecutiveFailures = 0;
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          running.rejected += chunk.length;
+          for (const url of chunk) running.outcomes.push({ url, status: "rejected", reason: message });
+          if (++consecutiveFailures >= CONSECUTIVE_FAILURE_LIMIT) {
+            stopped = true;
+            setError(
+              `Stopped after ${CONSECUTIVE_FAILURE_LIMIT} failures in a row — the remaining links were not attempted. Everything above this point was saved.`,
+            );
+            setResult({ ...running, outcomes: [...running.outcomes] });
+            break;
+          }
+        }
+        // Committed after every chunk rather than at the end, so a run that is stopped or
+        // that dies mid-way still shows exactly what it managed to do.
+        setResult({ ...running, outcomes: [...running.outcomes] });
       }
-    });
+
+      // Only clear the box when everything landed and nothing was left unattempted —
+      // otherwise the operator loses the links they still need to fix or re-run.
+      if (!stopped && running.rejected === 0 && running.duplicates === 0) setText("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      // Every exit path: links that succeeded are in the database regardless of how the run
+      // ended, so the view below must always end up showing them.
+      router.refresh();
+      setProgress(null);
+    }
   }
 
   const subscribed = result?.outcomes.filter((o) => o.status === "page-subscribed") ?? [];
@@ -63,10 +196,34 @@ export function AddTrackedPostForm({ campaignId }: { campaignId: string }) {
         disabled={pending}
         style={{ width: "100%", marginBottom: 8 }}
       />
+
+      {/* Said before the button is pressed, while it is still free to change the paste: a long
+          list is a long wait, and someone who doesn't expect that reads it as a hang. */}
+      {parsed.submit.length > 1 ? (
+        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8, lineHeight: 1.5 }}>
+          {parsed.submit.length} links
+          {parsed.duplicates.length > 0
+            ? ` · ${parsed.duplicates.length} repeat${parsed.duplicates.length === 1 ? "" : "s"} skipped`
+            : ""}
+          . Each one is fetched on its own — a link from an account that&apos;s new to the
+          tracker also pulls that account&apos;s follower count, which is slow. Results appear
+          as they land, and you can leave it running.
+        </div>
+      ) : null}
+
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <button className="btn btn-primary" onClick={onSubmit} disabled={pending || !text.trim()}>
-          {pending ? "Fetching metrics…" : "Track posts"}
+        <button className="btn btn-primary" onClick={onSubmit} disabled={pending || parsed.submit.length === 0}>
+          {pending
+            ? progress.total > 1
+              ? `Fetching ${progress.done + 1} of ${progress.total}…`
+              : "Fetching metrics…"
+            : "Track posts"}
         </button>
+        {pending && progress.total > 1 ? (
+          <button className="btn" onClick={() => (stopRequested.current = true)}>
+            Stop
+          </button>
+        ) : null}
         {result ? (
           <span style={{ fontSize: 12, color: "var(--muted)" }}>
             {result.added} post{result.added === 1 ? "" : "s"} added

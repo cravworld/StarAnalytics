@@ -14,11 +14,18 @@ import {
   type IngestResult,
 } from "@/lib/data/trackedPosts";
 import type { AccountCategory } from "@/lib/tracking/categories";
+import { splitTrackedPostUrls } from "@/lib/tracking/postUrl";
 import { requireSession } from "@/lib/require-session";
 
 // A Server Action is a public POST endpoint, so the batch size is capped here rather than
 // trusted from the caller — same reasoning as MAX_BULK_ADD_HANDLES on the fan-page path.
-// Matched to the scrape batch size so one submission is at most one actor run.
+//
+// This cap used to read "matched to the scrape batch size so one submission is at most one
+// actor run", and the form sent the whole textarea in one call on the strength of it. That
+// was only ever true of the POST actor: each link whose author is new to the tracker also
+// costs an inline profile scrape, so a mixed paste is one actor run per distinct account and
+// a long one times out. The form now chunks at TRACK_SUBMIT_CHUNK_SIZE and this is back to
+// what it always should have been — a sanity ceiling on a public endpoint, nothing more.
 const MAX_URLS_PER_SUBMIT = 200;
 
 // Same reasoning as MAX_URLS_PER_SUBMIT: a Server Action is a public POST endpoint, so a
@@ -28,17 +35,13 @@ const MAX_CATEGORY_NAME_LENGTH = 60;
 export async function addTrackedPostsAction(
   campaignId: string,
   rawUrls: string,
+  revalidate = true,
 ): Promise<IngestResult> {
   await requireSession();
 
-  // Split on newlines, commas and whitespace so a pasted column from a sheet works as-is.
-  // The UI passes one URL today; this costs nothing and means the bulk path (Phase 3) is a
-  // parser in front of the same function rather than a second pipeline.
-  const urls = rawUrls
-    .split(/[\s,]+/)
-    .map((u) => u.trim())
-    .filter(Boolean)
-    .slice(0, MAX_URLS_PER_SUBMIT);
+  // The same splitter the form chunks with, so a chunk boundary can never cut a URL in half.
+  // Still applied here rather than trusting the caller: this is a public POST endpoint.
+  const urls = splitTrackedPostUrls(rawUrls).slice(0, MAX_URLS_PER_SUBMIT);
 
   if (urls.length === 0) {
     return { added: 0, duplicates: 0, rejected: 0, pageSubscriptionIds: [], outcomes: [] };
@@ -70,8 +73,19 @@ export async function addTrackedPostsAction(
     });
   }
 
-  revalidatePath(`/campaigns/tracker/${campaignId}`);
-  revalidatePath("/campaigns/tracker");
+  // Only the client's LAST chunk revalidates — same reasoning as addFanPagesBulkAction, and
+  // now for the same reason: this is called once per link in a run of N. revalidatePath does
+  // not just invalidate a cache; it makes the action response carry a freshly rendered RSC
+  // payload for the whole route, which the client commits as a seeded navigation. Left
+  // unconditional, a thirty-link paste would run getCampaignTracking thirty times against the
+  // 5-connection pool *while* thirty scrapes are in flight, and commit thirty mid-run
+  // re-renders into the tree holding this form's progress and outcome state. The route is
+  // dynamic, so there is no cached payload to go stale in the meantime, and the form calls
+  // router.refresh() on every exit path — including the stopped and failed ones.
+  if (revalidate) {
+    revalidatePath(`/campaigns/tracker/${campaignId}`);
+    revalidatePath("/campaigns/tracker");
+  }
   return result;
 }
 

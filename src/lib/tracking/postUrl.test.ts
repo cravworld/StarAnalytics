@@ -5,6 +5,8 @@ import {
   accountUrlFor,
   accountKeyFor,
   facebookPageFrom,
+  splitTrackedPostUrls,
+  TRACK_SUBMIT_CHUNK_SIZE,
   FB_SHARE_LINK_REASON,
 } from "./postUrl";
 
@@ -230,5 +232,36 @@ describe("accountKeyFor", () => {
   // key is prefixed rather than being the handle itself.
   it("keeps the same handle on two platforms distinct", () => {
     expect(accountKeyFor("instagram", "brand")).not.toBe(accountKeyFor("facebook", "brand"));
+  });
+});
+
+describe("splitTrackedPostUrls", () => {
+  it("reads one-per-line, comma-separated and spreadsheet-column pastes the same way", () => {
+    const expected = ["https://a.com/1", "https://a.com/2", "https://a.com/3"];
+    expect(splitTrackedPostUrls("https://a.com/1\nhttps://a.com/2\nhttps://a.com/3")).toEqual(expected);
+    expect(splitTrackedPostUrls("https://a.com/1, https://a.com/2,https://a.com/3")).toEqual(expected);
+    expect(splitTrackedPostUrls("https://a.com/1\r\n\thttps://a.com/2  \n\n https://a.com/3\n")).toEqual(expected);
+  });
+
+  it("drops blank lines rather than submitting empty strings", () => {
+    expect(splitTrackedPostUrls("   \n\n  ")).toEqual([]);
+  });
+
+  // The whole point of it living in this file: the form chunks the paste with this splitter
+  // and the Server Action re-splits what arrives with the same one. If they disagreed, a
+  // chunk boundary could cut a URL in half and the operator would see a mangled link
+  // rejected for a reason that names nothing they pasted.
+  it("is stable when a chunk is re-joined and re-split", () => {
+    const urls = splitTrackedPostUrls("https://a.com/1 https://a.com/2");
+    for (let i = 0; i < urls.length; i += TRACK_SUBMIT_CHUNK_SIZE) {
+      const chunk = urls.slice(i, i + TRACK_SUBMIT_CHUNK_SIZE);
+      expect(splitTrackedPostUrls(chunk.join("\n"))).toEqual(chunk);
+    }
+  });
+
+  // Not an arbitrary constant: at 2+, two links from accounts new to the tracker put two
+  // sequential Apify profile scrapes in one request, which is what the 504 was.
+  it("submits one link per request", () => {
+    expect(TRACK_SUBMIT_CHUNK_SIZE).toBe(1);
   });
 });
