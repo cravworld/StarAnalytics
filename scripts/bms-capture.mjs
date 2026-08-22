@@ -120,6 +120,7 @@ const REGIONS = {
   // region's own landing page, not guessed: a wrong code silently returns a neighbouring
   // region rather than failing.
   KASA: ["kasaragod", "Kasaragod", "12.5102", "74.9852"],
+  MALP: ["malappuram", "Malappuram", "11.0732", "76.0740"],
 };
 
 // --- main -------------------------------------------------------------------

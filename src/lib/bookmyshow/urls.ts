@@ -80,6 +80,7 @@ export const KERALA_REGIONS: BmsRegion[] = [
   // neighbouring region's showtimes rather than failing, and the region assertion in
   // normalizeCityPage would then discard the page as a mismatch.
   { code: "KASA", slug: "kasaragod", name: "Kasaragod", lat: "12.5102", long: "74.9852" },
+  { code: "MALP", slug: "malappuram", name: "Malappuram", lat: "11.0732", long: "76.0740" },
 ];
 
 const REGIONS_BY_CODE = new Map(KERALA_REGIONS.map((r) => [r.code, r]));
