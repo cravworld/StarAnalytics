@@ -38,7 +38,7 @@ const MAX_ITEMS = 500;
  * Volume is what the justification is about, so volume is what is counted. Many small runs
  * and one large sweep now cost what they actually cost.
  */
-const MAX_PAGES_PER_DAY = Number(process.env.BOOKMYSHOW_CAPTURE_MAX_PAGES_PER_DAY) || 120;
+const MAX_PAGES_PER_DAY = Number(process.env.BOOKMYSHOW_CAPTURE_MAX_PAGES_PER_DAY) || 300;
 
 function secretMatches(provided: string | null): boolean {
   const expected = process.env.BOOKMYSHOW_CAPTURE_SECRET;

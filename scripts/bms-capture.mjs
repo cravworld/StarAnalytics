@@ -59,6 +59,9 @@ const CAMPAIGN_ID = args.campaign || process.env.BOOKMYSHOW_CAPTURE_CAMPAIGN;
 const BASE_URL = (args.url || process.env.STARANALYTICS_URL || "http://localhost:3000").replace(/\/$/, "");
 const SECRET = process.env.BOOKMYSHOW_CAPTURE_SECRET;
 const DAYS = Number(args.days || process.env.BOOKMYSHOW_CAPTURE_DAYS || 2);
+// Skip the days that are too late to act on. A show tonight cannot absorb a campaign push;
+// reading it spends a request on data nobody can use. See nextIstDates.
+const DAYS_FROM = Number(args["days-from"] || process.env.BOOKMYSHOW_CAPTURE_DAYS_FROM || 0);
 const DELAY_MS = Number(args["delay-ms"] || process.env.BOOKMYSHOW_CAPTURE_DELAY_MS || 4000);
 const MAX_CITIES = Number(args["max-cities"] || process.env.BOOKMYSHOW_CAPTURE_MAX_CITIES || 0);
 // Sweep mode: read every city, pacing around BookMyShow's burst allowance instead of
@@ -137,7 +140,7 @@ if (!DRY_RUN && typeof plan.pagesRemaining === "number" && plan.pagesRemaining <
 }
 
 const cities = resolveCities(plan);
-const dates = nextIstDates(DAYS);
+const dates = nextIstDates(DAYS, DAYS_FROM);
 
 log(`capture start campaign=${CAMPAIGN_ID} cities=${cities.length} dates=${dates.length} pages=${cities.length * dates.length}`);
 
@@ -519,11 +522,31 @@ function extractFromPage() {
 }
 
 /** The next N IST calendar days, as midnight-UTC dates. */
-function nextIstDates(n) {
+/**
+ * The date window to read, FURTHEST DAY FIRST.
+ *
+ * Two decisions here, both load-bearing.
+ *
+ * `from` skips the days that are too late to act on. A show tonight or tomorrow cannot
+ * absorb a campaign push in time, so reading them spends requests on data nobody can use.
+ * The launcher starts at day+2.
+ *
+ * The order is descending because BookMyShow serves the first page or two of a burst and
+ * refuses the rest — measured 2026-08-22: day+2 requested FIRST returned 200 with 18 shows,
+ * while requests two and three of the same session were both refused. Walking dates
+ * ascending therefore starved the furthest day permanently: it was always last, so it was
+ * always the one refused. The numbers were stark — 93% capture for day 0 against 27% for
+ * day+2, and only 83 screenings for the far date against 682 for the near one.
+ *
+ * Furthest-first also self-heals rather than merely swapping who starves: today's day+3 is
+ * tomorrow's day+2, so a date refused in the second slot gets the first slot on the next
+ * run, when the window has slid forward one day.
+ */
+function nextIstDates(n, from = 0) {
   const IST_MS = (5 * 60 + 30) * 60_000;
   const shifted = new Date(Date.now() + IST_MS);
   const start = Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate());
-  return Array.from({ length: n }, (_, i) => new Date(start + i * 86_400_000));
+  return Array.from({ length: n }, (_, i) => new Date(start + (from + n - 1 - i) * 86_400_000));
 }
 
 function toDateCode(d) {

@@ -57,7 +57,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     where: { campaignId: id, provider: "capture", startedAt: { gte: since } },
     _sum: { citiesRequested: true },
   });
-  const maxPages = Number(process.env.BOOKMYSHOW_CAPTURE_MAX_PAGES_PER_DAY) || 120;
+  const maxPages = Number(process.env.BOOKMYSHOW_CAPTURE_MAX_PAGES_PER_DAY) || 300;
 
   // Resolved, so an empty configuration (meaning "all Kerala") arrives as the explicit list
   // rather than as an empty array the script would have to interpret.

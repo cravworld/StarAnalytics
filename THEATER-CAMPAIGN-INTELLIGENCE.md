@@ -175,23 +175,34 @@ gets longer" and concluded that a run yields about one city. That was wrong. Not
 collapses: an allowance is spent and then refills. A fast run of 30 pages and a paced run of
 30 pages differ by everything.
 
-#### There is a second, slower limit — and a day of testing found it
+#### What limits a run is BURST SIZE, not the day's total
 
-The five-minute recovery above is not unconditional. Later the same day, after roughly
-**150 page requests** across an afternoon of investigation, a paced sweep was refused
-outright: three batches, five-minute pauses between them, **1 of 12 pages served**. The same
-pacing that had returned 12/12 a couple of hours earlier returned nothing.
+An earlier version of this section claimed a "slower, day-scale budget that pauses do not
+restore", and advised one sweep a day. **That was wrong, and the correction matters** — it
+was the reasoning behind a cap that then throttled real collection for a day.
 
-So there are two limits stacked: a short burst allowance that a five-minute pause restores,
-and a **slower, day-scale budget that pauses do not restore**. Exhaust the second and the
-first stops helping.
+The evidence for it was a sweep that collapsed after an afternoon of heavy use. The
+confound: that afternoon was mostly *30-page bursts*. Volume and burst size moved together,
+and burst size was blamed on the wrong variable.
 
-The practical rule: **one sweep a day, and do not investigate on the same day you need
-data.** A sweep started from a quiet day should complete; a sweep started after heavy use
-will stop early, by design, having learned nothing new.
+Measured properly on 2026-08-22 — **thirty consecutive 3-page runs, 240 cumulative pages in
+one day**:
 
-The correct response when this happens is the one the script takes automatically — stop.
-Not shorter batches, not longer pauses, not "just one more try". Come back tomorrow.
+| | hit rate |
+|---|---|
+| 3-page runs, first half (15 runs) | **76%** |
+| 3-page runs, second half (15 runs) | **71%** |
+| 30-page runs, same period | **3–7%** |
+
+Five percentage points of drift across 240 pages. There is no day-scale wall for runs of
+this shape. What collapses a run is asking for thirty pages at once; a 3-page run keeps
+being served all day.
+
+So the rule is the opposite of what was written here: **many small runs, freely.** The thing
+to avoid is the big burst, not the busy day.
+
+The `--sweep` mode below is kept because it works from a quiet start, but district-at-a-time
+is both cheaper and more reliable, and it is what the launcher uses.
 
 ### Reading everything: `--sweep`
 

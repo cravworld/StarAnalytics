@@ -129,6 +129,33 @@ describe("the capture script does not disguise itself", () => {
     expect(code).toMatch(/if \(raw\) return known;/);
   });
 
+  it("reads the furthest date first, so the far day is not permanently starved", () => {
+    // Behavioural, not a source match: this is arithmetic and a regex would not catch an
+    // off-by-one that silently reintroduces the bug.
+    //
+    // BookMyShow serves the first page or two of a burst and refuses the rest. Walking
+    // dates ascending meant the furthest day was always last and therefore always refused —
+    // measured 93% capture for day 0 against 27% for day+2, and 682 screenings for the near
+    // date against 83 for the far one. Descending gives the far day the reliable slot, and
+    // self-heals: today's day+3 is tomorrow's day+2.
+    const fn = SCRIPT.match(/function nextIstDates[\s\S]*?\n}/)?.[0];
+    const code = SCRIPT.match(/function toDateCode[\s\S]*?\n}/)?.[0];
+    expect(fn, "nextIstDates not found").toBeTruthy();
+    const { nextIstDates, toDateCode } = new Function(
+      `${fn}\n${code}\nreturn { nextIstDates, toDateCode };`,
+    )();
+
+    const window = nextIstDates(2, 2).map(toDateCode);
+    expect(window).toHaveLength(2);
+    // Descending — furthest first.
+    expect(Number(window[0])).toBeGreaterThan(Number(window[1]));
+
+    // The offset really skips the near days rather than just reordering them.
+    const today = Number(toDateCode(nextIstDates(1, 0)[0]));
+    expect(Number(window[1])).toBeGreaterThan(today);
+    expect(window).not.toContain(String(today));
+  });
+
   it("sets the region cookie per page, because the URL alone is not honoured", () => {
     expect(code).toMatch(/clearCookies\(\{ name: "rgn" \}\)/);
     expect(code).toMatch(/regionCode: code/);
