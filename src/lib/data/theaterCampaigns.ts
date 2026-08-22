@@ -927,7 +927,16 @@ export async function getTheaterCampaignDetail(
   });
 
   // Worst first — that is the question the page exists to answer.
-  theaters.sort((a, b) => b.priority.score - a.priority.score || a.name.localeCompare(b.name));
+  // Score is a SHARE, so it is size-blind: a theater with 3 of 3 shows wide open scores the
+  // same as one with 25 of 25. They are not equally worth acting on — the second is the same
+  // signal with eight times the evidence behind it. Ties therefore break on how many shows
+  // back the reading up, and only then on name.
+  theaters.sort(
+    (a, b) =>
+      b.priority.score - a.priority.score ||
+      b.priority.eligibleShows - a.priority.eligibleShows ||
+      a.name.localeCompare(b.name),
+  );
 
   return {
     campaign: {
