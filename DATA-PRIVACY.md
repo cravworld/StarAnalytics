@@ -142,7 +142,7 @@ These came out of the audit as real gaps but are scope/product decisions, not so
 
    **The ~20 unused Scoutline *derived metrics* were deliberately left in**, and that half stays open. They are analytics rather than identifiers, so the privacy gain is small, while dropping them is *irreversible for future data*: `raw` exists to be the artifact you go back to, and the prune already bounds retention at 90 days — stripping buys a shorter window, not an escape from indefinite retention. Revisit if a reviewer asks or if the retained volume starts to matter.
 
-5. **Six queries depend on fields the prune deletes** (found 2026-08-20, scope corrected 2026-08-22, not fixed). Once `posts.raw` is nulled past `RAW_PAYLOAD_RETENTION_DAYS`, every one of these silently stops matching:
+5. ~~**Six queries depend on fields the prune deletes**~~ — found 2026-08-20 as a single reader, scope corrected and **resolved 2026-08-22**. While `posts.raw` was nulled outright past `RAW_PAYLOAD_RETENTION_DAYS`, every one of these silently stopped matching:
 
    | Site | Field | What degrades |
    |---|---|---|
@@ -159,12 +159,29 @@ These came out of the audit as real gaps but are scope/product decisions, not so
 
    **The failure mode is silence.** A nulled `raw` does not error — it fails to match, so each of these under-reports. The campaign detail screen shows a hashtag breakdown that quietly shrinks as posts age past 90 days, with nothing to indicate rows are missing.
 
-   Two candidate fixes, not yet chosen:
+   **Fixed 2026-08-22** by minimizing `posts.raw` instead of nulling it: the prune now
+   replaces the payload with just its `hashtags` and `mentions` keys, so all six queries keep
+   working. One file (`prune-raw-payloads/route.ts`), no migration, no query rewrites.
 
-   - **Preserve the two keys in the prune** — replace `raw` with `jsonb_build_object('hashtags', …, 'mentions', …)` instead of nulling it. One file, no migration, no query rewrites. Retaining two arrays of non-identifying strings is not the over-collection this document objects to; it objects to retaining the whole payload, whose identifying fields `minimizeRaw()` already drops at ingest.
-   - **Promote both to real columns** and rewrite all six sites. Cleaner long-term shape, but a schema migration plus a backfill, and the backfill must land in the same migration that adds the columns or the cutover makes matching *worse* for the transition window.
+   Retaining two arrays of non-identifying strings is not the over-collection this document
+   objects to — it objects to retaining the *whole* payload, whose identifying fields
+   (`ownerFullName`, `ownerProfilePicUrl`) `minimizeRaw()` already drops at ingest. What the
+   prune discards is the rest of the actor item, which genuinely has no reader. The
+   alternative considered and rejected was promoting both fields to real columns: a cleaner
+   long-term shape, but a schema migration plus a backfill that has to land in the same
+   migration or the cutover makes matching temporarily worse, to buy the same outcome.
 
-   Either way, **posts already pruned are unrecoverable** — no backfill restores hashtags that have been nulled, so neither fix is retroactive.
+   The implementation has one non-obvious requirement, and it is load-bearing: the preserved
+   object is passed through `jsonb_strip_nulls`. Those queries guard with `raw ? 'mentions'`,
+   which tests key **existence**, so writing `"mentions": null` for a post with no mentions
+   would pass the guard and then fail in `jsonb_array_elements_text` with "cannot extract
+   elements from a scalar". Verified read-only against 500 production rows before shipping:
+   no row produces a JSON-null value, no key present beforehand is lost, and re-running over
+   an already-minimized row is a no-op.
+
+   **Posts already pruned are unrecoverable.** Their `raw` is already NULL and no backfill
+   restores it, so this fix is forward-looking only — it stops the loss continuing, it does
+   not undo what the prune has already removed.
 
 ~~6. Decide a real retention policy for structured data~~ — **resolved 2026-07-30**: see "Retention" above. `post_comments.text`/`author_handle` (the actual third-party personal data in the structured-data set) now prunes on `COMMENT_RETENTION_DAYS`; posts' own caption/engagement data and derived `sentiment` rows are deliberately kept indefinitely, for reasons documented in that section.
 
