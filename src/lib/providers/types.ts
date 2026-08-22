@@ -120,6 +120,11 @@ export interface Alert {
   // the email fallback for non-HTML clients, and by channels like MockNotifierProvider that
   // only ever log text), so no existing caller needs to change.
   html?: string;
+  // Optional subject line. Types default to `StarAnalytics alert: <type>`, which reads
+  // fine for the single-purpose types but not for a digest, whose type carries a campaign
+  // id. A digest's subject is the one line the recipient sees in an inbox list, so it
+  // gets to say what is actually in the mail.
+  subject?: string;
 }
 
 export interface NotifierProvider {

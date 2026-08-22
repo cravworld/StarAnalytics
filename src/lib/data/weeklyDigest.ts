@@ -3,6 +3,7 @@ import { getCampaignDetail, CAMPAIGN_DETAIL_CONCURRENCY, type CampaignDetail } f
 import { runWithConcurrency } from "@/lib/concurrency";
 import { getNotifierChannel, getNotifierProvider } from "@/lib/providers";
 import { TOKEN } from "@/lib/palette";
+import { EMAIL_FONT, escapeHtml } from "./emailHtml";
 
 export const WEEKLY_DIGEST_ALERT_TYPE = "weekly_digest";
 
@@ -71,14 +72,6 @@ export function formatWeeklyDigest(campaigns: WeeklyDigestCampaignSummary[], gen
   return lines.join("\n").trimEnd();
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 // Same green/yellow/red bands as the campaign detail page's BuzzScoreBadge (bandColor in
 // campaigns/[id]/page.tsx) — kept as a small standalone copy rather than an import since
 // that file is a page component (not meant to be imported from server-only data code) and
@@ -111,7 +104,7 @@ function sentimentBarHtml(s: { positivePct: number; neutralPct: number; negative
 // so the email reads as the same product as the dashboard, not a generic report.
 export function formatWeeklyDigestHtml(campaigns: WeeklyDigestCampaignSummary[], generatedAt: Date): string {
   const dateLabel = generatedAt.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
-  const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif";
+  const FONT = EMAIL_FONT;
 
   const body =
     campaigns.length === 0
