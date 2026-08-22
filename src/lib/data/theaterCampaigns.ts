@@ -1098,7 +1098,6 @@ export async function raiseCampaignAlerts(
       wideOpenShows: theater.priority.wideOpenShows,
       eligibleShows: theater.priority.eligibleShows,
       confidence: theater.priority.confidence,
-      reasons: theater.priority.reasons,
     };
 
     // The stored row keeps its own standalone text — it is the per-theater audit record
