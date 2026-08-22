@@ -53,6 +53,7 @@ const prisma = {
   },
   scoutSnapshot: { findMany: recorder("scoutSnapshot", "findMany", []) },
   trackedPageSubscription: { findMany: recorder("trackedPageSubscription", "findMany", []) },
+  trackedAccountCategory: { findMany: recorder("trackedAccountCategory", "findMany", []) },
   trackedPostSnapshot: { findMany: recorder("trackedPostSnapshot", "findMany", []) },
 };
 
@@ -99,6 +100,9 @@ function fakeAccounts(n: number) {
     accountKey: `instagram:creator${i}`,
     firstSeenAt: new Date("2026-08-01T00:00:00Z"),
     scoutCandidateId: `scout-${i}`,
+    // Alternating filed/unfiled, so both the grouped and the Uncategorised paths are
+    // exercised by the count test rather than only the happy one.
+    categoryId: i % 2 === 0 ? "category-1" : null,
   }));
 }
 
@@ -144,6 +148,14 @@ async function countWith(n: number, run: () => Promise<unknown>): Promise<number
     calls.push({ model: "trackedPageSubscription", op: "findMany" });
     return Array.from({ length: Math.ceil(n / 2) }, (_, i) => ({ accountId: `account-${i}` }));
   });
+  // The category list is read once for the whole screen — its size is the OPERATOR's list
+  // length, which has nothing to do with how many accounts a campaign has. Returned
+  // constant here on purpose: if this query ever became per-account, the count would grow
+  // with n and the ratio assertion would fire.
+  prisma.trackedAccountCategory.findMany.mockImplementation(async () => {
+    calls.push({ model: "trackedAccountCategory", op: "findMany" });
+    return [{ id: "category-1", name: "Influencers", sortOrder: 10 }];
+  });
   await run();
   return calls.length;
 }
@@ -173,6 +185,7 @@ describe("tracked posts query count", () => {
         "trackedAccountSnapshot",
         "scoutSnapshot",
         "trackedPageSubscription",
+        "trackedAccountCategory",
       ]),
     );
   });

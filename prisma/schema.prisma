@@ -896,6 +896,36 @@ enum TrackPlatform {
 
 // The account that posted a tracked post. Created from the post scrape itself (the actor
 // returns the owner), never typed in — the operator only ever pastes a link.
+// What KIND of account this is — influencer, vlogger, movie critic, and so on.
+//
+// A TABLE rather than an enum or a bare string on the account, for three reasons:
+//   - The set is the operator's, not the developer's. "etc." was in the ask; a new kind of
+//     account must not need a migration.
+//   - Renameable. The seeded names are the operator's own words, typed once in chat, and
+//     at least one of them ("FX Pages") is ambiguous enough that renaming is a matter of
+//     when, not if. A rename here is one UPDATE, not a sweep over every account row.
+//   - Ordered. Sections render in `sortOrder`, so the operator decides which kind of
+//     account they look at first, rather than the alphabet deciding.
+//
+// Deliberately SINGLE-valued on the account (categoryId, not categoryIds): sections carry
+// per-section totals, and an account filed under two sections would have its engagement
+// counted in both, so the section totals would no longer sum to the campaign total. A page
+// that is genuinely both a vlogger and a reviewer gets filed where the operator would look
+// for it. See CAMPAIGN-POST-TRACKING.md §14.
+model TrackedAccountCategory {
+  id        String   @id @default(uuid())
+  // Unique so two spellings of the same thing can't split one group into two sections.
+  name      String   @unique
+  // Lower sorts first. Not the alphabet: "Influencers" before "Movie Critics" is a
+  // judgement about what matters, and it belongs to the operator.
+  sortOrder Int      @default(100) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  accounts TrackedAccount[]
+
+  @@map("tracked_account_categories")
+}
+
 model TrackedAccount {
   id          String        @id @default(uuid())
   platform    TrackPlatform
@@ -915,10 +945,19 @@ model TrackedAccount {
   // "did this paid post beat their own baseline" comparison possible.
   scoutCandidateId String? @map("scout_candidate_id")
 
+  // Which section this account is filed under on the tracker — influencer, vlogger, movie
+  // critic, and so on. Nullable: a page discovered by a subscription arrives unfiled, and
+  // "Uncategorised" is a real, visible state rather than a wrong guess. onDelete: SetNull
+  // is explicit — deleting a category must drop its accounts into Uncategorised, never
+  // delete the accounts.
+  categoryId String?                 @map("category_id")
+  category   TrackedAccountCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
   trackedPosts  TrackedPost[]
   snapshots     TrackedAccountSnapshot[]
   subscriptions TrackedPageSubscription[]
 
+  @@index([categoryId])
   @@map("tracked_accounts")
 }
 

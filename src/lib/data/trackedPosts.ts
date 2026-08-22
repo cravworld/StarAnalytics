@@ -28,6 +28,7 @@ import {
   postUrlFor,
   type TrackPlatformId,
 } from "@/lib/tracking/postUrl";
+import { normalizeCategoryName, type AccountCategory } from "@/lib/tracking/categories";
 import { profileUrlKey } from "@/lib/scout/ingest";
 import {
   getTrackedPostProvider,
@@ -544,6 +545,76 @@ export async function setPostCampaignInclusion(trackedPostId: string, include: b
 }
 
 // ---------------------------------------------------------------------------
+// Account categories (§14)
+// ---------------------------------------------------------------------------
+
+/** The operator's category list, in the order sections render. */
+export async function listAccountCategories(): Promise<AccountCategory[]> {
+  const rows = await prisma.trackedAccountCategory.findMany({
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, sortOrder: true },
+  });
+  return rows;
+}
+
+/**
+ * File an account under a category, or clear it.
+ *
+ * On TrackedAccount, not on the campaign-account pair: an account IS a movie critic, and
+ * saying so once should hold for every campaign they appear in rather than being retyped
+ * per campaign. That's the whole reason this is worth storing at all.
+ */
+export async function setAccountCategory(accountId: string, categoryId: string | null): Promise<void> {
+  await prisma.trackedAccount.update({
+    where: { id: accountId },
+    data: { categoryId },
+  });
+}
+
+/**
+ * Add a category, or return the existing one if it's already there.
+ *
+ * Matched case-INSENSITIVELY even though the unique index is case-sensitive: Postgres would
+ * happily hold both "Movie Critics" and "movie critics", and they would render as two
+ * sections holding what the operator thinks of as one group. Returning the existing row
+ * makes a duplicate submission a no-op instead of an error the operator has to read.
+ */
+export async function createAccountCategory(rawName: string): Promise<AccountCategory | null> {
+  const name = normalizeCategoryName(rawName);
+  if (!name) return null;
+
+  const existing = await prisma.trackedAccountCategory.findFirst({
+    where: { name: { equals: name, mode: "insensitive" } },
+    select: { id: true, name: true, sortOrder: true },
+  });
+  if (existing) return existing;
+
+  // New categories land after the seeded five (10..50) and sort among themselves by name —
+  // see byOrderThenName for why that tie-break is load-bearing.
+  return prisma.trackedAccountCategory.create({
+    data: { name },
+    select: { id: true, name: true, sortOrder: true },
+  });
+}
+
+/** Rename in place. The id is stable, so every account stays filed where it was. */
+export async function renameAccountCategory(categoryId: string, rawName: string): Promise<void> {
+  const name = normalizeCategoryName(rawName);
+  if (!name) return;
+  await prisma.trackedAccountCategory.update({ where: { id: categoryId }, data: { name } });
+}
+
+/**
+ * Delete a category. Its accounts drop to Uncategorised — they are never deleted.
+ *
+ * That's enforced by the FK's ON DELETE SET NULL rather than by an UPDATE here, so it holds
+ * even for a row deleted straight from the database console.
+ */
+export async function deleteAccountCategory(categoryId: string): Promise<void> {
+  await prisma.trackedAccountCategory.delete({ where: { id: categoryId } });
+}
+
+// ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
 
@@ -596,6 +667,10 @@ export interface TrackedAccountView {
   otherPosts: TrackedPostView[];
   /** True when this page is subscribed: new posts arrive automatically. */
   isSubscribed: boolean;
+  /** Which section this account renders under. Null = unfiled (§14). */
+  categoryId: string | null;
+  /** Resolved name, so the UI never needs a second lookup to label a section. */
+  categoryName: string | null;
   /**
    * Follower count over time, oldest first — the one page-level metric that isn't a rollup
    * of its posts. Comes free from the snapshots already written on every scan.
@@ -608,6 +683,12 @@ export interface TrackedAccountView {
 
 export interface CampaignTrackingView {
   campaign: { id: string; name: string; hashtags: string[] };
+  /**
+   * Every category the operator has defined, not just the ones in use here — the assignment
+   * dropdown has to offer all of them, including ones no account in this campaign uses yet.
+   * Which of them become SECTIONS is decided by groupByCategory, which drops the empty ones.
+   */
+  categories: AccountCategory[];
   totals: AggregateTotals;
   accounts: TrackedAccountView[];
   posts: TrackedPostView[];
@@ -618,8 +699,8 @@ export interface CampaignTrackingView {
  * Everything the tracker detail screen renders, in a fixed number of queries regardless of
  * how many posts or accounts the campaign has.
  *
- * Five queries total: campaign, posts, accounts, latest account snapshots, Scoutline
- * baselines. The last two are set-wide `findMany`s filtered by an id list, then indexed in
+ * Seven queries total: campaign, posts, accounts, latest account snapshots, Scoutline
+ * baselines, page subscriptions, and the category list. The last two are set-wide `findMany`s filtered by an id list, then indexed in
  * memory — NOT a lookup per account, which is the shape that breaks this app.
  */
 export async function getCampaignTracking(campaignId: string): Promise<CampaignTrackingView | null> {
@@ -686,6 +767,12 @@ export async function getCampaignTracking(campaignId: string): Promise<CampaignT
     select: { accountId: true },
   });
   const subscribedAccountIds = new Set(subRows.map((s) => s.accountId));
+
+  // The whole category list, in one query, regardless of how many accounts there are. Read
+  // unconditionally rather than only when some account is filed: the dropdown that files an
+  // account needs the options precisely when nothing is filed yet.
+  const categories = await listAccountCategories();
+  const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
 
   const accountById = new Map(accountRows.map((a) => [a.id, a]));
   const allEngagement = postRows.map((p) => engagement({ likes: p.curLikes, comments: p.curComments }));
@@ -768,6 +855,11 @@ export async function getCampaignTracking(campaignId: string): Promise<CampaignT
         posts: own,
         otherPosts: other,
         isSubscribed: subscribedAccountIds.has(a.id),
+        // Resolved against the list just read, not trusted from the column: an id left over
+        // from a category deleted a moment ago resolves to null here and the account falls
+        // into Uncategorised, rather than rendering a section with no name.
+        categoryId: a.categoryId && categoryNameById.has(a.categoryId) ? a.categoryId : null,
+        categoryName: a.categoryId ? categoryNameById.get(a.categoryId) ?? null : null,
         followerHistory: historyByAccount.get(a.id) ?? [],
       };
     })
@@ -781,6 +873,7 @@ export async function getCampaignTracking(campaignId: string): Promise<CampaignT
 
   return {
     campaign,
+    categories,
     // Campaign totals count campaign posts only — the influencer's own unrelated content
     // must not inflate what the campaign is reported to have delivered.
     totals: aggregate(
